@@ -250,9 +250,9 @@ chunk_recycle(tsdn_t *tsdn, arena_t *arena, chunk_hooks_t *chunk_hooks,
 	ret = (void *)((uintptr_t)extent_node_addr_get(node) + leadsize);
 	*sn = extent_node_sn_get(node);
 	zeroed = extent_node_zeroed_get(node);
+	committed = extent_node_committed_get(node);
 	if (zeroed && committed)
 		*zero = true;
-	committed = extent_node_committed_get(node);
 	if (committed)
 		*commit = true;
 	/* Split the lead. */
