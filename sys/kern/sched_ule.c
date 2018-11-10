@@ -1268,9 +1268,11 @@ sched_pickcpu(struct thread *td, int flags)
 	 */
 	pri = td->td_priority;
 	if (td->td_priority <= PRI_MAX_ITHD && THREAD_CAN_SCHED(td, self) &&
-	    curthread->td_intr_nesting_level && ts->ts_cpu != self) {
-		SCHED_STAT_INC(pickcpu_intrbind);
-		ts->ts_cpu = self;
+	    curthread->td_intr_nesting_level) {
+		if (ts->ts_cpu != self) {
+			SCHED_STAT_INC(pickcpu_intrbind);
+			ts->ts_cpu = self;
+		}
 		if (TDQ_CPU(self)->tdq_lowpri > pri) {
 			SCHED_STAT_INC(pickcpu_affinity);
 			return (ts->ts_cpu);
