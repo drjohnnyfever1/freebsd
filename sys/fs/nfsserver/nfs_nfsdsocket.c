@@ -697,6 +697,11 @@ nfsrvd_compound(struct nfsrv_descript *nd, int isdgram, u_char *tag,
 		} else {
 			repp++;
 		}
+
+		binuptime(&start_time);
+		nfsrvd_statstart(op, &start_time);
+		statsinprog = 1;
+
 		if (i == 0)
 			op0 = op;
 		if (i == numops - 1)
