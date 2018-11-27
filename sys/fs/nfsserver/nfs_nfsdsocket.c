@@ -697,6 +697,7 @@ nfsrvd_compound(struct nfsrv_descript *nd, int isdgram, u_char *tag,
 		} else {
 			repp++;
 		}
+
 		if (i == 0)
 			op0 = op;
 		if (i == numops - 1)
