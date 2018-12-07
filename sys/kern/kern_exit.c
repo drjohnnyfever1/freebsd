@@ -447,7 +447,6 @@ exit1(struct thread *td, int rval, int signo)
 
 	WITNESS_WARN(WARN_PANIC, NULL, "process (pid %d) exiting", p->p_pid);
 
-	sx_xlock(&proctree_lock);
 	/*
 	 * Move proc from allproc queue to zombproc.
 	 */
