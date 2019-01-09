@@ -16,6 +16,14 @@ from older versions of FreeBSD, try WITHOUT_CLANG to bootstrap to the tip of
 stable/10, and then rebuild without this option. The bootstrap process from
 older version of current is a bit fragile.
 
+20190205        p17     FreeBSD-EN-19:03.sqlite
+                        FreeBSD-EN-19:04.tzdata
+
+        Update sqlite3-3.14.1 --> sqlite3-3.26.0 (3260000) [EN-19:03.sqlite]
+
+        Import tzdata 2018h, 2018i [EN-19:04.tzdata]
+
+
 20181219        p16     FreeBSD-SA-18:15.bootpd
                         FreeBSD-EN-18:18.zfs
 
@@ -23,10 +31,13 @@ older version of current is a bit fragile.
 
         Resolve a hang in ZFS during vnode reclamation [EN-18:18.zfs]
 
+
+
 20181204        p15     FreeBSD-SA-18:14.bhyve
 
         Fix insufficient bounds checking in bhyve(8) device model.
         [SA-18:14.bhyve]
+
 
 20181127	p14	FreeBSD-SA-18:13.nfs
 			FreeBSD-EN-18:13.icmp
