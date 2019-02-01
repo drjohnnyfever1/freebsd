@@ -54,6 +54,7 @@ SUBDIR=adjkerntz \
 	nos-tun \
 	openrc \
 	openrc-run \
+	pfilctl \
 	ping \
 	rcorder \
 	rc-service \
