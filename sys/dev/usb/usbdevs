@@ -489,6 +489,7 @@ vendor ASAHIOPTICAL	0x0a17	Asahi Optical
 vendor BOCASYSTEMS	0x0a43	Boca Systems
 vendor SHANTOU		0x0a46	ShanTou
 vendor MEDIAGEAR	0x0a48	MediaGear
+vendor PLOYTEC		0x0a4a	Ploytec GmbH
 vendor BROADCOM		0x0a5c	Broadcom
 vendor GREENHOUSE	0x0a6b	GREENHOUSE
 vendor MEDELI		0x0a67	Medeli
@@ -1523,7 +1524,8 @@ product COREGA FETHER_USB_TXC	0x9601	FEther USB-TXC
 product CORSAIR K60		0x0a60	Corsair Vengeance K60 keyboard
 product CORSAIR K70		0x1b09	Corsair Vengeance K70 keyboard
 product CORSAIR K70_RGB		0x1b13	Corsair K70 RGB Keyboard
-product CORSAIR STRAFE		0x1b15	Cossair STRAFE Gaming keyboard
+product CORSAIR STRAFE		0x1b15	Corsair STRAFE Gaming keyboard
+product CORSAIR STRAFE2		0x1b44	Corsair STRAFE Gaming keyboard
 
 /* Creative products */
 product CREATIVE NOMAD_II	0x1002	Nomad II MP3 player
@@ -3584,6 +3586,9 @@ product PLANEX2 GWUSNANO	0xab28	GW-USNano
 
 /* Plextor Corp. */
 product PLEXTOR 40_12_40U	0x0011	PlexWriter 40/12/40U
+
+/* Ploytec GmbH */
+product PLOYTEC SPL_CRIMSON_1	0xc150	SPL Crimson Revision 1
 
 /* PLX products */
 product PLX TESTBOARD		0x9060	test board

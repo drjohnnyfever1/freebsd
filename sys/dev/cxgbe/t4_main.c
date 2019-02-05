@@ -85,12 +85,15 @@ __FBSDID("$FreeBSD$");
 static int t4_probe(device_t);
 static int t4_attach(device_t);
 static int t4_detach(device_t);
+static int t4_child_location_str(device_t, device_t, char *, size_t);
 static int t4_ready(device_t);
 static int t4_read_port_device(device_t, int, device_t *);
 static device_method_t t4_methods[] = {
 	DEVMETHOD(device_probe,		t4_probe),
 	DEVMETHOD(device_attach,	t4_attach),
 	DEVMETHOD(device_detach,	t4_detach),
+
+	DEVMETHOD(bus_child_location_str, t4_child_location_str),
 
 	DEVMETHOD(t4_is_main_ready,	t4_ready),
 	DEVMETHOD(t4_read_port_device,	t4_read_port_device),
@@ -151,6 +154,8 @@ static device_method_t t5_methods[] = {
 	DEVMETHOD(device_attach,	t4_attach),
 	DEVMETHOD(device_detach,	t4_detach),
 
+	DEVMETHOD(bus_child_location_str, t4_child_location_str),
+
 	DEVMETHOD(t4_is_main_ready,	t4_ready),
 	DEVMETHOD(t4_read_port_device,	t4_read_port_device),
 
@@ -183,6 +188,8 @@ static device_method_t t6_methods[] = {
 	DEVMETHOD(device_probe,		t6_probe),
 	DEVMETHOD(device_attach,	t4_attach),
 	DEVMETHOD(device_detach,	t4_detach),
+
+	DEVMETHOD(bus_child_location_str, t4_child_location_str),
 
 	DEVMETHOD(t4_is_main_ready,	t4_ready),
 	DEVMETHOD(t4_read_port_device,	t4_read_port_device),
@@ -516,9 +523,9 @@ static inline int read_via_memwin(struct adapter *, int, uint32_t, uint32_t *,
     int);
 static inline int write_via_memwin(struct adapter *, int, uint32_t,
     const uint32_t *, int);
-static int validate_mem_range(struct adapter *, uint32_t, int);
+static int validate_mem_range(struct adapter *, uint32_t, uint32_t);
 static int fwmtype_to_hwmtype(int);
-static int validate_mt_off_len(struct adapter *, int, uint32_t, int,
+static int validate_mt_off_len(struct adapter *, int, uint32_t, uint32_t,
     uint32_t *);
 static int fixup_devlog_params(struct adapter *);
 static int cfg_itype_and_nqueues(struct adapter *, struct intrs_and_queues *);
@@ -670,6 +677,10 @@ struct {
 	{0x5419,  "Chelsio T540-LP-BT"},	/* 4 x 10GBaseT */
 	{0x541a,  "Chelsio T540-SO-BT"},	/* 4 x 10GBaseT, nomem */
 	{0x541b,  "Chelsio T540-SO-CR"},	/* 4 x 10G, nomem */
+
+	/* Custom */
+	{0x5483, "Custom T540-CR"},
+	{0x5484, "Custom T540-BT"},
 }, t6_pciids[] = {
 	{0xc006, "Chelsio Terminator 6 FPGA"},	/* T6 PE10K6 FPGA (PF0) */
 	{0x6400, "Chelsio T6-DBG-25"},		/* 2 x 10/25G, debug */
@@ -843,6 +854,24 @@ t4_init_devnames(struct adapter *sc)
 		device_printf(sc->dev, "chip id %d is not supported.\n", id);
 		sc->names = NULL;
 	}
+}
+
+static int
+t4_ifnet_unit(struct adapter *sc, struct port_info *pi)
+{
+	const char *parent, *name;
+	long value;
+	int line, unit;
+
+	line = 0;
+	parent = device_get_nameunit(sc->dev);
+	name = sc->names->ifnet_name;
+	while (resource_find_dev(&line, name, &unit, "at", parent) == 0) {
+		if (resource_long_value(name, unit, "port", &value) == 0 &&
+		    value == pi->port_id)
+			return (unit);
+	}
+	return (-1);
 }
 
 static int
@@ -1040,7 +1069,8 @@ t4_attach(device_t dev)
 			pi->flags |= FIXED_IFMEDIA;
 		PORT_UNLOCK(pi);
 
-		pi->dev = device_add_child(dev, sc->names->ifnet_name, -1);
+		pi->dev = device_add_child(dev, sc->names->ifnet_name,
+		    t4_ifnet_unit(sc, pi));
 		if (pi->dev == NULL) {
 			device_printf(dev,
 			    "failed to add device for port %d.\n", i);
@@ -1238,6 +1268,16 @@ done:
 		t4_sysctls(sc);
 
 	return (rc);
+}
+
+static int
+t4_child_location_str(device_t bus, device_t dev, char *buf, size_t buflen)
+{
+	struct port_info *pi;
+
+	pi = device_get_softc(dev);
+	snprintf(buf, buflen, "port=%d", pi->port_id);
+	return (0);
 }
 
 static int
@@ -2645,14 +2685,14 @@ t4_range_cmp(const void *a, const void *b)
  * the card's address space.
  */
 static int
-validate_mem_range(struct adapter *sc, uint32_t addr, int len)
+validate_mem_range(struct adapter *sc, uint32_t addr, uint32_t len)
 {
 	struct t4_range mem_ranges[4], *r, *next;
 	uint32_t em, addr_len;
 	int i, n, remaining;
 
 	/* Memory can only be accessed in naturally aligned 4 byte units */
-	if (addr & 3 || len & 3 || len <= 0)
+	if (addr & 3 || len & 3 || len == 0)
 		return (EINVAL);
 
 	/* Enabled memories */
@@ -2791,7 +2831,7 @@ fwmtype_to_hwmtype(int mtype)
  * the start of the range is returned in addr.
  */
 static int
-validate_mt_off_len(struct adapter *sc, int mtype, uint32_t off, int len,
+validate_mt_off_len(struct adapter *sc, int mtype, uint32_t off, uint32_t len,
     uint32_t *addr)
 {
 	uint32_t em, addr_len, maddr;
