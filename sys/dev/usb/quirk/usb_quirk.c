@@ -140,6 +140,7 @@ static struct usb_quirk_entry usb_quirks[USB_DEV_QUIRKS_MAX] = {
 	USB_QUIRK(CORSAIR, K70_RGB, 0x0000, 0xffff, UQ_KBD_BOOTPROTO),
 	/* Quirk for Corsair STRAFE Gaming keyboard */
 	USB_QUIRK(CORSAIR, STRAFE, 0x0000, 0xffff, UQ_KBD_BOOTPROTO),
+	USB_QUIRK(CORSAIR, STRAFE2, 0x0000, 0xffff, UQ_KBD_BOOTPROTO),
 	/* umodem(4) device quirks */
 	USB_QUIRK(METRICOM, RICOCHET_GS, 0x100, 0x100, UQ_ASSUME_CM_OVER_DATA),
 	USB_QUIRK(SANYO, SCP4900, 0x000, 0x000, UQ_ASSUME_CM_OVER_DATA),
@@ -525,6 +526,7 @@ static struct usb_quirk_entry usb_quirks[USB_DEV_QUIRKS_MAX] = {
 	USB_QUIRK(MAUDIO, FASTTRACKULTRA, 0x0000, 0xffff, UQ_AU_VENDOR_CLASS),
 	USB_QUIRK(MAUDIO, FASTTRACKULTRA8R, 0x0000, 0xffff, UQ_AU_VENDOR_CLASS),
 	USB_QUIRK(CMEDIA, CM6206, 0x0000, 0xffff, UQ_AU_SET_SPDIF_CM6206),
+	USB_QUIRK(PLOYTEC, SPL_CRIMSON_1, 0x0000, 0xffff, UQ_CFG_INDEX_1),
 
 	/*
 	 * Quirks for manufacturers which USB devices does not respond
