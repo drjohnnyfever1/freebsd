@@ -47,9 +47,9 @@
 #define	tls_msg(s)		write(STDOUT_FILENO, s, strlen(s))
 
 /* Provided by jemalloc to avoid bootstrapping issues. */
-void	*__je_bootstrap_malloc(size_t size);
-void	*__je_bootstrap_calloc(size_t num, size_t size);
-void	__je_bootstrap_free(void *ptr);
+void	*__je_a0malloc(size_t size);
+void	*__je_a0calloc(size_t num, size_t size);
+void	__je_a0free(void *ptr);
 
 __weak_reference(__libc_allocate_tls, _rtld_allocate_tls);
 __weak_reference(__libc_free_tls, _rtld_free_tls);
