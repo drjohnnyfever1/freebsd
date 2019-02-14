@@ -68,11 +68,11 @@ size_t	nallocx(size_t size, int flags);
 #define	ALLOCM_ERR_OOM		1
 #define	ALLOCM_ERR_NOT_MOVED	2
 
-int	allocm(void **ptr, size_t *rsize, size_t size, int flags) __nonnull(1);
+int	allocm(void **ptr, size_t *rsize, size_t size, int flags);
 int	rallocm(void **ptr, size_t *rsize, size_t size, size_t extra,
-    int flags) __nonnull(1);
-int	sallocm(const void *ptr, size_t *rsize, int flags) __nonnull(1);
-int	dallocm(void *ptr, int flags) __nonnull(1);
+    int flags);
+int	sallocm(const void *ptr, size_t *rsize, int flags);
+int	dallocm(void *ptr, int flags);
 int	nallocm(size_t *rsize, size_t size, int flags);
 
 void *	__calloc(size_t, size_t) __malloc_like;
@@ -87,10 +87,10 @@ size_t	__xallocx(void *ptr, size_t size, size_t extra, int flags);
 size_t	__sallocx(const void *ptr, int flags);
 void	__dallocx(void *ptr, int flags);
 size_t	__nallocx(size_t size, int flags);
-int	__allocm(void **, size_t *, size_t, int) __nonnull(1);
-int	__rallocm(void **, size_t *, size_t, size_t, int) __nonnull(1);
-int	__sallocm(const void *, size_t *, int) __nonnull(1);
-int	__dallocm(void *, int) __nonnull(1);
+int	__allocm(void **, size_t *, size_t, int);
+int	__rallocm(void **, size_t *, size_t, size_t, int);
+int	__sallocm(const void *, size_t *, int);
+int	__dallocm(void *, int);
 int	__nallocm(size_t *, size_t, int);
 __END_DECLS
 
