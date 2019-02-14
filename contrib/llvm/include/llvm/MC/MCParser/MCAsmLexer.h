@@ -161,6 +161,7 @@ protected: // Can only create subclasses.
   bool IsAtStartOfStatement;
   AsmCommentConsumer *CommentConsumer;
 
+  bool AltMacroMode;
   MCAsmLexer();
 
   virtual AsmToken LexToken() = 0;
@@ -172,6 +173,14 @@ protected: // Can only create subclasses.
 
 public:
   virtual ~MCAsmLexer();
+
+  bool IsaAltMacroMode() {
+    return AltMacroMode;
+  }
+
+  void SetAltMacroMode(bool AltMacroSet) {
+    AltMacroMode = AltMacroSet;
+  }
 
   /// Consume the next token from the input stream and return it.
   ///
