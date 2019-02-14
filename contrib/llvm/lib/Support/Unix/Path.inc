@@ -351,7 +351,6 @@ std::error_code resize_file(int FD, uint64_t Size) {
   // OS X with HFS+ it does.
   if (::ftruncate(FD, Size) == -1)
     return std::error_code(errno, std::generic_category());
-#endif
 
   return std::error_code();
 }
