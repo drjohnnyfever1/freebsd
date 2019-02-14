@@ -55,9 +55,6 @@
 #elif defined(__powerpc__)
 #  define LG_SIZEOF_PTR		2
 #endif
-#ifdef __riscv__
-#  define LG_SIZEOF_PTR		3
-#endif
 
 #ifndef JEMALLOC_TLS_MODEL
 #  define JEMALLOC_TLS_MODEL	/* Default. */
