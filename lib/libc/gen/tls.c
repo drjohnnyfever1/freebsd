@@ -130,7 +130,7 @@ malloc_aligned(size_t size, size_t align)
 	if (align < sizeof(void *))
 		align = sizeof(void *);
 
-	mem = __je_bootstrap_malloc(size + sizeof(void *) + align - 1);
+	mem = __je_a0malloc(size + sizeof(void *) + align - 1);
 	res = (void *)roundup2((uintptr_t)mem + sizeof(void *), align);
 	*(void **)((uintptr_t)res - sizeof(void *)) = mem;
 	return (res);
@@ -148,7 +148,7 @@ free_aligned(void *ptr)
 	x = (uintptr_t)ptr;
 	x -= sizeof(void *);
 	mem = *(void **)x;
-	__je_bootstrap_free(mem);
+	__je_a0free(mem);
 }
 
 #ifdef TLS_VARIANT_I
@@ -223,7 +223,7 @@ __libc_free_tls(void *tcb, size_t tcbsize, size_t tcbalign __unused)
 
 	tls = (Elf_Addr **)tcb;
 	dtv = tls[0];
-	__je_bootstrap_free(dtv);
+	__je_a0free(dtv);
 	free_aligned(get_tls_block_ptr(tcb, tcbsize));
 }
 
@@ -290,7 +290,7 @@ __libc_allocate_tls(void *oldtcb, size_t tcbsize, size_t tcbalign)
 		dtv = tcb[0];
 		dtv[2] = (Elf_Addr)(tls + DTV_OFFSET);
 	} else {
-		dtv = __je_bootstrap_malloc(3 * sizeof(Elf_Addr));
+		dtv = __je_a0malloc(3 * sizeof(Elf_Addr));
 		if (dtv == NULL) {
 			tls_msg("__libc_allocate_tls: Out of memory.\n");
 			abort();
@@ -335,7 +335,7 @@ __libc_free_tls(void *tcb, size_t tcbsize __unused, size_t tcbalign)
 	tlsend = (Elf_Addr) tcb;
 	tlsstart = tlsend - size;
 	free_aligned((void*)tlsstart);
-	__je_bootstrap_free(dtv);
+	__je_a0free(dtv);
 }
 
 /*
@@ -360,7 +360,7 @@ __libc_allocate_tls(void *oldtls, size_t tcbsize, size_t tcbalign)
 		abort();
 	}
 	memset(tls, 0, size + tcbsize);
-	dtv = __je_bootstrap_malloc(3 * sizeof(Elf_Addr));
+	dtv = __je_a0malloc(3 * sizeof(Elf_Addr));
 	if (dtv == NULL) {
 		tls_msg("__libc_allocate_tls: Out of memory.\n");
 		abort();
