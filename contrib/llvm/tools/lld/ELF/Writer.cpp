@@ -50,6 +50,7 @@ private:
   void createSyntheticSections();
   void copyLocalSymbols();
   void addSectionSymbols();
+  void addReservedSymbols();
   void createSections();
   void forEachRelSec(std::function<void(InputSectionBase &)> Fn);
   void sortSections();
@@ -167,6 +168,10 @@ template <class ELFT> void Writer<ELFT>::run() {
   if (!Config->Relocatable)
     combineEhFrameSections<ELFT>();
 
+  // We need to create some reserved symbols such as _end. Create them.
+  if (!Config->Relocatable)
+    addReservedSymbols();
+
   // Create output sections.
   if (Script->Opt.HasSections) {
     // If linker script contains SECTIONS commands, let it create sections.
@@ -281,6 +286,8 @@ template <class ELFT> void Writer<ELFT>::createSyntheticSections() {
       Config->IsRela ? ".rela.dyn" : ".rel.dyn", Config->ZCombreloc);
   InX::ShStrTab = make<StringTableSection>(".shstrtab", false);
 
+  Out::ElfHeader = make<OutputSection>("", 0, SHF_ALLOC);
+  Out::ElfHeader->Size = sizeof(Elf_Ehdr);
   Out::ProgramHeaders = make<OutputSection>("", 0, SHF_ALLOC);
   Out::ProgramHeaders->updateAlignment(Config->Wordsize);
 
@@ -789,7 +796,7 @@ template <class ELFT> void Writer<ELFT>::addRelIpltSymbols() {
 
 // The linker is expected to define some symbols depending on
 // the linking result. This function defines such symbols.
-template <class ELFT> void elf::addReservedSymbols() {
+template <class ELFT> void Writer<ELFT>::addReservedSymbols() {
   if (Config->EMachine == EM_MIPS) {
     // Define _gp for MIPS. st_value of _gp symbol will be updated by Writer
     // so that it points to an absolute address which by default is relative
@@ -813,8 +820,20 @@ template <class ELFT> void elf::addReservedSymbols() {
           Symtab<ELFT>::X->addAbsolute("__gnu_local_gp", STV_HIDDEN, STB_LOCAL);
   }
 
+  // The _GLOBAL_OFFSET_TABLE_ symbol is defined by target convention to
+  // be at some offset from the base of the .got section, usually 0 or the end
+  // of the .got
+  InputSection *GotSection = InX::MipsGot ? cast<InputSection>(InX::MipsGot)
+                                          : cast<InputSection>(InX::Got);
   ElfSym::GlobalOffsetTable = addOptionalRegular<ELFT>(
-      "_GLOBAL_OFFSET_TABLE_", Out::ElfHeader, Target->GotBaseSymOff);
+      "_GLOBAL_OFFSET_TABLE_", GotSection, Target->GotBaseSymOff);
+
+  // __tls_get_addr is defined by the dynamic linker for dynamic ELFs. For
+  // static linking the linker is required to optimize away any references to
+  // __tls_get_addr, so it's not defined anywhere. Create a hidden definition
+  // to avoid the undefined symbol error.
+  if (!InX::DynSymTab)
+    Symtab<ELFT>::X->addIgnored("__tls_get_addr");
 
   // __ehdr_start is the location of ELF file headers. Note that we define
   // this symbol unconditionally even when using a linker script, which
@@ -1702,15 +1721,6 @@ static uint16_t getELFType() {
 // to each section. This function fixes some predefined
 // symbol values that depend on section address and size.
 template <class ELFT> void Writer<ELFT>::fixPredefinedSymbols() {
-  if (ElfSym::GlobalOffsetTable) {
-    // The _GLOBAL_OFFSET_TABLE_ symbol is defined by target convention to
-    // be at some offset from the base of the .got section, usually 0 or the end
-    // of the .got
-    InputSection *GotSection = InX::MipsGot ? cast<InputSection>(InX::MipsGot)
-                                            : cast<InputSection>(InX::Got);
-    ElfSym::GlobalOffsetTable->Section = GotSection;
-  }
-
   // _etext is the first location after the last read-only loadable segment.
   // _edata is the first location after the last read-write loadable segment.
   // _end is the first location after the uninitialized data region.
@@ -1901,8 +1911,3 @@ template void elf::writeResult<ELF32LE>();
 template void elf::writeResult<ELF32BE>();
 template void elf::writeResult<ELF64LE>();
 template void elf::writeResult<ELF64BE>();
-
-template void elf::addReservedSymbols<ELF32LE>();
-template void elf::addReservedSymbols<ELF32BE>();
-template void elf::addReservedSymbols<ELF64LE>();
-template void elf::addReservedSymbols<ELF64BE>();

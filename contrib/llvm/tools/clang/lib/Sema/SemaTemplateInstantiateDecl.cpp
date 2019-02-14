@@ -677,7 +677,6 @@ TemplateDeclInstantiator::VisitTypeAliasTemplateDecl(TypeAliasTemplateDecl *D) {
 Decl *TemplateDeclInstantiator::VisitBindingDecl(BindingDecl *D) {
   auto *NewBD = BindingDecl::Create(SemaRef.Context, Owner, D->getLocation(),
                                     D->getIdentifier());
-  NewBD->setReferenced(D->isReferenced());
   SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, NewBD);
   return NewBD;
 }

@@ -826,10 +826,7 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
   NamedDecl *New =
       ActOnVariableDeclarator(S, D, DC, TInfo, Previous,
                               MultiTemplateParamsArg(), AddToScope, Bindings);
-  if (AddToScope) {
-    S->AddDecl(New);
-    CurContext->addHiddenDecl(New);
-  }
+  CurContext->addHiddenDecl(New);
 
   if (isInOpenMPDeclareTargetContext())
     checkDeclIsAllowedInOpenMPTarget(nullptr, New);
