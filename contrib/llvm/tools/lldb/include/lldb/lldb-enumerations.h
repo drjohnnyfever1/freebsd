@@ -380,8 +380,7 @@ FLAGS_ENUM(BreakpointEventType){
     eBreakpointEventTypeCommandChanged = (1u << 8),
     eBreakpointEventTypeConditionChanged = (1u << 9),
     eBreakpointEventTypeIgnoreChanged = (1u << 10),
-    eBreakpointEventTypeThreadChanged = (1u << 11),
-    eBreakpointEventTypeAutoContinueChanged = (1u << 12)};
+    eBreakpointEventTypeThreadChanged = (1u << 11)};
 
 FLAGS_ENUM(WatchpointEventType){
     eWatchpointEventTypeInvalidType = (1u << 0),
@@ -567,7 +566,6 @@ enum CommandArgumentType {
   eArgTypeWatchpointIDRange,
   eArgTypeWatchType,
   eArgRawInput,
-  eArgTypeCommand,
   eArgTypeLastArg // Always keep this entry as the last entry in this
                   // enumeration!!
 };
@@ -628,7 +626,6 @@ enum SectionType {
   eSectionTypeDWARFDebugAbbrev,
   eSectionTypeDWARFDebugAddr,
   eSectionTypeDWARFDebugAranges,
-  eSectionTypeDWARFDebugCuIndex,
   eSectionTypeDWARFDebugFrame,
   eSectionTypeDWARFDebugInfo,
   eSectionTypeDWARFDebugLine,
@@ -767,8 +764,8 @@ enum TemplateArgumentKind {
   eTemplateArgumentKindTemplate,
   eTemplateArgumentKindTemplateExpansion,
   eTemplateArgumentKindExpression,
-  eTemplateArgumentKindPack,
-  eTemplateArgumentKindNullPtr,
+  eTemplateArgumentKindPack
+
 };
 
 //----------------------------------------------------------------------
@@ -934,8 +931,8 @@ enum ExpressionEvaluationPhase {
 // Indicates what types of events cause the watchpoint to fire.
 // Used by Native*Protocol-related classes.
 //----------------------------------------------------------------------
-FLAGS_ENUM(WatchpointKind){eWatchpointKindWrite = (1u << 0),
-                           eWatchpointKindRead = (1u << 1)};
+FLAGS_ENUM(WatchpointKind){eWatchpointKindRead = (1u << 0),
+                           eWatchpointKindWrite = (1u << 1)};
 
 enum GdbSignal {
   eGdbSignalBadAccess = 0x91,

@@ -13,13 +13,9 @@
 #include "Plugins/Instruction/MIPS/EmulateInstructionMIPS.h"
 #include "Plugins/Instruction/MIPS64/EmulateInstructionMIPS64.h"
 #include "Plugins/ObjectContainer/BSD-Archive/ObjectContainerBSDArchive.h"
-#ifdef LLDB_ENABLE_ALL
-#include "Plugins/ObjectContainer/Universal-Mach-O/ObjectContainerUniversalMachO.h"
-#endif // LLDB_ENABLE_ALL
+//#include "Plugins/ObjectContainer/Universal-Mach-O/ObjectContainerUniversalMachO.h"
 #include "Plugins/ObjectFile/ELF/ObjectFileELF.h"
-#ifdef LLDB_ENABLE_ALL
-#include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
-#endif // LLDB_ENABLE_ALL
+//#include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
 #include "Plugins/Process/gdb-remote/ProcessGDBRemoteLog.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
@@ -73,10 +69,8 @@ void SystemInitializerCommon::Initialize() {
   }
 #endif
 
-#if not defined(__APPLE__)
   llvm::EnablePrettyStackTrace();
-#endif
-  Log::Initialize();
+  InitializeLog();
   HostInfo::Initialize();
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
   Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
@@ -86,9 +80,7 @@ void SystemInitializerCommon::Initialize() {
   // Initialize plug-ins
   ObjectContainerBSDArchive::Initialize();
   ObjectFileELF::Initialize();
-#ifdef LLDB_ENABLE_ALL
-  ObjectFilePECOFF::Initialize();
-#endif // LLDB_ENABLE_ALL
+//ObjectFilePECOFF::Initialize();
 
   EmulateInstructionARM::Initialize();
   EmulateInstructionMIPS::Initialize();
@@ -97,9 +89,7 @@ void SystemInitializerCommon::Initialize() {
   //----------------------------------------------------------------------
   // Apple/Darwin hosted plugins
   //----------------------------------------------------------------------
-#ifdef LLDB_ENABLE_ALL
-  ObjectContainerUniversalMachO::Initialize();
-#endif // LLDB_ENABLE_ALL
+//ObjectContainerUniversalMachO::Initialize();
 
 #if defined(__APPLE__)
   ObjectFileMachO::Initialize();
@@ -117,17 +107,13 @@ void SystemInitializerCommon::Terminate() {
   Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
   ObjectContainerBSDArchive::Terminate();
   ObjectFileELF::Terminate();
-#ifdef LLDB_ENABLE_ALL
-  ObjectFilePECOFF::Terminate();
-#endif // LLDB_ENABLE_ALL
+//ObjectFilePECOFF::Terminate();
 
   EmulateInstructionARM::Terminate();
   EmulateInstructionMIPS::Terminate();
   EmulateInstructionMIPS64::Terminate();
 
-#ifdef LLDB_ENABLE_ALL
-  ObjectContainerUniversalMachO::Terminate();
-#endif // LLDB_ENABLE_ALL
+//ObjectContainerUniversalMachO::Terminate();
 #if defined(__APPLE__)
   ObjectFileMachO::Terminate();
 #endif

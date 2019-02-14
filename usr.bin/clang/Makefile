@@ -28,7 +28,6 @@ SUBDIR+=	llvm-lto2
 SUBDIR+=	llvm-mc
 SUBDIR+=	llvm-modextract
 SUBDIR+=	llvm-nm
-SUBDIR+=	llvm-objcopy
 SUBDIR+=	llvm-objdump
 SUBDIR+=	llvm-pdbutil
 SUBDIR+=	llvm-profdata

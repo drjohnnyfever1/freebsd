@@ -22,7 +22,6 @@
 #include "lldb/Breakpoint/BreakpointID.h"
 #include "lldb/Breakpoint/BreakpointLocationCollection.h"
 #include "lldb/Breakpoint/BreakpointLocationList.h"
-#include "lldb/Breakpoint/BreakpointName.h"
 #include "lldb/Breakpoint/BreakpointOptions.h"
 #include "lldb/Breakpoint/Stoppoint.h"
 #include "lldb/Core/Event.h"
@@ -422,18 +421,6 @@ public:
   bool IsOneShot() const;
 
   //------------------------------------------------------------------
-  /// If \a auto_continue is \b true, breakpoint will auto-continue when on hit.
-  //------------------------------------------------------------------
-  void SetAutoContinue(bool auto_continue);
-
-  //------------------------------------------------------------------
-  /// Check the AutoContinue state.
-  /// @return
-  ///     \b true if the breakpoint is set to auto-continue, \b false otherwise.
-  //------------------------------------------------------------------
-  bool IsAutoContinue() const;
-
-  //------------------------------------------------------------------
   /// Set the valid thread to be checked when the breakpoint is hit.
   /// @param[in] thread_id
   ///    If this thread hits the breakpoint, we stop, otherwise not.
@@ -604,16 +591,6 @@ public:
   BreakpointOptions *GetOptions();
 
   //------------------------------------------------------------------
-  /// Returns the BreakpointOptions structure set at the breakpoint level.
-  ///
-  /// Meant to be used by the BreakpointLocation class.
-  ///
-  /// @return
-  ///     A pointer to this breakpoint's BreakpointOptions.
-  //------------------------------------------------------------------
-  const BreakpointOptions *GetOptions() const;
-
-  //------------------------------------------------------------------
   /// Invoke the callback action when the breakpoint is hit.
   ///
   /// Meant to be used by the BreakpointLocation class.
@@ -636,16 +613,13 @@ public:
 
   lldb::SearchFilterSP GetSearchFilter() { return m_filter_sp; }
 
-private: // The target needs to manage adding & removing names.  It will do the
-         // checking for name validity as well.
-  bool AddName(llvm::StringRef new_name);
+  bool AddName(llvm::StringRef new_name, Status &error);
 
   void RemoveName(const char *name_to_remove) {
     if (name_to_remove)
       m_name_list.erase(name_to_remove);
   }
-  
-public:
+
   bool MatchesName(const char *name) {
     return m_name_list.find(name) != m_name_list.end();
   }
@@ -677,25 +651,6 @@ public:
   bool EvaluatePrecondition(StoppointCallbackContext &context);
 
   BreakpointPreconditionSP GetPrecondition() { return m_precondition_sp; }
-  
-  // Produces the OR'ed values for all the names assigned to this breakpoint.
-  const BreakpointName::Permissions &GetPermissions() const { 
-      return m_permissions; 
-  }
-
-  BreakpointName::Permissions &GetPermissions() { 
-      return m_permissions; 
-  }
-  
-  bool AllowList() const {
-    return GetPermissions().GetAllowList();
-  }
-  bool AllowDisable() const {
-    return GetPermissions().GetAllowDisable();
-  }
-  bool AllowDelete() const {
-    return GetPermissions().GetAllowDelete();
-  }
 
 protected:
   friend class Target;
@@ -795,7 +750,6 @@ private:
                         // hit.  This is kept
   // separately from the locations hit counts, since locations can go away when
   // their backing library gets unloaded, and we would lose hit counts.
-  BreakpointName::Permissions m_permissions;
 
   void SendBreakpointChangedEvent(lldb::BreakpointEventType eventKind);
 

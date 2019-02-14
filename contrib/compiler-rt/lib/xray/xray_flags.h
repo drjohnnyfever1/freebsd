@@ -16,7 +16,6 @@
 #define XRAY_FLAGS_H
 
 #include "sanitizer_common/sanitizer_flag_parser.h"
-#include "sanitizer_common/sanitizer_internal_defs.h"
 
 namespace __xray {
 

@@ -7,6 +7,9 @@
 |*
 \*===----------------------------------------------------------------------===*/
 
+#include "InstrProfiling.h"
+#include "InstrProfilingInternal.h"
+#include "InstrProfilingUtil.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,10 +30,6 @@
 #include <sys/types.h>
 #endif
 #endif
-
-#include "InstrProfiling.h"
-#include "InstrProfilingInternal.h"
-#include "InstrProfilingUtil.h"
 
 /* From where is profile name specified.
  * The order the enumerators define their
@@ -86,6 +85,7 @@ typedef struct lprofFilename {
 COMPILER_RT_WEAK lprofFilename lprofCurFilename = {0, 0, 0, {0}, {0},
                                                    0, 0, 0, PNS_unknown};
 
+int getpid(void);
 static int getCurFilenameLength();
 static const char *getCurFilename(char *FilenameBuf);
 static unsigned doMerging() { return lprofCurFilename.MergePoolSize; }
@@ -325,7 +325,7 @@ static int parseFilenamePattern(const char *FilenamePat,
     if (FilenamePat[I] == '%') {
       if (FilenamePat[++I] == 'p') {
         if (!NumPids++) {
-          if (snprintf(PidChars, MAX_PID_SIZE, "%ld", (long)getpid()) <= 0) {
+          if (snprintf(PidChars, MAX_PID_SIZE, "%d", getpid()) <= 0) {
             PROF_WARN("Unable to get pid for filename pattern %s. Using the "
                       "default name.",
                       FilenamePat);
@@ -519,10 +519,8 @@ void __llvm_profile_initialize_file(void) {
 
   EnvFilenamePat = getFilenamePatFromEnv();
   if (EnvFilenamePat) {
-    /* Pass CopyFilenamePat = 1, to ensure that the filename would be valid 
-       at the  moment when __llvm_profile_write_file() gets executed. */
-    parseAndSetFilename(EnvFilenamePat, PNS_environment, 1);
-    return;
+    SelectedPat = EnvFilenamePat;
+    PNS = PNS_environment;
   } else if (hasCommandLineOverrider) {
     SelectedPat = INSTR_PROF_PROFILE_NAME_VAR;
     PNS = PNS_command_line;
