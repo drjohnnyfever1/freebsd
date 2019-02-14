@@ -12,9 +12,7 @@
 # LINKER_FEATURES may contain one or more of the following, based on
 # linker support for that feature:
 #
-# - build-id:  support for generating a Build-ID note
-# - retpoline: support for generating PLT with retpoline speculative
-#              execution vulnerability mitigation
+# - build-id : support for generating a Build-ID note
 #
 # These variables with an X_ prefix will also be provided if XLD is set.
 #
@@ -74,9 +72,6 @@ ${X_}LINKER_FEATURES+=	build-id
 .endif
 .if ${${X_}LINKER_TYPE} != "lld" || ${${X_}LINKER_VERSION} >= 50000
 ${X_}LINKER_FEATURES+=	filter
-.endif
-.if ${${X_}LINKER_TYPE} == "lld" && ${${X_}LINKER_VERSION} >= 60000
-${X_}LINKER_FEATURES+=	retpoline
 .endif
 .endif
 .else
