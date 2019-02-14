@@ -70,7 +70,7 @@ size_t	nallocx(size_t size, int flags);
 
 int	allocm(void **ptr, size_t *rsize, size_t size, int flags);
 int	rallocm(void **ptr, size_t *rsize, size_t size, size_t extra,
-    int flags) __nonnull(1);
+    int flags);
 int	sallocm(const void *ptr, size_t *rsize, int flags);
 int	dallocm(void *ptr, int flags);
 int	nallocm(size_t *rsize, size_t size, int flags);
