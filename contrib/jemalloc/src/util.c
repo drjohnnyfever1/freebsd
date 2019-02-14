@@ -14,7 +14,6 @@
 		malloc_write("<jemalloc>: Unreachable code reached\n");	\
 		abort();						\
 	}								\
-	unreachable();							\
 } while (0)
 
 #define	not_implemented() do {						\
@@ -331,9 +330,10 @@ x2s(uintmax_t x, bool alt_form, bool uppercase, char *s, size_t *slen_p)
 	return (s);
 }
 
-size_t
+int
 malloc_vsnprintf(char *str, size_t size, const char *format, va_list ap)
 {
+	int ret;
 	size_t i;
 	const char *f;
 
@@ -424,8 +424,6 @@ malloc_vsnprintf(char *str, size_t size, const char *format, va_list ap)
 			int prec = -1;
 			int width = -1;
 			unsigned char len = '?';
-			char *s;
-			size_t slen;
 
 			f++;
 			/* Flags. */
@@ -516,6 +514,8 @@ malloc_vsnprintf(char *str, size_t size, const char *format, va_list ap)
 			}
 			/* Conversion specifier. */
 			switch (*f) {
+				char *s;
+				size_t slen;
 			case '%':
 				/* %% */
 				APPEND_C(*f);
@@ -601,19 +601,21 @@ malloc_vsnprintf(char *str, size_t size, const char *format, va_list ap)
 		str[i] = '\0';
 	else
 		str[size - 1] = '\0';
+	assert(i < INT_MAX);
+	ret = (int)i;
 
 #undef APPEND_C
 #undef APPEND_S
 #undef APPEND_PADDED_S
 #undef GET_ARG_NUMERIC
-	return (i);
+	return (ret);
 }
 
 JEMALLOC_FORMAT_PRINTF(3, 4)
-size_t
+int
 malloc_snprintf(char *str, size_t size, const char *format, ...)
 {
-	size_t ret;
+	int ret;
 	va_list ap;
 
 	va_start(ap, format);
