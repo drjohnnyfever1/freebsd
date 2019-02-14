@@ -38,8 +38,6 @@ class BreakpointList;
 class BreakpointLocation;
 class BreakpointLocationCollection;
 class BreakpointLocationList;
-class BreakpointName;
-class BreakpointOptionGroup;
 class BreakpointOptions;
 class BreakpointResolver;
 class BreakpointSite;

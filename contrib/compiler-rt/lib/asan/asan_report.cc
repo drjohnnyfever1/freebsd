@@ -60,8 +60,9 @@ void PrintMemoryByte(InternalScopedString *str, const char *before, u8 byte,
                      bool in_shadow, const char *after) {
   Decorator d;
   str->append("%s%s%x%x%s%s", before,
-              in_shadow ? d.ShadowByte(byte) : d.MemoryByte(), byte >> 4,
-              byte & 15, d.Default(), after);
+              in_shadow ? d.ShadowByte(byte) : d.MemoryByte(),
+              byte >> 4, byte & 15,
+              in_shadow ? d.EndShadowByte() : d.EndMemoryByte(), after);
 }
 
 static void PrintZoneForPointer(uptr ptr, uptr zone_ptr,
@@ -122,15 +123,53 @@ bool ParseFrameDescription(const char *frame_descr,
 // immediately after printing error report.
 class ScopedInErrorReport {
  public:
-  explicit ScopedInErrorReport(bool fatal = false)
-      : halt_on_error_(fatal || flags()->halt_on_error) {
-    // Make sure the registry and sanitizer report mutexes are locked while
-    // we're printing an error report.
-    // We can lock them only here to avoid self-deadlock in case of
-    // recursive reports.
-    asanThreadRegistry().Lock();
-    Printf(
-        "=================================================================\n");
+  explicit ScopedInErrorReport(bool fatal = false) {
+    halt_on_error_ = fatal || flags()->halt_on_error;
+
+    if (lock_.TryLock()) {
+      StartReporting();
+      return;
+    }
+
+    // ASan found two bugs in different threads simultaneously.
+
+    u32 current_tid = GetCurrentTidOrInvalid();
+    if (reporting_thread_tid_ == current_tid ||
+        reporting_thread_tid_ == kInvalidTid) {
+      // This is either asynch signal or nested error during error reporting.
+      // Fail simple to avoid deadlocks in Report().
+
+      // Can't use Report() here because of potential deadlocks
+      // in nested signal handlers.
+      const char msg[] = "AddressSanitizer: nested bug in the same thread, "
+                         "aborting.\n";
+      WriteToFile(kStderrFd, msg, sizeof(msg));
+
+      internal__exit(common_flags()->exitcode);
+    }
+
+    if (halt_on_error_) {
+      // Do not print more than one report, otherwise they will mix up.
+      // Error reporting functions shouldn't return at this situation, as
+      // they are effectively no-returns.
+
+      Report("AddressSanitizer: while reporting a bug found another one. "
+             "Ignoring.\n");
+
+      // Sleep long enough to make sure that the thread which started
+      // to print an error report will finish doing it.
+      SleepForSeconds(Max(100, flags()->sleep_before_dying + 1));
+
+      // If we're still not dead for some reason, use raw _exit() instead of
+      // Die() to bypass any additional checks.
+      internal__exit(common_flags()->exitcode);
+    } else {
+      // The other thread will eventually finish reporting
+      // so it's safe to wait
+      lock_.Lock();
+    }
+
+    StartReporting();
   }
 
   ~ScopedInErrorReport() {
@@ -178,6 +217,9 @@ class ScopedInErrorReport {
     if (!halt_on_error_)
       internal_memset(&current_error_, 0, sizeof(current_error_));
 
+    CommonSanitizerReportMutex.Unlock();
+    reporting_thread_tid_ = kInvalidTid;
+    lock_.Unlock();
     if (halt_on_error_) {
       Report("ABORTING\n");
       Die();
@@ -195,18 +237,39 @@ class ScopedInErrorReport {
   }
 
  private:
-  ScopedErrorReportLock error_report_lock_;
+  void StartReporting() {
+    // Make sure the registry and sanitizer report mutexes are locked while
+    // we're printing an error report.
+    // We can lock them only here to avoid self-deadlock in case of
+    // recursive reports.
+    asanThreadRegistry().Lock();
+    CommonSanitizerReportMutex.Lock();
+    reporting_thread_tid_ = GetCurrentTidOrInvalid();
+    Printf("===================================================="
+           "=============\n");
+  }
+
+  static StaticSpinMutex lock_;
+  static u32 reporting_thread_tid_;
   // Error currently being reported. This enables the destructor to interact
   // with the debugger and point it to an error description.
   static ErrorDescription current_error_;
   bool halt_on_error_;
 };
 
+StaticSpinMutex ScopedInErrorReport::lock_;
+u32 ScopedInErrorReport::reporting_thread_tid_ = kInvalidTid;
 ErrorDescription ScopedInErrorReport::current_error_;
 
-void ReportDeadlySignal(const SignalContext &sig) {
+void ReportStackOverflow(const SignalContext &sig) {
   ScopedInErrorReport in_report(/*fatal*/ true);
-  ErrorDeadlySignal error(GetCurrentTidOrInvalid(), sig);
+  ErrorStackOverflow error(GetCurrentTidOrInvalid(), sig);
+  in_report.ReportError(error);
+}
+
+void ReportDeadlySignal(int signo, const SignalContext &sig) {
+  ScopedInErrorReport in_report(/*fatal*/ true);
+  ErrorDeadlySignal error(GetCurrentTidOrInvalid(), sig, signo);
   in_report.ReportError(error);
 }
 
@@ -216,12 +279,11 @@ void ReportDoubleFree(uptr addr, BufferedStackTrace *free_stack) {
   in_report.ReportError(error);
 }
 
-void ReportNewDeleteTypeMismatch(uptr addr, uptr delete_size,
-                                 uptr delete_alignment,
+void ReportNewDeleteSizeMismatch(uptr addr, uptr delete_size,
                                  BufferedStackTrace *free_stack) {
   ScopedInErrorReport in_report;
-  ErrorNewDeleteTypeMismatch error(GetCurrentTidOrInvalid(), free_stack, addr,
-                                   delete_size, delete_alignment);
+  ErrorNewDeleteSizeMismatch error(GetCurrentTidOrInvalid(), free_stack, addr,
+                                   delete_size);
   in_report.ReportError(error);
 }
 
@@ -298,58 +360,17 @@ static NOINLINE void ReportInvalidPointerPair(uptr pc, uptr bp, uptr sp,
   in_report.ReportError(error);
 }
 
-static bool IsInvalidPointerPair(uptr a1, uptr a2) {
-  if (a1 == a2)
-    return false;
-
-  // 256B in shadow memory can be iterated quite fast
-  static const uptr kMaxOffset = 2048;
-
-  uptr left = a1 < a2 ? a1 : a2;
-  uptr right = a1 < a2 ? a2 : a1;
-  uptr offset = right - left;
-  if (offset <= kMaxOffset)
-    return __asan_region_is_poisoned(left, offset);
-
-  AsanThread *t = GetCurrentThread();
-
-  // check whether left is a stack memory pointer
-  if (uptr shadow_offset1 = t->GetStackVariableShadowStart(left)) {
-    uptr shadow_offset2 = t->GetStackVariableShadowStart(right);
-    return shadow_offset2 == 0 || shadow_offset1 != shadow_offset2;
-  }
-
-  // check whether left is a heap memory address
-  HeapAddressDescription hdesc1, hdesc2;
-  if (GetHeapAddressInformation(left, 0, &hdesc1) &&
-      hdesc1.chunk_access.access_type == kAccessTypeInside)
-    return !GetHeapAddressInformation(right, 0, &hdesc2) ||
-        hdesc2.chunk_access.access_type != kAccessTypeInside ||
-        hdesc1.chunk_access.chunk_begin != hdesc2.chunk_access.chunk_begin;
-
-  // check whether left is an address of a global variable
-  GlobalAddressDescription gdesc1, gdesc2;
-  if (GetGlobalAddressInformation(left, 0, &gdesc1))
-    return !GetGlobalAddressInformation(right - 1, 0, &gdesc2) ||
-        !gdesc1.PointsInsideTheSameVariable(gdesc2);
-
-  if (t->GetStackVariableShadowStart(right) ||
-      GetHeapAddressInformation(right, 0, &hdesc2) ||
-      GetGlobalAddressInformation(right - 1, 0, &gdesc2))
-    return true;
-
-  // At this point we know nothing about both a1 and a2 addresses.
-  return false;
-}
-
 static INLINE void CheckForInvalidPointerPair(void *p1, void *p2) {
   if (!flags()->detect_invalid_pointer_pairs) return;
   uptr a1 = reinterpret_cast<uptr>(p1);
   uptr a2 = reinterpret_cast<uptr>(p2);
-
-  if (IsInvalidPointerPair(a1, a2)) {
+  AsanChunkView chunk1 = FindHeapChunkByAddress(a1);
+  AsanChunkView chunk2 = FindHeapChunkByAddress(a2);
+  bool valid1 = chunk1.IsAllocated();
+  bool valid2 = chunk2.IsAllocated();
+  if (!valid1 || !valid2 || !chunk1.Eq(chunk2)) {
     GET_CALLER_PC_BP_SP;
-    ReportInvalidPointerPair(pc, bp, sp, a1, a2);
+    return ReportInvalidPointerPair(pc, bp, sp, a1, a2);
   }
 }
 // ----------------------- Mac-specific reports ----------------- {{{1

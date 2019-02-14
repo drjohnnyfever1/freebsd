@@ -7,7 +7,6 @@ if(NOT LLD_BUILT_STANDALONE)
 endif()
 
 add_lld_library(lldELF
-  AArch64ErrataFix.cpp
   Arch/AArch64.cpp
   Arch/AMDGPU.cpp
   Arch/ARM.cpp
@@ -22,6 +21,7 @@ add_lld_library(lldELF
   Driver.cpp
   DriverUtils.cpp
   EhFrame.cpp
+  Error.cpp
   Filesystem.cpp
   GdbIndex.cpp
   ICF.cpp
@@ -45,17 +45,28 @@ add_lld_library(lldELF
 
   LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
+  Analysis
   BinaryFormat
+  BitReader
+  BitWriter
+  Codegen
   Core
   DebugInfoDWARF
+  Demangle
+  IPO
+  Linker
   LTO
-  MC
   Object
   Option
+  Passes
+  MC
   Support
+  Target
+  TransformUtils
 
   LINK_LIBS
-  lldCommon
+  lldConfig
+  lldCore
   ${LLVM_PTHREAD_LIB}
 
   DEPENDS

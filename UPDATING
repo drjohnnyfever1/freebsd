@@ -136,6 +136,7 @@ from older version of current across the gcc/clang cutover is a bit fragile.
 	The geli password typed at boot is now hidden.  To restore the previous
 	behavior, see geli(8) for configuration options.
 
+20180113:
 	The SW_WATCHDOG option is no longer necessary to enable the
 	hardclock-based software watchdog if no hardware watchdog is
 	configured. As before, SW_WATCHDOG will cause the software

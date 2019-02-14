@@ -7,11 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Error.h"
 #include "InputFiles.h"
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "Target.h"
-#include "lld/Common/ErrorHandler.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Support/Endian.h"
 
@@ -26,23 +26,23 @@ namespace {
 template <class ELFT> class X86_64 : public TargetInfo {
 public:
   X86_64();
-  RelExpr getRelExpr(RelType Type, const Symbol &S,
+  RelExpr getRelExpr(uint32_t Type, const SymbolBody &S,
                      const uint8_t *Loc) const override;
-  bool isPicRel(RelType Type) const override;
+  bool isPicRel(uint32_t Type) const override;
   void writeGotPltHeader(uint8_t *Buf) const override;
-  void writeGotPlt(uint8_t *Buf, const Symbol &S) const override;
+  void writeGotPlt(uint8_t *Buf, const SymbolBody &S) const override;
   void writePltHeader(uint8_t *Buf) const override;
   void writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr, uint64_t PltEntryAddr,
                 int32_t Index, unsigned RelOff) const override;
-  void relocateOne(uint8_t *Loc, RelType Type, uint64_t Val) const override;
+  void relocateOne(uint8_t *Loc, uint32_t Type, uint64_t Val) const override;
 
-  RelExpr adjustRelaxExpr(RelType Type, const uint8_t *Data,
+  RelExpr adjustRelaxExpr(uint32_t Type, const uint8_t *Data,
                           RelExpr Expr) const override;
   void relaxGot(uint8_t *Loc, uint64_t Val) const override;
-  void relaxTlsGdToIe(uint8_t *Loc, RelType Type, uint64_t Val) const override;
-  void relaxTlsGdToLe(uint8_t *Loc, RelType Type, uint64_t Val) const override;
-  void relaxTlsIeToLe(uint8_t *Loc, RelType Type, uint64_t Val) const override;
-  void relaxTlsLdToLe(uint8_t *Loc, RelType Type, uint64_t Val) const override;
+  void relaxTlsGdToIe(uint8_t *Loc, uint32_t Type, uint64_t Val) const override;
+  void relaxTlsGdToLe(uint8_t *Loc, uint32_t Type, uint64_t Val) const override;
+  void relaxTlsIeToLe(uint8_t *Loc, uint32_t Type, uint64_t Val) const override;
+  void relaxTlsLdToLe(uint8_t *Loc, uint32_t Type, uint64_t Val) const override;
 
 private:
   void relaxGotNoPic(uint8_t *Loc, uint64_t Val, uint8_t Op,
@@ -73,7 +73,7 @@ template <class ELFT> X86_64<ELFT>::X86_64() {
 }
 
 template <class ELFT>
-RelExpr X86_64<ELFT>::getRelExpr(RelType Type, const Symbol &S,
+RelExpr X86_64<ELFT>::getRelExpr(uint32_t Type, const SymbolBody &S,
                                  const uint8_t *Loc) const {
   switch (Type) {
   case R_X86_64_8:
@@ -109,7 +109,8 @@ RelExpr X86_64<ELFT>::getRelExpr(RelType Type, const Symbol &S,
   case R_X86_64_NONE:
     return R_NONE;
   default:
-    return R_INVALID;
+    error(toString(S.File) + ": unknown relocation type: " + toString(Type));
+    return R_HINT;
   }
 }
 
@@ -122,16 +123,16 @@ template <class ELFT> void X86_64<ELFT>::writeGotPltHeader(uint8_t *Buf) const {
 }
 
 template <class ELFT>
-void X86_64<ELFT>::writeGotPlt(uint8_t *Buf, const Symbol &S) const {
-  // See comments in X86::writeGotPlt.
+void X86_64<ELFT>::writeGotPlt(uint8_t *Buf, const SymbolBody &S) const {
+  // See comments in X86TargetInfo::writeGotPlt.
   write32le(Buf, S.getPltVA() + 6);
 }
 
 template <class ELFT> void X86_64<ELFT>::writePltHeader(uint8_t *Buf) const {
   const uint8_t PltData[] = {
-      0xff, 0x35, 0, 0, 0, 0, // pushq GOTPLT+8(%rip)
-      0xff, 0x25, 0, 0, 0, 0, // jmp *GOTPLT+16(%rip)
-      0x0f, 0x1f, 0x40, 0x00, // nop
+      0xff, 0x35, 0x00, 0x00, 0x00, 0x00, // pushq GOTPLT+8(%rip)
+      0xff, 0x25, 0x00, 0x00, 0x00, 0x00, // jmp *GOTPLT+16(%rip)
+      0x0f, 0x1f, 0x40, 0x00              // nop
   };
   memcpy(Buf, PltData, sizeof(PltData));
   uint64_t GotPlt = InX::GotPlt->getVA();
@@ -145,9 +146,9 @@ void X86_64<ELFT>::writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr,
                             uint64_t PltEntryAddr, int32_t Index,
                             unsigned RelOff) const {
   const uint8_t Inst[] = {
-      0xff, 0x25, 0, 0, 0, 0, // jmpq *got(%rip)
-      0x68, 0, 0, 0, 0,       // pushq <relocation index>
-      0xe9, 0, 0, 0, 0,       // jmpq plt[0]
+      0xff, 0x25, 0x00, 0x00, 0x00, 0x00, // jmpq *got(%rip)
+      0x68, 0x00, 0x00, 0x00, 0x00,       // pushq <relocation index>
+      0xe9, 0x00, 0x00, 0x00, 0x00        // jmpq plt[0]
   };
   memcpy(Buf, Inst, sizeof(Inst));
 
@@ -156,13 +157,13 @@ void X86_64<ELFT>::writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr,
   write32le(Buf + 12, -Index * PltEntrySize - PltHeaderSize - 16);
 }
 
-template <class ELFT> bool X86_64<ELFT>::isPicRel(RelType Type) const {
+template <class ELFT> bool X86_64<ELFT>::isPicRel(uint32_t Type) const {
   return Type != R_X86_64_PC32 && Type != R_X86_64_32 &&
          Type != R_X86_64_TPOFF32;
 }
 
 template <class ELFT>
-void X86_64<ELFT>::relaxTlsGdToLe(uint8_t *Loc, RelType Type,
+void X86_64<ELFT>::relaxTlsGdToLe(uint8_t *Loc, uint32_t Type,
                                   uint64_t Val) const {
   // Convert
   //   .byte 0x66
@@ -175,7 +176,7 @@ void X86_64<ELFT>::relaxTlsGdToLe(uint8_t *Loc, RelType Type,
   //   lea x@tpoff,%rax
   const uint8_t Inst[] = {
       0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00, // mov %fs:0x0,%rax
-      0x48, 0x8d, 0x80, 0, 0, 0, 0,                         // lea x@tpoff,%rax
+      0x48, 0x8d, 0x80, 0x00, 0x00, 0x00, 0x00              // lea x@tpoff,%rax
   };
   memcpy(Loc - 4, Inst, sizeof(Inst));
 
@@ -185,7 +186,7 @@ void X86_64<ELFT>::relaxTlsGdToLe(uint8_t *Loc, RelType Type,
 }
 
 template <class ELFT>
-void X86_64<ELFT>::relaxTlsGdToIe(uint8_t *Loc, RelType Type,
+void X86_64<ELFT>::relaxTlsGdToIe(uint8_t *Loc, uint32_t Type,
                                   uint64_t Val) const {
   // Convert
   //   .byte 0x66
@@ -198,7 +199,7 @@ void X86_64<ELFT>::relaxTlsGdToIe(uint8_t *Loc, RelType Type,
   //   addq x@tpoff,%rax
   const uint8_t Inst[] = {
       0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00, // mov %fs:0x0,%rax
-      0x48, 0x03, 0x05, 0, 0, 0, 0,                         // addq x@tpoff,%rax
+      0x48, 0x03, 0x05, 0x00, 0x00, 0x00, 0x00              // addq x@tpoff,%rax
   };
   memcpy(Loc - 4, Inst, sizeof(Inst));
 
@@ -210,7 +211,7 @@ void X86_64<ELFT>::relaxTlsGdToIe(uint8_t *Loc, RelType Type,
 // In some conditions, R_X86_64_GOTTPOFF relocation can be optimized to
 // R_X86_64_TPOFF32 so that it does not use GOT.
 template <class ELFT>
-void X86_64<ELFT>::relaxTlsIeToLe(uint8_t *Loc, RelType Type,
+void X86_64<ELFT>::relaxTlsIeToLe(uint8_t *Loc, uint32_t Type,
                                   uint64_t Val) const {
   uint8_t *Inst = Loc - 3;
   uint8_t Reg = Loc[-1] >> 3;
@@ -253,7 +254,7 @@ void X86_64<ELFT>::relaxTlsIeToLe(uint8_t *Loc, RelType Type,
 }
 
 template <class ELFT>
-void X86_64<ELFT>::relaxTlsLdToLe(uint8_t *Loc, RelType Type,
+void X86_64<ELFT>::relaxTlsLdToLe(uint8_t *Loc, uint32_t Type,
                                   uint64_t Val) const {
   // Convert
   //   leaq bar@tlsld(%rip), %rdi
@@ -274,15 +275,16 @@ void X86_64<ELFT>::relaxTlsLdToLe(uint8_t *Loc, RelType Type,
   }
 
   const uint8_t Inst[] = {
-      0x66, 0x66,                                           // .word 0x6666
-      0x66,                                                 // .byte 0x66
-      0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00, // mov %fs:0,%rax
+      0x66, 0x66,                                          // .word 0x6666
+      0x66,                                                // .byte 0x66
+      0x64, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00 // mov %fs:0,%rax
   };
   memcpy(Loc - 3, Inst, sizeof(Inst));
 }
 
 template <class ELFT>
-void X86_64<ELFT>::relocateOne(uint8_t *Loc, RelType Type, uint64_t Val) const {
+void X86_64<ELFT>::relocateOne(uint8_t *Loc, uint32_t Type,
+                               uint64_t Val) const {
   switch (Type) {
   case R_X86_64_8:
     checkUInt<8>(Loc, Val, Type);
@@ -321,12 +323,12 @@ void X86_64<ELFT>::relocateOne(uint8_t *Loc, RelType Type, uint64_t Val) const {
     write64le(Loc, Val);
     break;
   default:
-    error(getErrorLocation(Loc) + "unrecognized reloc " + Twine(Type));
+    llvm_unreachable("unexpected relocation");
   }
 }
 
 template <class ELFT>
-RelExpr X86_64<ELFT>::adjustRelaxExpr(RelType Type, const uint8_t *Data,
+RelExpr X86_64<ELFT>::adjustRelaxExpr(uint32_t Type, const uint8_t *Data,
                                       RelExpr RelExpr) const {
   if (Type != R_X86_64_GOTPCRELX && Type != R_X86_64_REX_GOTPCRELX)
     return RelExpr;
@@ -464,7 +466,7 @@ namespace {
 template <class ELFT> class Retpoline : public X86_64<ELFT> {
 public:
   Retpoline();
-  void writeGotPlt(uint8_t *Buf, const Symbol &S) const override;
+  void writeGotPlt(uint8_t *Buf, const SymbolBody &S) const override;
   void writePltHeader(uint8_t *Buf) const override;
   void writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr, uint64_t PltEntryAddr,
                 int32_t Index, unsigned RelOff) const override;
@@ -473,7 +475,7 @@ public:
 template <class ELFT> class RetpolineZNow : public X86_64<ELFT> {
 public:
   RetpolineZNow();
-  void writeGotPlt(uint8_t *Buf, const Symbol &S) const override {}
+  void writeGotPlt(uint8_t *Buf, const SymbolBody &S) const override {}
   void writePltHeader(uint8_t *Buf) const override;
   void writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr, uint64_t PltEntryAddr,
                 int32_t Index, unsigned RelOff) const override;
@@ -486,7 +488,7 @@ template <class ELFT> Retpoline<ELFT>::Retpoline() {
 }
 
 template <class ELFT>
-void Retpoline<ELFT>::writeGotPlt(uint8_t *Buf, const Symbol &S) const {
+void Retpoline<ELFT>::writeGotPlt(uint8_t *Buf, const SymbolBody &S) const {
   write32le(Buf, S.getPltVA() + 17);
 }
 
@@ -501,8 +503,11 @@ template <class ELFT> void Retpoline<ELFT>::writePltHeader(uint8_t *Buf) const {
       0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, // 19:   int3; .align 16
       0x4c, 0x89, 0x1c, 0x24,                   // 20: next: mov %r11, (%rsp)
       0xc3,                                     // 24:   ret
+      0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, // 25: int3; .align 16
+      0xcc, 0xcc, 0xcc, 0xcc,
   };
   memcpy(Buf, Insn, sizeof(Insn));
+  assert(sizeof(Insn) == TargetInfo::PltHeaderSize);
 
   uint64_t GotPlt = InX::GotPlt->getVA();
   uint64_t Plt = InX::Plt->getVA();
@@ -520,8 +525,10 @@ void Retpoline<ELFT>::writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr,
       0xe9, 0,    0,    0, 0,       // c:  jmp plt+0x12
       0x68, 0,    0,    0, 0,       // 11: pushq <relocation index>
       0xe9, 0,    0,    0, 0,       // 16: jmp plt+0
+      0xcc, 0xcc, 0xcc, 0xcc, 0xcc, // int3; .align 16
   };
   memcpy(Buf, Insn, sizeof(Insn));
+  assert(sizeof(Insn) == TargetInfo::PltEntrySize);
 
   uint64_t Off = TargetInfo::PltHeaderSize + TargetInfo::PltEntrySize * Index;
 
@@ -547,8 +554,12 @@ void RetpolineZNow<ELFT>::writePltHeader(uint8_t *Buf) const {
       0xcc, 0xcc, 0xcc, 0xcc,       // c:    int3; .align 16
       0x4c, 0x89, 0x1c, 0x24,       // 10: next: mov %r11, (%rsp)
       0xc3,                         // 14:   ret
+      0xcc,                         // 15: int3; .align 16
+      0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+      0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
   };
   memcpy(Buf, Insn, sizeof(Insn));
+  assert(sizeof(Insn) == TargetInfo::PltHeaderSize);
 }
 
 template <class ELFT>
@@ -558,8 +569,10 @@ void RetpolineZNow<ELFT>::writePlt(uint8_t *Buf, uint64_t GotPltEntryAddr,
   const uint8_t Insn[] = {
       0x4c, 0x8b, 0x1d, 0, 0, 0, 0, // mov foo@GOTPLT(%rip), %r11
       0xe9, 0,    0,    0, 0,       // jmp plt+0
+      0xcc, 0xcc, 0xcc, 0xcc,       // int3; .align 16
   };
   memcpy(Buf, Insn, sizeof(Insn));
+  assert(sizeof(Insn) == TargetInfo::PltEntrySize);
 
   write32le(Buf + 3, GotPltEntryAddr - PltEntryAddr - 7);
   write32le(Buf + 8,

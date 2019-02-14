@@ -53,7 +53,6 @@ protected:
   friend class SBBlock;
   friend class SBBreakpoint;
   friend class SBBreakpointLocation;
-  friend class SBBreakpointName;
   friend class SBCommandReturnObject;
   friend class SBCompileUnit;
   friend class SBData;

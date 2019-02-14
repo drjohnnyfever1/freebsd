@@ -23,7 +23,6 @@
 #include <stdio.h>
 
 #include "sanitizer_common.h"
-#include "sanitizer_file.h"
 #include "sanitizer_flags.h"
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_libc.h"
@@ -185,7 +184,7 @@ uptr internal_getpid() {
 
 int internal_sigaction(int signum, const void *act, void *oldact) {
   return sigaction(signum,
-                   (const struct sigaction *)act, (struct sigaction *)oldact);
+                   (struct sigaction *)act, (struct sigaction *)oldact);
 }
 
 void internal_sigfillset(__sanitizer_sigset_t *set) { sigfillset(set); }
@@ -365,10 +364,6 @@ u64 NanoTime() {
   return 0;
 }
 
-u64 MonotonicNanoTime() {
-  return 0;
-}
-
 uptr GetTlsSize() {
   return 0;
 }
@@ -415,12 +410,10 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
 }
 
 void ListOfModules::init() {
-  clearOrInit();
+  clear();
   MemoryMappingLayout memory_mapping(false);
   memory_mapping.DumpListOfModules(&modules_);
 }
-
-void ListOfModules::fallbackInit() { clear(); }
 
 static HandleSignalMode GetHandleSignalModeImpl(int signum) {
   switch (signum) {
@@ -580,7 +573,7 @@ void LogFullErrorReport(const char *buffer) {
 #endif
 }
 
-SignalContext::WriteFlag SignalContext::GetWriteFlag() const {
+SignalContext::WriteFlag SignalContext::GetWriteFlag(void *context) {
 #if defined(__x86_64__) || defined(__i386__)
   ucontext_t *ucontext = static_cast<ucontext_t*>(context);
   return ucontext->uc_mcontext->__es.__err & 2 /*T_PF_WRITE*/ ? WRITE : READ;
@@ -589,7 +582,7 @@ SignalContext::WriteFlag SignalContext::GetWriteFlag() const {
 #endif
 }
 
-static void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
+void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
   ucontext_t *ucontext = (ucontext_t*)context;
 # if defined(__aarch64__)
   *pc = ucontext->uc_mcontext->__ss.__pc;
@@ -615,8 +608,6 @@ static void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
 # error "Unknown architecture"
 # endif
 }
-
-void SignalContext::InitPcSpBp() { GetPcSpBp(context, &pc, &sp, &bp); }
 
 #if !SANITIZER_GO
 static const char kDyldInsertLibraries[] = "DYLD_INSERT_LIBRARIES";
@@ -745,9 +736,6 @@ void MaybeReexec() {
   if (!lib_is_in_env)
     return;
 
-  if (!common_flags()->strip_env)
-    return;
-
   // DYLD_INSERT_LIBRARIES is set and contains the runtime library. Let's remove
   // the dylib from the environment variable, because interceptors are installed
   // and we don't want our children to inherit the variable.
@@ -856,7 +844,7 @@ uptr GetTaskInfoMaxAddress() {
 }
 #endif
 
-uptr GetMaxUserVirtualAddress() {
+uptr GetMaxVirtualAddress() {
 #if SANITIZER_WORDSIZE == 64
 # if defined(__aarch64__) && SANITIZER_IOS && !SANITIZER_IOSSIM
   // Get the maximum VM address
@@ -869,10 +857,6 @@ uptr GetMaxUserVirtualAddress() {
 #else  // SANITIZER_WORDSIZE == 32
   return (1ULL << 32) - 1;  // 0xffffffff;
 #endif  // SANITIZER_WORDSIZE
-}
-
-uptr GetMaxVirtualAddress() {
-  return GetMaxUserVirtualAddress();
 }
 
 uptr FindAvailableMemoryRange(uptr shadow_size,
@@ -897,11 +881,6 @@ uptr FindAvailableMemoryRange(uptr shadow_size,
     mach_msg_type_number_t count = kRegionInfoSize;
     kr = mach_vm_region_recurse(mach_task_self(), &address, &vmsize, &depth,
                                 (vm_region_info_t)&vminfo, &count);
-    if (kr == KERN_INVALID_ADDRESS) {
-      // No more regions beyond "address", consider the gap at the end of VM.
-      address = GetMaxVirtualAddress() + 1;
-      vmsize = 0;
-    }
     if (free_begin != address) {
       // We found a free region [free_begin..address-1].
       uptr gap_start = RoundUpTo((uptr)free_begin + left_padding, alignment);
@@ -1012,12 +991,7 @@ void CheckNoDeepBind(const char *filename, int flag) {
 }
 
 // FIXME: implement on this platform.
-bool GetRandom(void *buffer, uptr length, bool blocking) {
-  UNIMPLEMENTED();
-}
-
-// FIXME: implement on this platform.
-u32 GetNumberOfCPUs() {
+bool GetRandom(void *buffer, uptr length) {
   UNIMPLEMENTED();
 }
 

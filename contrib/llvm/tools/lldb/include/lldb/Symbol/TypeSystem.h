@@ -351,12 +351,9 @@ public:
 
   virtual size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type) = 0;
 
-  virtual lldb::TemplateArgumentKind
-  GetTemplateArgumentKind(lldb::opaque_compiler_type_t type, size_t idx);
-  virtual CompilerType GetTypeTemplateArgument(lldb::opaque_compiler_type_t type,
-                                           size_t idx);
-  virtual llvm::Optional<CompilerType::IntegralTemplateArgument>
-  GetIntegralTemplateArgument(lldb::opaque_compiler_type_t type, size_t idx);
+  virtual CompilerType
+  GetTemplateArgument(lldb::opaque_compiler_type_t type, size_t idx,
+                      lldb::TemplateArgumentKind &kind) = 0;
 
   //----------------------------------------------------------------------
   // Dumping types

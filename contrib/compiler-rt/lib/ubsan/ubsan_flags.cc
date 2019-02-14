@@ -18,8 +18,6 @@
 #include "sanitizer_common/sanitizer_flags.h"
 #include "sanitizer_common/sanitizer_flag_parser.h"
 
-#include <stdlib.h>
-
 namespace __ubsan {
 
 const char *MaybeCallUbsanDefaultOptions() {
@@ -47,7 +45,7 @@ void InitializeFlags() {
     CommonFlags cf;
     cf.CopyFrom(*common_flags());
     cf.print_summary = false;
-    cf.external_symbolizer_path = getenv("UBSAN_SYMBOLIZER_PATH");
+    cf.external_symbolizer_path = GetEnv("UBSAN_SYMBOLIZER_PATH");
     OverrideCommonFlags(cf);
   }
 
@@ -61,7 +59,7 @@ void InitializeFlags() {
   // Override from user-specified string.
   parser.ParseString(MaybeCallUbsanDefaultOptions());
   // Override from environment variable.
-  parser.ParseString(getenv("UBSAN_OPTIONS"));
+  parser.ParseString(GetEnv("UBSAN_OPTIONS"));
   InitializeCommonFlags();
   if (Verbosity()) ReportUnrecognizedFlags();
 
