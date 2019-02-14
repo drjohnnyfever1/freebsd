@@ -62,7 +62,6 @@ public:
   void VisitCallExpr(CallExpr *CE) {
     if (Decl *D = getDeclFromCall(CE))
       addCalledDecl(D);
-    VisitChildren(CE);
   }
 
   // Adds may-call edges for the ObjC message sends.

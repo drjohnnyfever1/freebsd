@@ -1,4 +1,4 @@
-//===- Binary.cpp - A generic binary file ---------------------------------===//
+//===- Binary.cpp - A generic binary file -----------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,25 +13,19 @@
 
 #include "llvm/Object/Binary.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/BinaryFormat/Magic.h"
-#include "llvm/Object/Archive.h"
-#include "llvm/Object/Error.h"
-#include "llvm/Object/MachOUniversal.h"
-#include "llvm/Object/ObjectFile.h"
-#include "llvm/Object/WindowsResource.h"
-#include "llvm/Support/Error.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include <algorithm>
-#include <memory>
-#include <system_error>
+#include "llvm/Support/Path.h"
+
+// Include headers for createBinary.
+#include "llvm/Object/Archive.h"
+#include "llvm/Object/MachOUniversal.h"
+#include "llvm/Object/ObjectFile.h"
 
 using namespace llvm;
 using namespace object;
 
-Binary::~Binary() = default;
+Binary::~Binary() {}
 
 Binary::Binary(unsigned int Type, MemoryBufferRef Source)
     : TypeID(Type), Data(Source) {}
@@ -44,41 +38,40 @@ MemoryBufferRef Binary::getMemoryBufferRef() const { return Data; }
 
 Expected<std::unique_ptr<Binary>> object::createBinary(MemoryBufferRef Buffer,
                                                       LLVMContext *Context) {
-  file_magic Type = identify_magic(Buffer.getBuffer());
+  sys::fs::file_magic Type = sys::fs::identify_magic(Buffer.getBuffer());
 
   switch (Type) {
-  case file_magic::archive:
-    return Archive::create(Buffer);
-  case file_magic::elf:
-  case file_magic::elf_relocatable:
-  case file_magic::elf_executable:
-  case file_magic::elf_shared_object:
-  case file_magic::elf_core:
-  case file_magic::macho_object:
-  case file_magic::macho_executable:
-  case file_magic::macho_fixed_virtual_memory_shared_lib:
-  case file_magic::macho_core:
-  case file_magic::macho_preload_executable:
-  case file_magic::macho_dynamically_linked_shared_lib:
-  case file_magic::macho_dynamic_linker:
-  case file_magic::macho_bundle:
-  case file_magic::macho_dynamically_linked_shared_lib_stub:
-  case file_magic::macho_dsym_companion:
-  case file_magic::macho_kext_bundle:
-  case file_magic::coff_object:
-  case file_magic::coff_import_library:
-  case file_magic::pecoff_executable:
-  case file_magic::bitcode:
-  case file_magic::wasm_object:
-    return ObjectFile::createSymbolicFile(Buffer, Type, Context);
-  case file_magic::macho_universal_binary:
-    return MachOUniversalBinary::create(Buffer);
-  case file_magic::windows_resource:
-    return WindowsResource::createWindowsResource(Buffer);
-  case file_magic::unknown:
-  case file_magic::coff_cl_gl_object:
-    // Unrecognized object file format.
-    return errorCodeToError(object_error::invalid_file_type);
+    case sys::fs::file_magic::archive:
+      return Archive::create(Buffer);
+    case sys::fs::file_magic::elf:
+    case sys::fs::file_magic::elf_relocatable:
+    case sys::fs::file_magic::elf_executable:
+    case sys::fs::file_magic::elf_shared_object:
+    case sys::fs::file_magic::elf_core:
+    case sys::fs::file_magic::macho_object:
+    case sys::fs::file_magic::macho_executable:
+    case sys::fs::file_magic::macho_fixed_virtual_memory_shared_lib:
+    case sys::fs::file_magic::macho_core:
+    case sys::fs::file_magic::macho_preload_executable:
+    case sys::fs::file_magic::macho_dynamically_linked_shared_lib:
+    case sys::fs::file_magic::macho_dynamic_linker:
+    case sys::fs::file_magic::macho_bundle:
+    case sys::fs::file_magic::macho_dynamically_linked_shared_lib_stub:
+    case sys::fs::file_magic::macho_dsym_companion:
+    case sys::fs::file_magic::macho_kext_bundle:
+    case sys::fs::file_magic::coff_object:
+    case sys::fs::file_magic::coff_import_library:
+    case sys::fs::file_magic::pecoff_executable:
+    case sys::fs::file_magic::bitcode:
+    case sys::fs::file_magic::wasm_object:
+      return ObjectFile::createSymbolicFile(Buffer, Type, Context);
+    case sys::fs::file_magic::macho_universal_binary:
+      return MachOUniversalBinary::create(Buffer);
+    case sys::fs::file_magic::unknown:
+    case sys::fs::file_magic::coff_cl_gl_object:
+    case sys::fs::file_magic::windows_resource:
+      // Unrecognized object file format.
+      return errorCodeToError(object_error::invalid_file_type);
   }
   llvm_unreachable("Unexpected Binary File Type");
 }

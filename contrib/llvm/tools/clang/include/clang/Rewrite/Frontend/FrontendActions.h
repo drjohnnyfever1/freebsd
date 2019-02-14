@@ -11,7 +11,6 @@
 #define LLVM_CLANG_REWRITE_FRONTEND_FRONTENDACTIONS_H
 
 #include "clang/Frontend/FrontendAction.h"
-#include "llvm/Support/raw_ostream.h"
 
 namespace clang {
 class FixItRewriter;
@@ -35,7 +34,8 @@ protected:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  StringRef InFile) override;
 
-  bool BeginSourceFileAction(CompilerInstance &CI) override;
+  bool BeginSourceFileAction(CompilerInstance &CI,
+                             StringRef Filename) override;
 
   void EndSourceFileAction() override;
 
@@ -74,10 +74,7 @@ protected:
 };
 
 class RewriteIncludesAction : public PreprocessorFrontendAction {
-  std::shared_ptr<raw_ostream> OutputStream;
-  class RewriteImportsListener;
 protected:
-  bool BeginSourceFileAction(CompilerInstance &CI) override;
   void ExecuteAction() override;
 };
 

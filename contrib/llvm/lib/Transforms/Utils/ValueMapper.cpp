@@ -121,8 +121,6 @@ public:
 
   void addFlags(RemapFlags Flags);
 
-  void remapGlobalObjectMetadata(GlobalObject &GO);
-
   Value *mapValue(const Value *V);
   void remapInstruction(Instruction *I);
   void remapFunction(Function &F);
@@ -683,7 +681,6 @@ void MDNodeMapper::mapNodesInPOT(UniquedGraph &G) {
     remapOperands(*ClonedN, [this, &D, &G](Metadata *Old) {
       if (Optional<Metadata *> MappedOp = getMappedOp(Old))
         return *MappedOp;
-      (void)D;
       assert(G.Info[Old].ID > D.ID && "Expected a forward reference");
       return &G.getFwdReference(*cast<MDNode>(Old));
     });
@@ -804,7 +801,6 @@ void Mapper::flush() {
     switch (E.Kind) {
     case WorklistEntry::MapGlobalInit:
       E.Data.GVInit.GV->setInitializer(mapConstant(E.Data.GVInit.Init));
-      remapGlobalObjectMetadata(*E.Data.GVInit.GV);
       break;
     case WorklistEntry::MapAppendingVar: {
       unsigned PrefixSize = AppendingInits.size() - E.AppendingGVNumNewMembers;
@@ -895,14 +891,6 @@ void Mapper::remapInstruction(Instruction *I) {
   I->mutateType(TypeMapper->remapType(I->getType()));
 }
 
-void Mapper::remapGlobalObjectMetadata(GlobalObject &GO) {
-  SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
-  GO.getAllMetadata(MDs);
-  GO.clearMetadata();
-  for (const auto &I : MDs)
-    GO.addMetadata(I.first, *cast<MDNode>(mapMetadata(I.second)));
-}
-
 void Mapper::remapFunction(Function &F) {
   // Remap the operands.
   for (Use &Op : F.operands())
@@ -910,7 +898,11 @@ void Mapper::remapFunction(Function &F) {
       Op = mapValue(Op);
 
   // Remap the metadata attachments.
-  remapGlobalObjectMetadata(F);
+  SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
+  F.getAllMetadata(MDs);
+  F.clearMetadata();
+  for (const auto &I : MDs)
+    F.addMetadata(I.first, *cast<MDNode>(mapMetadata(I.second)));
 
   // Remap the argument types.
   if (TypeMapper)
@@ -949,10 +941,11 @@ void Mapper::mapAppendingVariable(GlobalVariable &GV, Constant *InitPrefix,
     Constant *NewV;
     if (IsOldCtorDtor) {
       auto *S = cast<ConstantStruct>(V);
-      auto *E1 = cast<Constant>(mapValue(S->getOperand(0)));
-      auto *E2 = cast<Constant>(mapValue(S->getOperand(1)));
-      Constant *Null = Constant::getNullValue(VoidPtrTy);
-      NewV = ConstantStruct::get(cast<StructType>(EltTy), E1, E2, Null);
+      auto *E1 = mapValue(S->getOperand(0));
+      auto *E2 = mapValue(S->getOperand(1));
+      Value *Null = Constant::getNullValue(VoidPtrTy);
+      NewV =
+          ConstantStruct::get(cast<StructType>(EltTy), E1, E2, Null, nullptr);
     } else {
       NewV = cast_or_null<Constant>(mapValue(V));
     }

@@ -187,18 +187,20 @@ AddCodeToMergeInOperand(Record *R, BitsInit *BI, const std::string &VarName,
 std::string CodeEmitterGen::getInstructionCase(Record *R,
                                                CodeGenTarget &Target) {
   std::string Case;
+  
   BitsInit *BI = R->getValueAsBitsInit("Inst");
+  const std::vector<RecordVal> &Vals = R->getValues();
   unsigned NumberedOp = 0;
-  std::set<unsigned> NamedOpIndices;
 
+  std::set<unsigned> NamedOpIndices;
   // Collect the set of operand indices that might correspond to named
   // operand, and skip these when assigning operands based on position.
   if (Target.getInstructionSet()->
        getValueAsBit("noNamedPositionallyEncodedOperands")) {
     CodeGenInstruction &CGI = Target.getInstruction(R);
-    for (const RecordVal &RV : R->getValues()) {
+    for (unsigned i = 0, e = Vals.size(); i != e; ++i) {
       unsigned OpIdx;
-      if (!CGI.Operands.hasOperandNamed(RV.getName(), OpIdx))
+      if (!CGI.Operands.hasOperandNamed(Vals[i].getName(), OpIdx))
         continue;
 
       NamedOpIndices.insert(OpIdx);
@@ -207,21 +209,19 @@ std::string CodeEmitterGen::getInstructionCase(Record *R,
 
   // Loop over all of the fields in the instruction, determining which are the
   // operands to the instruction.
-  for (const RecordVal &RV : R->getValues()) { 
+  for (unsigned i = 0, e = Vals.size(); i != e; ++i) {
     // Ignore fixed fields in the record, we're looking for values like:
     //    bits<5> RST = { ?, ?, ?, ?, ? };
-    if (RV.getPrefix() || RV.getValue()->isComplete())
+    if (Vals[i].getPrefix() || Vals[i].getValue()->isComplete())
       continue;
     
-    AddCodeToMergeInOperand(R, BI, RV.getName(), NumberedOp,
+    AddCodeToMergeInOperand(R, BI, Vals[i].getName(), NumberedOp,
                             NamedOpIndices, Case, Target);
   }
-
-  StringRef PostEmitter = R->getValueAsString("PostEncoderMethod");
+  
+  std::string PostEmitter = R->getValueAsString("PostEncoderMethod");
   if (!PostEmitter.empty()) {
-    Case += "      Value = ";
-    Case += PostEmitter;
-    Case += "(MI, Value";
+    Case += "      Value = " + PostEmitter + "(MI, Value";
     Case += ", STI";
     Case += ");\n";
   }
@@ -278,11 +278,11 @@ void CodeEmitterGen::run(raw_ostream &o) {
     if (R->getValueAsString("Namespace") == "TargetOpcode" ||
         R->getValueAsBit("isPseudo"))
       continue;
-    std::string InstName =
-        (R->getValueAsString("Namespace") + "::" + R->getName()).str();
+    const std::string &InstName = R->getValueAsString("Namespace") + "::"
+      + R->getName().str();
     std::string Case = getInstructionCase(R, Target);
 
-    CaseMap[Case].push_back(std::move(InstName));
+    CaseMap[Case].push_back(InstName);
   }
 
   // Emit initial function code
@@ -336,7 +336,7 @@ void CodeEmitterGen::run(raw_ostream &o) {
   o << "#endif // NDEBUG\n";
 
   // Emit the available features compute function.
-  SubtargetFeatureInfo::emitComputeAssemblerAvailableFeatures(
+  SubtargetFeatureInfo::emitComputeAvailableFeatures(
       Target.getName(), "MCCodeEmitter", "computeAvailableFeatures",
       SubtargetFeatures, o);
 

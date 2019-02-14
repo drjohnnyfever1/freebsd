@@ -438,7 +438,15 @@ static void InitializeShadowMemory() {
   if (shadow_start == kDefaultShadowSentinel) {
     __asan_shadow_memory_dynamic_address = 0;
     CHECK_EQ(0, kLowShadowBeg);
-    shadow_start = FindDynamicShadowStart();
+
+    uptr granularity = GetMmapGranularity();
+    uptr alignment = 8 * granularity;
+    uptr left_padding = granularity;
+    uptr space_size = kHighShadowEnd + left_padding;
+
+    shadow_start = FindAvailableMemoryRange(space_size, alignment, granularity);
+    CHECK_NE((uptr)0, shadow_start);
+    CHECK(IsAligned(shadow_start, alignment));
   }
   // Update the shadow memory address (potentially) used by instrumentation.
   __asan_shadow_memory_dynamic_address = shadow_start;

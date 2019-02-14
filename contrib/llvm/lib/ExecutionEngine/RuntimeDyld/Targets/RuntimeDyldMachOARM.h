@@ -288,6 +288,7 @@ private:
                       HalfDiffKindBits);
 
     addRelocationForSection(R, SectionAID);
+    addRelocationForSection(R, SectionBID);
 
     return ++RelI;
   }

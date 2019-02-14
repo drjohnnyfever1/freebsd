@@ -15,22 +15,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/LexicalScopes.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/IR/DebugInfoMetadata.h"
-#include "llvm/IR/Metadata.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/Compiler.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
-#include <cassert>
-#include <string>
-#include <tuple>
-#include <utility>
-
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FormattedStream.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "lexicalscopes"
@@ -47,10 +38,6 @@ void LexicalScopes::reset() {
 
 /// initialize - Scan machine function and constuct lexical scope nest.
 void LexicalScopes::initialize(const MachineFunction &Fn) {
-  // Don't attempt any lexical scope creation for a NoDebug compile unit.
-  if (Fn.getFunction()->getSubprogram()->getUnit()->getEmissionKind() ==
-      DICompileUnit::NoDebug)
-    return;
   reset();
   MF = &Fn;
   SmallVector<InsnRange, 4> MIRanges;
@@ -67,6 +54,7 @@ void LexicalScopes::initialize(const MachineFunction &Fn) {
 void LexicalScopes::extractLexicalScopes(
     SmallVectorImpl<InsnRange> &MIRanges,
     DenseMap<const MachineInstr *, LexicalScope *> &MI2ScopeMap) {
+
   // Scan each instruction and create scopes. First build working set of scopes.
   for (const auto &MBB : *MF) {
     const MachineInstr *RangeBeginMI = nullptr;
@@ -86,9 +74,8 @@ void LexicalScopes::extractLexicalScopes(
         continue;
       }
 
-      // Ignore DBG_VALUE and similar instruction that do not contribute to any
-      // instruction in the output.
-      if (MInsn.isMetaInstruction())
+      // Ignore DBG_VALUE. It does not contribute to any instruction in output.
+      if (MInsn.isDebugValue())
         continue;
 
       if (RangeBeginMI) {
@@ -140,10 +127,6 @@ LexicalScope *LexicalScopes::findLexicalScope(const DILocation *DL) {
 LexicalScope *LexicalScopes::getOrCreateLexicalScope(const DILocalScope *Scope,
                                                      const DILocation *IA) {
   if (IA) {
-    // Skip scopes inlined from a NoDebug compile unit.
-    if (Scope->getSubprogram()->getUnit()->getEmissionKind() ==
-        DICompileUnit::NoDebug)
-      return getOrCreateLexicalScope(IA);
     // Create an abstract scope for inlined function.
     getOrCreateAbstractScope(Scope);
     // Create an inlined scope for inlined function.
@@ -198,9 +181,10 @@ LexicalScopes::getOrCreateInlinedScope(const DILocalScope *Scope,
   else
     Parent = getOrCreateLexicalScope(InlinedAt);
 
-  I = InlinedLexicalScopeMap
-          .emplace(std::piecewise_construct, std::forward_as_tuple(P),
-                   std::forward_as_tuple(Parent, Scope, InlinedAt, false))
+  I = InlinedLexicalScopeMap.emplace(std::piecewise_construct,
+                                     std::forward_as_tuple(P),
+                                     std::forward_as_tuple(Parent, Scope,
+                                                           InlinedAt, false))
           .first;
   return &I->second;
 }
@@ -257,6 +241,7 @@ void LexicalScopes::constructScopeNest(LexicalScope *Scope) {
 void LexicalScopes::assignInstructionRanges(
     SmallVectorImpl<InsnRange> &MIRanges,
     DenseMap<const MachineInstr *, LexicalScope *> &MI2ScopeMap) {
+
   LexicalScope *PrevLexicalScope = nullptr;
   for (const auto &R : MIRanges) {
     LexicalScope *S = MI2ScopeMap.lookup(R.first);
@@ -314,8 +299,9 @@ bool LexicalScopes::dominates(const DILocation *DL, MachineBasicBlock *MBB) {
   return Result;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-LLVM_DUMP_METHOD void LexicalScope::dump(unsigned Indent) const {
+/// dump - Print data structures.
+void LexicalScope::dump(unsigned Indent) const {
+#ifndef NDEBUG
   raw_ostream &err = dbgs();
   err.indent(Indent);
   err << "DFSIn: " << DFSIn << " DFSOut: " << DFSOut << "\n";
@@ -330,5 +316,5 @@ LLVM_DUMP_METHOD void LexicalScope::dump(unsigned Indent) const {
   for (unsigned i = 0, e = Children.size(); i != e; ++i)
     if (Children[i] != this)
       Children[i]->dump(Indent + 2);
-}
 #endif
+}

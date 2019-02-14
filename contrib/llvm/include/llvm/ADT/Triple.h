@@ -59,7 +59,6 @@ public:
     mips64,         // MIPS64: mips64
     mips64el,       // MIPS64EL: mips64el
     msp430,         // MSP430: msp430
-    nios2,          // NIOSII: nios2
     ppc,            // PPC: powerpc
     ppc64,          // PPC64: powerpc64, ppu
     ppc64le,        // PPC64LE: powerpc64le
@@ -111,7 +110,6 @@ public:
     ARMSubArch_v7m,
     ARMSubArch_v7s,
     ARMSubArch_v7k,
-    ARMSubArch_v7ve,
     ARMSubArch_v6,
     ARMSubArch_v6m,
     ARMSubArch_v6k,
@@ -141,13 +139,11 @@ public:
     Myriad,
     AMD,
     Mesa,
-    SUSE,
-    LastVendorType = SUSE
+    LastVendorType = Mesa
   };
   enum OSType {
     UnknownOS,
 
-    Ananas,
     CloudABI,
     Darwin,
     DragonFly,
@@ -210,7 +206,6 @@ public:
     COFF,
     ELF,
     MachO,
-    Wasm,
   };
 
 private:
@@ -240,9 +235,7 @@ public:
 
   /// Default constructor is the same as an empty string and leaves all
   /// triple fields unknown.
-  Triple()
-      : Data(), Arch(), SubArch(), Vendor(), OS(), Environment(),
-        ObjectFormat() {}
+  Triple() : Data(), Arch(), Vendor(), OS(), Environment(), ObjectFormat() {}
 
   explicit Triple(const Twine &Str);
   Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr);
@@ -254,10 +247,6 @@ public:
            Vendor == Other.Vendor && OS == Other.OS &&
            Environment == Other.Environment &&
            ObjectFormat == Other.ObjectFormat;
-  }
-
-  bool operator!=(const Triple &Other) const {
-    return !(*this == Other);
   }
 
   /// @}
@@ -569,8 +558,7 @@ public:
 
   /// Tests whether the OS uses glibc.
   bool isOSGlibc() const {
-    return (getOS() == Triple::Linux || getOS() == Triple::KFreeBSD) &&
-           !isAndroid();
+    return getOS() == Triple::Linux || getOS() == Triple::KFreeBSD;
   }
 
   /// Tests whether the OS uses the ELF binary format.
@@ -588,11 +576,6 @@ public:
     return getObjectFormat() == Triple::MachO;
   }
 
-  /// Tests whether the OS uses the Wasm binary format.
-  bool isOSBinFormatWasm() const {
-    return getObjectFormat() == Triple::Wasm;
-  }
-
   /// Tests whether the target is the PS4 CPU
   bool isPS4CPU() const {
     return getArch() == Triple::x86_64 &&
@@ -608,19 +591,6 @@ public:
 
   /// Tests whether the target is Android
   bool isAndroid() const { return getEnvironment() == Triple::Android; }
-
-  bool isAndroidVersionLT(unsigned Major) const {
-    assert(isAndroid() && "Not an Android triple!");
-
-    unsigned Env[3];
-    getEnvironmentVersion(Env[0], Env[1], Env[2]);
-
-    // 64-bit targets did not exist before API level 21 (Lollipop).
-    if (isArch64Bit() && Env[0] < 21)
-      Env[0] = 21;
-
-    return Env[0] < Major;
-  }
 
   /// Tests whether the environment is musl-libc
   bool isMusl() const {
@@ -729,12 +699,6 @@ public:
   ///
   /// \returns true if the triple is little endian, false otherwise.
   bool isLittleEndian() const;
-
-  /// Test whether target triples are compatible.
-  bool isCompatibleWith(const Triple &Other) const;
-
-  /// Merge target triples.
-  std::string merge(const Triple &Other) const;
 
   /// @}
   /// @name Static helpers for IDs.

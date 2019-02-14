@@ -1,4 +1,4 @@
-//===- Thumb2InstrInfo.cpp - Thumb-2 Instruction Information --------------===//
+//===-- Thumb2InstrInfo.cpp - Thumb-2 Instruction Information -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,26 +11,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Thumb2InstrInfo.h"
+#include "ARMConstantPoolValue.h"
 #include "ARMMachineFunctionInfo.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
-#include "Thumb2InstrInfo.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/MC/MCInstrDesc.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include <cassert>
 
 using namespace llvm;
 
@@ -40,10 +30,10 @@ OldT2IfCvt("old-thumb2-ifcvt", cl::Hidden,
            cl::init(false));
 
 Thumb2InstrInfo::Thumb2InstrInfo(const ARMSubtarget &STI)
-    : ARMBaseInstrInfo(STI) {}
+    : ARMBaseInstrInfo(STI), RI() {}
 
-/// Return the noop instruction to use for a noop.
-void Thumb2InstrInfo::getNoop(MCInst &NopInst) const {
+/// getNoopForMachoTarget - Return the noop instruction to use for a noop.
+void Thumb2InstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
   NopInst.setOpcode(ARM::tHINT);
   NopInst.addOperand(MCOperand::createImm(0));
   NopInst.addOperand(MCOperand::createImm(ARMCC::AL));
@@ -127,9 +117,8 @@ void Thumb2InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   if (!ARM::GPRRegClass.contains(DestReg, SrcReg))
     return ARMBaseInstrInfo::copyPhysReg(MBB, I, DL, DestReg, SrcReg, KillSrc);
 
-  BuildMI(MBB, I, DL, get(ARM::tMOVr), DestReg)
-      .addReg(SrcReg, getKillRegState(KillSrc))
-      .add(predOps(ARMCC::AL));
+  AddDefaultPred(BuildMI(MBB, I, DL, get(ARM::tMOVr), DestReg)
+    .addReg(SrcReg, getKillRegState(KillSrc)));
 }
 
 void Thumb2InstrInfo::
@@ -149,12 +138,9 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   if (RC == &ARM::GPRRegClass   || RC == &ARM::tGPRRegClass ||
       RC == &ARM::tcGPRRegClass || RC == &ARM::rGPRRegClass ||
       RC == &ARM::GPRnopcRegClass) {
-    BuildMI(MBB, I, DL, get(ARM::t2STRi12))
-        .addReg(SrcReg, getKillRegState(isKill))
-        .addFrameIndex(FI)
-        .addImm(0)
-        .addMemOperand(MMO)
-        .add(predOps(ARMCC::AL));
+    AddDefaultPred(BuildMI(MBB, I, DL, get(ARM::t2STRi12))
+                   .addReg(SrcReg, getKillRegState(isKill))
+                   .addFrameIndex(FI).addImm(0).addMemOperand(MMO));
     return;
   }
 
@@ -170,7 +156,8 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(ARM::t2STRDi8));
     AddDReg(MIB, SrcReg, ARM::gsub_0, getKillRegState(isKill), TRI);
     AddDReg(MIB, SrcReg, ARM::gsub_1, 0, TRI);
-    MIB.addFrameIndex(FI).addImm(0).addMemOperand(MMO).add(predOps(ARMCC::AL));
+    MIB.addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+    AddDefaultPred(MIB);
     return;
   }
 
@@ -193,11 +180,8 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   if (RC == &ARM::GPRRegClass   || RC == &ARM::tGPRRegClass ||
       RC == &ARM::tcGPRRegClass || RC == &ARM::rGPRRegClass ||
       RC == &ARM::GPRnopcRegClass) {
-    BuildMI(MBB, I, DL, get(ARM::t2LDRi12), DestReg)
-        .addFrameIndex(FI)
-        .addImm(0)
-        .addMemOperand(MMO)
-        .add(predOps(ARMCC::AL));
+    AddDefaultPred(BuildMI(MBB, I, DL, get(ARM::t2LDRi12), DestReg)
+                   .addFrameIndex(FI).addImm(0).addMemOperand(MMO));
     return;
   }
 
@@ -214,7 +198,8 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(ARM::t2LDRDi8));
     AddDReg(MIB, DestReg, ARM::gsub_0, RegState::DefineNoRead, TRI);
     AddDReg(MIB, DestReg, ARM::gsub_1, RegState::DefineNoRead, TRI);
-    MIB.addFrameIndex(FI).addImm(0).addMemOperand(MMO).add(predOps(ARMCC::AL));
+    MIB.addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+    AddDefaultPred(MIB);
 
     if (TargetRegisterInfo::isPhysicalRegister(DestReg))
       MIB.addReg(DestReg, RegState::ImplicitDefine);
@@ -274,11 +259,10 @@ void llvm::emitT2RegPlusImmediate(MachineBasicBlock &MBB,
     if (Fits) {
       if (isSub) {
         BuildMI(MBB, MBBI, dl, TII.get(ARM::t2SUBrr), DestReg)
-            .addReg(BaseReg)
-            .addReg(DestReg, RegState::Kill)
-            .add(predOps(Pred, PredReg))
-            .add(condCodeOp())
-            .setMIFlags(MIFlags);
+          .addReg(BaseReg)
+          .addReg(DestReg, RegState::Kill)
+          .addImm((unsigned)Pred).addReg(PredReg).addReg(0)
+          .setMIFlags(MIFlags);
       } else {
         // Here we know that DestReg is not SP but we do not
         // know anything about BaseReg. t2ADDrr is an invalid
@@ -286,11 +270,10 @@ void llvm::emitT2RegPlusImmediate(MachineBasicBlock &MBB,
         // is fine if SP is the first argument. To be sure we
         // do not generate invalid encoding, put BaseReg first.
         BuildMI(MBB, MBBI, dl, TII.get(ARM::t2ADDrr), DestReg)
-            .addReg(BaseReg)
-            .addReg(DestReg, RegState::Kill)
-            .add(predOps(Pred, PredReg))
-            .add(condCodeOp())
-            .setMIFlags(MIFlags);
+          .addReg(BaseReg)
+          .addReg(DestReg, RegState::Kill)
+          .addImm((unsigned)Pred).addReg(PredReg).addReg(0)
+          .setMIFlags(MIFlags);
       }
       return;
     }
@@ -301,10 +284,8 @@ void llvm::emitT2RegPlusImmediate(MachineBasicBlock &MBB,
     unsigned Opc = 0;
     if (DestReg == ARM::SP && BaseReg != ARM::SP) {
       // mov sp, rn. Note t2MOVr cannot be used.
-      BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr), DestReg)
-          .addReg(BaseReg)
-          .setMIFlags(MIFlags)
-          .add(predOps(ARMCC::AL));
+      AddDefaultPred(BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr),DestReg)
+        .addReg(BaseReg).setMIFlags(MIFlags));
       BaseReg = ARM::SP;
       continue;
     }
@@ -315,11 +296,8 @@ void llvm::emitT2RegPlusImmediate(MachineBasicBlock &MBB,
       if (DestReg == ARM::SP && (ThisVal < ((1 << 7)-1) * 4)) {
         assert((ThisVal & 3) == 0 && "Stack update is not multiple of 4?");
         Opc = isSub ? ARM::tSUBspi : ARM::tADDspi;
-        BuildMI(MBB, MBBI, dl, TII.get(Opc), DestReg)
-            .addReg(BaseReg)
-            .addImm(ThisVal / 4)
-            .setMIFlags(MIFlags)
-            .add(predOps(ARMCC::AL));
+        AddDefaultPred(BuildMI(MBB, MBBI, dl, TII.get(Opc), DestReg)
+          .addReg(BaseReg).addImm(ThisVal/4).setMIFlags(MIFlags));
         NumBytes = 0;
         continue;
       }
@@ -356,13 +334,12 @@ void llvm::emitT2RegPlusImmediate(MachineBasicBlock &MBB,
     }
 
     // Build the new ADD / SUB.
-    MachineInstrBuilder MIB = BuildMI(MBB, MBBI, dl, TII.get(Opc), DestReg)
-                                  .addReg(BaseReg, RegState::Kill)
-                                  .addImm(ThisVal)
-                                  .add(predOps(ARMCC::AL))
-                                  .setMIFlags(MIFlags);
+    MachineInstrBuilder MIB =
+      AddDefaultPred(BuildMI(MBB, MBBI, dl, TII.get(Opc), DestReg)
+                     .addReg(BaseReg, RegState::Kill)
+                     .addImm(ThisVal)).setMIFlags(MIFlags);
     if (HasCCOut)
-      MIB.add(condCodeOp());
+      AddDefaultCC(MIB);
 
     BaseReg = DestReg;
   }
@@ -497,7 +474,7 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
       do MI.RemoveOperand(FrameRegIdx+1);
       while (MI.getNumOperands() > FrameRegIdx+1);
       MachineInstrBuilder MIB(*MI.getParent()->getParent(), &MI);
-      MIB.add(predOps(ARMCC::AL));
+      AddDefaultPred(MIB);
       return true;
     }
 
@@ -549,7 +526,9 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
     // Add cc_out operand if the original instruction did not have one.
     if (!HasCCOut)
       MI.addOperand(MachineOperand::CreateReg(0, false));
+
   } else {
+
     // AddrMode4 and AddrMode6 cannot handle any offset.
     if (AddrMode == ARMII::AddrMode4 || AddrMode == ARMII::AddrMode6)
       return false;

@@ -18,9 +18,8 @@
 #include "llvm/DebugInfo/Symbolize/Symbolize.h"
 
 static llvm::symbolize::LLVMSymbolizer *getDefaultSymbolizer() {
-  static llvm::symbolize::LLVMSymbolizer *DefaultSymbolizer =
-      new llvm::symbolize::LLVMSymbolizer();
-  return DefaultSymbolizer;
+  static llvm::symbolize::LLVMSymbolizer DefaultSymbolizer;
+  return &DefaultSymbolizer;
 }
 
 namespace __sanitizer {
@@ -42,8 +41,8 @@ bool __sanitizer_symbolize_code(const char *ModuleName, uint64_t ModuleOffset,
         getDefaultSymbolizer()->symbolizeInlinedCode(ModuleName, ModuleOffset);
     Printer << (ResOrErr ? ResOrErr.get() : llvm::DIInliningInfo());
   }
-  return __sanitizer::internal_snprintf(Buffer, MaxLength, "%s",
-                                        Result.c_str()) < MaxLength;
+  __sanitizer::internal_snprintf(Buffer, MaxLength, "%s", Result.c_str());
+  return true;
 }
 
 bool __sanitizer_symbolize_data(const char *ModuleName, uint64_t ModuleOffset,
@@ -56,8 +55,8 @@ bool __sanitizer_symbolize_data(const char *ModuleName, uint64_t ModuleOffset,
         getDefaultSymbolizer()->symbolizeData(ModuleName, ModuleOffset);
     Printer << (ResOrErr ? ResOrErr.get() : llvm::DIGlobal());
   }
-  return __sanitizer::internal_snprintf(Buffer, MaxLength, "%s",
-                                        Result.c_str()) < MaxLength;
+  __sanitizer::internal_snprintf(Buffer, MaxLength, "%s", Result.c_str());
+  return true;
 }
 
 void __sanitizer_symbolize_flush() { getDefaultSymbolizer()->flush(); }
@@ -66,10 +65,8 @@ int __sanitizer_symbolize_demangle(const char *Name, char *Buffer,
                                    int MaxLength) {
   std::string Result =
       llvm::symbolize::LLVMSymbolizer::DemangleName(Name, nullptr);
-  return __sanitizer::internal_snprintf(Buffer, MaxLength, "%s",
-                                        Result.c_str()) < MaxLength
-             ? static_cast<int>(Result.size() + 1)
-             : 0;
+  __sanitizer::internal_snprintf(Buffer, MaxLength, "%s", Result.c_str());
+  return static_cast<int>(Result.size() + 1);
 }
 
 }  // extern "C"

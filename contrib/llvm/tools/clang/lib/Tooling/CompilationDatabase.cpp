@@ -27,7 +27,6 @@
 #include "llvm/Option/Arg.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/raw_ostream.h"
 #include <sstream>
 #include <system_error>
 using namespace clang;
@@ -151,21 +150,23 @@ private:
 // options.
 class UnusedInputDiagConsumer : public DiagnosticConsumer {
 public:
-  UnusedInputDiagConsumer(DiagnosticConsumer &Other) : Other(Other) {}
+  UnusedInputDiagConsumer() : Other(nullptr) {}
+
+  // Useful for debugging, chain diagnostics to another consumer after
+  // recording for our own purposes.
+  UnusedInputDiagConsumer(DiagnosticConsumer *Other) : Other(Other) {}
 
   void HandleDiagnostic(DiagnosticsEngine::Level DiagLevel,
                         const Diagnostic &Info) override {
     if (Info.getID() == clang::diag::warn_drv_input_file_unused) {
       // Arg 1 for this diagnostic is the option that didn't get used.
       UnusedInputs.push_back(Info.getArgStdStr(0));
-    } else if (DiagLevel >= DiagnosticsEngine::Error) {
-      // If driver failed to create compilation object, show the diagnostics
-      // to user.
-      Other.HandleDiagnostic(DiagLevel, Info);
     }
+    if (Other)
+      Other->HandleDiagnostic(DiagLevel, Info);
   }
 
-  DiagnosticConsumer &Other;
+  DiagnosticConsumer *Other;
   SmallVector<std::string, 2> UnusedInputs;
 };
 
@@ -204,12 +205,9 @@ private:
 ///          \li false if \c Args cannot be used for compilation jobs (e.g.
 ///          contains an option like -E or -version).
 static bool stripPositionalArgs(std::vector<const char *> Args,
-                                std::vector<std::string> &Result,
-                                std::string &ErrorMsg) {
+                                std::vector<std::string> &Result) {
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
-  llvm::raw_string_ostream Output(ErrorMsg);
-  TextDiagnosticPrinter DiagnosticPrinter(Output, &*DiagOpts);
-  UnusedInputDiagConsumer DiagClient(DiagnosticPrinter);
+  UnusedInputDiagConsumer DiagClient;
   DiagnosticsEngine Diagnostics(
       IntrusiveRefCntPtr<clang::DiagnosticIDs>(new DiagnosticIDs()),
       &*DiagOpts, &DiagClient, false);
@@ -247,24 +245,21 @@ static bool stripPositionalArgs(std::vector<const char *> Args,
 
   const std::unique_ptr<driver::Compilation> Compilation(
       NewDriver->BuildCompilation(Args));
-  if (!Compilation)
-    return false;
 
   const driver::JobList &Jobs = Compilation->getJobs();
 
   CompileJobAnalyzer CompileAnalyzer;
 
   for (const auto &Cmd : Jobs) {
-    // Collect only for Assemble and Compile jobs. If we do all jobs we get
-    // duplicates since Link jobs point to Assemble jobs as inputs.
-    if (Cmd.getSource().getKind() == driver::Action::AssembleJobClass ||
-        Cmd.getSource().getKind() == driver::Action::CompileJobClass) {
+    // Collect only for Assemble jobs. If we do all jobs we get duplicates
+    // since Link jobs point to Assemble jobs as inputs.
+    if (Cmd.getSource().getKind() == driver::Action::AssembleJobClass)
       CompileAnalyzer.run(&Cmd.getSource());
-    }
   }
 
   if (CompileAnalyzer.Inputs.empty()) {
-    ErrorMsg = "warning: no compile jobs found\n";
+    // No compile jobs found.
+    // FIXME: Emit a warning of some kind?
     return false;
   }
 
@@ -285,14 +280,8 @@ static bool stripPositionalArgs(std::vector<const char *> Args,
   return true;
 }
 
-std::unique_ptr<FixedCompilationDatabase>
-FixedCompilationDatabase::loadFromCommandLine(int &Argc,
-                                              const char *const *Argv,
-                                              std::string &ErrorMsg,
-                                              Twine Directory) {
-  ErrorMsg.clear();
-  if (Argc == 0)
-    return nullptr;
+FixedCompilationDatabase *FixedCompilationDatabase::loadFromCommandLine(
+    int &Argc, const char *const *Argv, Twine Directory) {
   const char *const *DoubleDash = std::find(Argv, Argv + Argc, StringRef("--"));
   if (DoubleDash == Argv + Argc)
     return nullptr;
@@ -300,10 +289,9 @@ FixedCompilationDatabase::loadFromCommandLine(int &Argc,
   Argc = DoubleDash - Argv;
 
   std::vector<std::string> StrippedArgs;
-  if (!stripPositionalArgs(CommandLine, StrippedArgs, ErrorMsg))
+  if (!stripPositionalArgs(CommandLine, StrippedArgs))
     return nullptr;
-  return std::unique_ptr<FixedCompilationDatabase>(
-      new FixedCompilationDatabase(Directory, StrippedArgs));
+  return new FixedCompilationDatabase(Directory, StrippedArgs);
 }
 
 FixedCompilationDatabase::

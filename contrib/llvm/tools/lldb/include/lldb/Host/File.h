@@ -10,14 +10,17 @@
 #ifndef liblldb_File_h_
 #define liblldb_File_h_
 
-#include "lldb/Host/PosixApi.h"
-#include "lldb/Utility/IOObject.h"
-#include "lldb/Utility/Status.h"
-#include "lldb/lldb-private.h"
-
+// C Includes
+// C++ Includes
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/types.h>
+
+// Other libraries and framework includes
+// Project includes
+#include "lldb/Host/IOObject.h"
+#include "lldb/Host/PosixApi.h"
+#include "lldb/lldb-private.h"
 
 namespace lldb_private {
 
@@ -164,7 +167,7 @@ public:
   /// @return
   ///     A reference to the file specification object.
   //------------------------------------------------------------------
-  Status GetFileSpec(FileSpec &file_spec) const;
+  Error GetFileSpec(FileSpec &file_spec) const;
 
   //------------------------------------------------------------------
   /// Open a file for read/writing with the specified options.
@@ -181,10 +184,10 @@ public:
   /// @param[in] permissions
   ///     Options to use when opening (see File::Permissions)
   //------------------------------------------------------------------
-  Status Open(const char *path, uint32_t options,
-              uint32_t permissions = lldb::eFilePermissionsFileDefault);
+  Error Open(const char *path, uint32_t options,
+             uint32_t permissions = lldb::eFilePermissionsFileDefault);
 
-  Status Close() override;
+  Error Close() override;
 
   void Clear();
 
@@ -216,7 +219,7 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Read(void *buf, size_t &num_bytes) override;
+  Error Read(void *buf, size_t &num_bytes) override;
 
   //------------------------------------------------------------------
   /// Write bytes to a file at the current file position.
@@ -237,7 +240,7 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Write(const void *buf, size_t &num_bytes) override;
+  Error Write(const void *buf, size_t &num_bytes) override;
 
   //------------------------------------------------------------------
   /// Seek to an offset relative to the beginning of the file.
@@ -253,13 +256,13 @@ public:
   ///     beginning of the file.
   ///
   /// @param[in] error_ptr
-  ///     A pointer to a lldb_private::Status object that will be
+  ///     A pointer to a lldb_private::Error object that will be
   ///     filled in if non-nullptr.
   ///
   /// @return
   ///     The resulting seek offset, or -1 on error.
   //------------------------------------------------------------------
-  off_t SeekFromStart(off_t offset, Status *error_ptr = nullptr);
+  off_t SeekFromStart(off_t offset, Error *error_ptr = nullptr);
 
   //------------------------------------------------------------------
   /// Seek to an offset relative to the current file position.
@@ -275,13 +278,13 @@ public:
   ///     current file position.
   ///
   /// @param[in] error_ptr
-  ///     A pointer to a lldb_private::Status object that will be
+  ///     A pointer to a lldb_private::Error object that will be
   ///     filled in if non-nullptr.
   ///
   /// @return
   ///     The resulting seek offset, or -1 on error.
   //------------------------------------------------------------------
-  off_t SeekFromCurrent(off_t offset, Status *error_ptr = nullptr);
+  off_t SeekFromCurrent(off_t offset, Error *error_ptr = nullptr);
 
   //------------------------------------------------------------------
   /// Seek to an offset relative to the end of the file.
@@ -298,13 +301,13 @@ public:
   ///     absolute file offset.
   ///
   /// @param[in] error_ptr
-  ///     A pointer to a lldb_private::Status object that will be
+  ///     A pointer to a lldb_private::Error object that will be
   ///     filled in if non-nullptr.
   ///
   /// @return
   ///     The resulting seek offset, or -1 on error.
   //------------------------------------------------------------------
-  off_t SeekFromEnd(off_t offset, Status *error_ptr = nullptr);
+  off_t SeekFromEnd(off_t offset, Error *error_ptr = nullptr);
 
   //------------------------------------------------------------------
   /// Read bytes from a file from the specified file offset.
@@ -329,7 +332,7 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Read(void *dst, size_t &num_bytes, off_t &offset);
+  Error Read(void *dst, size_t &num_bytes, off_t &offset);
 
   //------------------------------------------------------------------
   /// Read bytes from a file from the specified file offset.
@@ -360,8 +363,8 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Read(size_t &num_bytes, off_t &offset, bool null_terminate,
-              lldb::DataBufferSP &data_buffer_sp);
+  Error Read(size_t &num_bytes, off_t &offset, bool null_terminate,
+             lldb::DataBufferSP &data_buffer_sp);
 
   //------------------------------------------------------------------
   /// Write bytes to a file at the specified file offset.
@@ -388,7 +391,7 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Write(const void *src, size_t &num_bytes, off_t &offset);
+  Error Write(const void *src, size_t &num_bytes, off_t &offset);
 
   //------------------------------------------------------------------
   /// Flush the current stream
@@ -397,7 +400,7 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Flush();
+  Error Flush();
 
   //------------------------------------------------------------------
   /// Sync to disk.
@@ -406,7 +409,7 @@ public:
   ///     An error object that indicates success or the reason for
   ///     failure.
   //------------------------------------------------------------------
-  Status Sync();
+  Error Sync();
 
   //------------------------------------------------------------------
   /// Get the permissions for a this file.
@@ -415,9 +418,9 @@ public:
   ///     Bits logical OR'ed together from the permission bits defined
   ///     in lldb_private::File::Permissions.
   //------------------------------------------------------------------
-  uint32_t GetPermissions(Status &error) const;
+  uint32_t GetPermissions(Error &error) const;
 
-  static uint32_t GetPermissions(const FileSpec &file_spec, Status &error);
+  static uint32_t GetPermissions(const FileSpec &file_spec, Error &error);
 
   //------------------------------------------------------------------
   /// Return true if this file is interactive.

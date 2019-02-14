@@ -1,4 +1,4 @@
-//===- LambdaResolverMM - Redirect symbol lookup via a functor --*- C++ -*-===//
+//===-- LambdaResolverMM - Redirect symbol lookup via a functor -*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,7 +16,7 @@
 #define LLVM_EXECUTIONENGINE_ORC_LAMBDARESOLVER_H
 
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include <memory>
 
 namespace llvm {
@@ -25,6 +25,7 @@ namespace orc {
 template <typename DylibLookupFtorT, typename ExternalLookupFtorT>
 class LambdaResolver : public JITSymbolResolver {
 public:
+
   LambdaResolver(DylibLookupFtorT DylibLookupFtor,
                  ExternalLookupFtorT ExternalLookupFtor)
       : DylibLookupFtor(DylibLookupFtor),
@@ -45,15 +46,15 @@ private:
 
 template <typename DylibLookupFtorT,
           typename ExternalLookupFtorT>
-std::shared_ptr<LambdaResolver<DylibLookupFtorT, ExternalLookupFtorT>>
+std::unique_ptr<LambdaResolver<DylibLookupFtorT, ExternalLookupFtorT>>
 createLambdaResolver(DylibLookupFtorT DylibLookupFtor,
                      ExternalLookupFtorT ExternalLookupFtor) {
-  using LR = LambdaResolver<DylibLookupFtorT, ExternalLookupFtorT>;
+  typedef LambdaResolver<DylibLookupFtorT, ExternalLookupFtorT> LR;
   return make_unique<LR>(std::move(DylibLookupFtor),
                          std::move(ExternalLookupFtor));
 }
 
-} // end namespace orc
-} // end namespace llvm
+} // End namespace orc.
+} // End namespace llvm.
 
 #endif // LLVM_EXECUTIONENGINE_ORC_LAMBDARESOLVER_H

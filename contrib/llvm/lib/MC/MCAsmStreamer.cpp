@@ -103,10 +103,7 @@ public:
   void AddComment(const Twine &T, bool EOL = true) override;
 
   /// AddEncodingComment - Add a comment showing the encoding of an instruction.
-  /// If PrintSchedInfo - is true then the comment sched:[x:y] should
-  //    be added to output if it's being supported by target
-  void AddEncodingComment(const MCInst &Inst, const MCSubtargetInfo &,
-                          bool PrintSchedInfo);
+  void AddEncodingComment(const MCInst &Inst, const MCSubtargetInfo &);
 
   /// GetCommentOS - Return a raw_ostream that comments can be written to.
   /// Unlike AddComment, you are required to terminate comments with \n if you
@@ -133,7 +130,7 @@ public:
   void ChangeSection(MCSection *Section, const MCExpr *Subsection) override;
 
   void EmitLOHDirective(MCLOHType Kind, const MCLOHArgs &Args) override;
-  void EmitLabel(MCSymbol *Symbol, SMLoc Loc = SMLoc()) override;
+  void EmitLabel(MCSymbol *Symbol) override;
 
   void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
   void EmitLinkerOptions(ArrayRef<std::string> Options) override;
@@ -281,8 +278,7 @@ public:
   void EmitWinEHHandler(const MCSymbol *Sym, bool Unwind, bool Except) override;
   void EmitWinEHHandlerData() override;
 
-  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
-                       bool PrintSchedInfo) override;
+  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) override;
 
   void EmitBundleAlignMode(unsigned AlignPow2) override;
   void EmitBundleLock(bool AlignToEnd) override;
@@ -396,13 +392,12 @@ void MCAsmStreamer::emitExplicitComments() {
 void MCAsmStreamer::ChangeSection(MCSection *Section,
                                   const MCExpr *Subsection) {
   assert(Section && "Cannot switch to a null section!");
-  Section->PrintSwitchToSection(
-      *MAI, getContext().getObjectFileInfo()->getTargetTriple(), OS,
-      Subsection);
+  Section->PrintSwitchToSection(*MAI, OS, Subsection);
 }
 
-void MCAsmStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
-  MCStreamer::EmitLabel(Symbol, Loc);
+void MCAsmStreamer::EmitLabel(MCSymbol *Symbol) {
+  assert(Symbol->isUndefined() && "Cannot define a symbol twice!");
+  MCStreamer::EmitLabel(Symbol);
 
   Symbol->print(OS, MAI);
   OS << MAI->getLabelSuffix();
@@ -1508,8 +1503,7 @@ void MCAsmStreamer::EmitWinCFIEndProlog() {
 }
 
 void MCAsmStreamer::AddEncodingComment(const MCInst &Inst,
-                                       const MCSubtargetInfo &STI,
-                                       bool PrintSchedInfo) {
+                                       const MCSubtargetInfo &STI) {
   raw_ostream &OS = GetCommentOS();
   SmallString<256> Code;
   SmallVector<MCFixup, 4> Fixups;
@@ -1582,11 +1576,7 @@ void MCAsmStreamer::AddEncodingComment(const MCInst &Inst,
       }
     }
   }
-  OS << "]";
-  // If we are not going to add fixup or schedul comments after this point then
-  // we have to end the current comment line with "\n".
-  if (Fixups.size() || !PrintSchedInfo)
-    OS << "\n";
+  OS << "]\n";
 
   for (unsigned i = 0, e = Fixups.size(); i != e; ++i) {
     MCFixup &F = Fixups[i];
@@ -1597,19 +1587,16 @@ void MCAsmStreamer::AddEncodingComment(const MCInst &Inst,
 }
 
 void MCAsmStreamer::EmitInstruction(const MCInst &Inst,
-                                    const MCSubtargetInfo &STI,
-                                    bool PrintSchedInfo) {
+                                    const MCSubtargetInfo &STI) {
   assert(getCurrentSectionOnly() &&
          "Cannot emit contents before setting section!");
 
   // Show the encoding in a comment if we have a code emitter.
   if (Emitter)
-    AddEncodingComment(Inst, STI, PrintSchedInfo);
+    AddEncodingComment(Inst, STI);
 
   // Show the MCInst if enabled.
   if (ShowInst) {
-    if (PrintSchedInfo)
-      GetCommentOS() << "\n";
     Inst.dump_pretty(GetCommentOS(), InstPrinter.get(), "\n ");
     GetCommentOS() << "\n";
   }
@@ -1618,16 +1605,6 @@ void MCAsmStreamer::EmitInstruction(const MCInst &Inst,
     getTargetStreamer()->prettyPrintAsm(*InstPrinter, OS, Inst, STI);
   else
     InstPrinter->printInst(&Inst, OS, "", STI);
-
-  if (PrintSchedInfo) {
-    std::string SI = STI.getSchedInfoStr(Inst);
-    if (!SI.empty())
-      GetCommentOS() << SI;
-  }
-
-  StringRef Comments = CommentToEmit;
-  if (Comments.size() && Comments.back() != '\n')
-    GetCommentOS() << "\n";
 
   EmitEOL();
 }

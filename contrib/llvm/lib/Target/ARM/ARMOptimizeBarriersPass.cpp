@@ -88,15 +88,13 @@ bool ARMOptimizeBarriersPass::runOnMachineFunction(MachineFunction &MF) {
       }
     }
   }
-  bool Changed = false;
   // Remove the tagged DMB
   for (auto MI : ToRemove) {
     MI->eraseFromParent();
     ++NumDMBsRemoved;
-    Changed = true;
   }
 
-  return Changed;
+  return NumDMBsRemoved > 0;
 }
 
 /// createARMOptimizeBarriersPass - Returns an instance of the remove double

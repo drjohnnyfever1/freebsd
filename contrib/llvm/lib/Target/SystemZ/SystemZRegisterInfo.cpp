@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SystemZRegisterInfo.h"
 #include "SystemZInstrInfo.h"
+#include "SystemZRegisterInfo.h"
 #include "SystemZSubtarget.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"

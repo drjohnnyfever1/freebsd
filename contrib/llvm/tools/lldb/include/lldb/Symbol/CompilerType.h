@@ -23,8 +23,6 @@
 
 namespace lldb_private {
 
-class DataExtractor;
-
 //----------------------------------------------------------------------
 // A class that can carry around a clang ASTContext and a opaque clang
 // QualType. A clang::QualType can be easily reconstructed from an

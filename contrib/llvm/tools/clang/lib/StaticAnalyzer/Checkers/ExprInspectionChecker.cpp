@@ -13,7 +13,6 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 #include "clang/StaticAnalyzer/Checkers/SValExplainer.h"
 #include "llvm/ADT/StringSwitch.h"
-#include "llvm/Support/ScopedPrinter.h"
 
 using namespace clang;
 using namespace ento;
@@ -72,8 +71,8 @@ bool ExprInspectionChecker::evalCall(const CallExpr *CE,
           &ExprInspectionChecker::analyzerWarnIfReached)
     .Case("clang_analyzer_warnOnDeadSymbol",
           &ExprInspectionChecker::analyzerWarnOnDeadSymbol)
-    .StartsWith("clang_analyzer_explain", &ExprInspectionChecker::analyzerExplain)
-    .StartsWith("clang_analyzer_dump", &ExprInspectionChecker::analyzerDump)
+    .Case("clang_analyzer_explain", &ExprInspectionChecker::analyzerExplain)
+    .Case("clang_analyzer_dump", &ExprInspectionChecker::analyzerDump)
     .Case("clang_analyzer_getExtent", &ExprInspectionChecker::analyzerGetExtent)
     .Case("clang_analyzer_printState",
           &ExprInspectionChecker::analyzerPrintState)
@@ -270,7 +269,7 @@ void ExprInspectionChecker::checkEndAnalysis(ExplodedGraph &G, BugReporter &BR,
     unsigned NumTimesReached = Item.second.NumTimesReached;
     ExplodedNode *N = Item.second.ExampleNode;
 
-    reportBug(llvm::to_string(NumTimesReached), BR, N);
+    reportBug(std::to_string(NumTimesReached), BR, N);
   }
 }
 

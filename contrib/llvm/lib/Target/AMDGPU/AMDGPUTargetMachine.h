@@ -35,7 +35,6 @@ class AMDGPUTargetMachine : public LLVMTargetMachine {
 protected:
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   AMDGPUIntrinsicInfo IntrinsicInfo;
-  AMDGPUAS AS;
 
   StringRef getGPUName(const Function &F) const;
   StringRef getFeatureString(const Function &F) const;
@@ -58,17 +57,7 @@ public:
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }
-  AMDGPUAS getAMDGPUAS() const {
-    return AS;
-  }
-
-  void adjustPassManager(PassManagerBuilder &) override;
-  /// Get the integer value of a null pointer in the given address space.
-  uint64_t getNullPointerValue(unsigned AddrSpace) const {
-    if (AddrSpace == AS.LOCAL_ADDRESS || AddrSpace == AS.REGION_ADDRESS)
-      return -1;
-    return 0;
-  }
+  void addEarlyAsPossiblePasses(PassManagerBase &PM) override;
 };
 
 //===----------------------------------------------------------------------===//
@@ -88,10 +77,6 @@ public:
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
   const R600Subtarget *getSubtargetImpl(const Function &) const override;
-
-  bool isMachineVerifierClean() const override {
-    return false;
-  }
 };
 
 //===----------------------------------------------------------------------===//

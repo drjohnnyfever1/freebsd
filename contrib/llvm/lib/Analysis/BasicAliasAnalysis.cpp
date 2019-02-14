@@ -17,13 +17,13 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CaptureTracking.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -36,7 +36,6 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/KnownBits.h"
 #include <algorithm>
 
 #define DEBUG_TYPE "basicaa"
@@ -128,9 +127,7 @@ static uint64_t getObjectSize(const Value *V, const DataLayout &DL,
                               const TargetLibraryInfo &TLI,
                               bool RoundToAlign = false) {
   uint64_t Size;
-  ObjectSizeOpts Opts;
-  Opts.RoundToAlign = RoundToAlign;
-  if (getObjectSize(V, Size, DL, &TLI, Opts))
+  if (getObjectSize(V, Size, DL, &TLI, RoundToAlign))
     return Size;
   return MemoryLocation::UnknownSize;
 }
@@ -638,7 +635,7 @@ FunctionModRefBehavior BasicAAResult::getModRefBehavior(const Function *F) {
 /// Returns true if this is a writeonly (i.e Mod only) parameter.
 static bool isWriteOnlyParam(ImmutableCallSite CS, unsigned ArgIdx,
                              const TargetLibraryInfo &TLI) {
-  if (CS.paramHasAttr(ArgIdx, Attribute::WriteOnly))
+  if (CS.paramHasAttr(ArgIdx + 1, Attribute::WriteOnly))
     return true;
 
   // We can bound the aliasing properties of memset_pattern16 just as we can
@@ -647,9 +644,9 @@ static bool isWriteOnlyParam(ImmutableCallSite CS, unsigned ArgIdx,
   // whenever possible.
   // FIXME Consider handling this in InferFunctionAttr.cpp together with other
   // attributes.
-  LibFunc F;
+  LibFunc::Func F;
   if (CS.getCalledFunction() && TLI.getLibFunc(*CS.getCalledFunction(), F) &&
-      F == LibFunc_memset_pattern16 && TLI.has(F))
+      F == LibFunc::memset_pattern16 && TLI.has(F))
     if (ArgIdx == 0)
       return true;
 
@@ -667,10 +664,10 @@ ModRefInfo BasicAAResult::getArgModRefInfo(ImmutableCallSite CS,
   if (isWriteOnlyParam(CS, ArgIdx, TLI))
     return MRI_Mod;
 
-  if (CS.paramHasAttr(ArgIdx, Attribute::ReadOnly))
+  if (CS.paramHasAttr(ArgIdx + 1, Attribute::ReadOnly))
     return MRI_Ref;
 
-  if (CS.paramHasAttr(ArgIdx, Attribute::ReadNone))
+  if (CS.paramHasAttr(ArgIdx + 1, Attribute::ReadNone))
     return MRI_NoModRef;
 
   return AAResultBase::getArgModRefInfo(CS, ArgIdx);
@@ -683,11 +680,8 @@ static bool isIntrinsicCall(ImmutableCallSite CS, Intrinsic::ID IID) {
 
 #ifndef NDEBUG
 static const Function *getParent(const Value *V) {
-  if (const Instruction *inst = dyn_cast<Instruction>(V)) {
-    if (!inst->getParent())
-      return nullptr;
+  if (const Instruction *inst = dyn_cast<Instruction>(V))
     return inst->getParent()->getParent();
-  }
 
   if (const Argument *arg = dyn_cast<Argument>(V))
     return arg->getParent();
@@ -755,11 +749,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // as an argument, and itself doesn't capture it.
   if (!isa<Constant>(Object) && CS.getInstruction() != Object &&
       isNonEscapingLocalObject(Object)) {
-
-    // Optimistically assume that call doesn't touch Object and check this
-    // assumption in the following loop.
-    ModRefInfo Result = MRI_NoModRef;
-
+    bool PassedAsArg = false;
     unsigned OperandNo = 0;
     for (auto CI = CS.data_operands_begin(), CE = CS.data_operands_end();
          CI != CE; ++CI, ++OperandNo) {
@@ -771,38 +761,20 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
            OperandNo < CS.getNumArgOperands() && !CS.isByValArgument(OperandNo)))
         continue;
 
-      // Call doesn't access memory through this operand, so we don't care
-      // if it aliases with Object.
-      if (CS.doesNotAccessMemory(OperandNo))
-        continue;
-
       // If this is a no-capture pointer argument, see if we can tell that it
-      // is impossible to alias the pointer we're checking.
+      // is impossible to alias the pointer we're checking.  If not, we have to
+      // assume that the call could touch the pointer, even though it doesn't
+      // escape.
       AliasResult AR =
           getBestAAResults().alias(MemoryLocation(*CI), MemoryLocation(Object));
-
-      // Operand doesnt alias 'Object', continue looking for other aliases
-      if (AR == NoAlias)
-        continue;
-      // Operand aliases 'Object', but call doesn't modify it. Strengthen
-      // initial assumption and keep looking in case if there are more aliases.
-      if (CS.onlyReadsMemory(OperandNo)) {
-        Result = static_cast<ModRefInfo>(Result | MRI_Ref);
-        continue;
+      if (AR) {
+        PassedAsArg = true;
+        break;
       }
-      // Operand aliases 'Object' but call only writes into it.
-      if (CS.doesNotReadMemory(OperandNo)) {
-        Result = static_cast<ModRefInfo>(Result | MRI_Mod);
-        continue;
-      }
-      // This operand aliases 'Object' and call reads and writes into it.
-      Result = MRI_ModRef;
-      break;
     }
 
-    // Early return if we improved mod ref information
-    if (Result != MRI_ModRef)
-      return Result;
+    if (!PassedAsArg)
+      return MRI_NoModRef;
   }
 
   // If the CallSite is to malloc or calloc, we can assume that it doesn't
@@ -812,7 +784,7 @@ ModRefInfo BasicAAResult::getModRefInfo(ImmutableCallSite CS,
   // well.  Or alternatively, replace all of this with inaccessiblememonly once
   // that's implemented fully. 
   auto *Inst = CS.getInstruction();
-  if (isMallocOrCallocLikeFn(Inst, &TLI)) {
+  if (isMallocLikeFn(Inst, &TLI) || isCallocLikeFn(Inst, &TLI)) {
     // Be conservative if the accessed pointer may alias the allocation -
     // fallback to the generic handling below.
     if (getBestAAResults().alias(MemoryLocation(Inst), Loc) == NoAlias)
@@ -928,9 +900,10 @@ static AliasResult aliasSameBasePointerGEPs(const GEPOperator *GEP1,
                                             uint64_t V2Size,
                                             const DataLayout &DL) {
 
-  assert(GEP1->getPointerOperand()->stripPointerCastsAndBarriers() ==
-             GEP2->getPointerOperand()->stripPointerCastsAndBarriers() &&
-         GEP1->getPointerOperandType() == GEP2->getPointerOperandType() &&
+  assert(GEP1->getPointerOperand()->stripPointerCasts() ==
+         GEP2->getPointerOperand()->stripPointerCasts() &&
+         GEP1->getPointerOperand()->getType() ==
+         GEP2->getPointerOperand()->getType() &&
          "Expected GEPs with the same pointer operand");
 
   // Try to determine whether GEP1 and GEP2 index through arrays, into structs,
@@ -1006,32 +979,15 @@ static AliasResult aliasSameBasePointerGEPs(const GEPOperator *GEP1,
     // Because they cannot partially overlap and because fields in an array
     // cannot overlap, if we can prove the final indices are different between
     // GEP1 and GEP2, we can conclude GEP1 and GEP2 don't alias.
-
+    
     // If the last indices are constants, we've already checked they don't
     // equal each other so we can exit early.
     if (C1 && C2)
       return NoAlias;
-    {
-      Value *GEP1LastIdx = GEP1->getOperand(GEP1->getNumOperands() - 1);
-      Value *GEP2LastIdx = GEP2->getOperand(GEP2->getNumOperands() - 1);
-      if (isa<PHINode>(GEP1LastIdx) || isa<PHINode>(GEP2LastIdx)) {
-        // If one of the indices is a PHI node, be safe and only use
-        // computeKnownBits so we don't make any assumptions about the
-        // relationships between the two indices. This is important if we're
-        // asking about values from different loop iterations. See PR32314.
-        // TODO: We may be able to change the check so we only do this when
-        // we definitely looked through a PHINode.
-        if (GEP1LastIdx != GEP2LastIdx &&
-            GEP1LastIdx->getType() == GEP2LastIdx->getType()) {
-          KnownBits Known1 = computeKnownBits(GEP1LastIdx, DL);
-          KnownBits Known2 = computeKnownBits(GEP2LastIdx, DL);
-          if (Known1.Zero.intersects(Known2.One) ||
-              Known1.One.intersects(Known2.Zero))
-            return NoAlias;
-        }
-      } else if (isKnownNonEqual(GEP1LastIdx, GEP2LastIdx, DL))
-        return NoAlias;
-    }
+    if (isKnownNonEqual(GEP1->getOperand(GEP1->getNumOperands() - 1),
+                        GEP2->getOperand(GEP2->getNumOperands() - 1),
+                        DL))
+      return NoAlias;
     return MayAlias;
   } else if (!LastIndexedStruct || !C1 || !C2) {
     return MayAlias;
@@ -1205,9 +1161,10 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
     // If we know the two GEPs are based off of the exact same pointer (and not
     // just the same underlying object), see if that tells us anything about
     // the resulting pointers.
-    if (GEP1->getPointerOperand()->stripPointerCastsAndBarriers() ==
-            GEP2->getPointerOperand()->stripPointerCastsAndBarriers() &&
-        GEP1->getPointerOperandType() == GEP2->getPointerOperandType()) {
+    if (GEP1->getPointerOperand()->stripPointerCasts() ==
+        GEP2->getPointerOperand()->stripPointerCasts() &&
+        GEP1->getPointerOperand()->getType() ==
+        GEP2->getPointerOperand()->getType()) {
       AliasResult R = aliasSameBasePointerGEPs(GEP1, V1Size, GEP2, V2Size, DL);
       // If we couldn't find anything interesting, don't abandon just yet.
       if (R != MayAlias)
@@ -1304,9 +1261,9 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
         // give up if we can't determine conditions that hold for every cycle:
         const Value *V = DecompGEP1.VarIndices[i].V;
 
-        KnownBits Known = computeKnownBits(V, DL, 0, &AC, nullptr, DT);
-        bool SignKnownZero = Known.isNonNegative();
-        bool SignKnownOne = Known.isNegative();
+        bool SignKnownZero, SignKnownOne;
+        ComputeSignBit(const_cast<Value *>(V), SignKnownZero, SignKnownOne, DL,
+                       0, &AC, nullptr, DT);
 
         // Zero-extension widens the variable, and so forces the sign
         // bit to zero.
@@ -1348,7 +1305,11 @@ AliasResult BasicAAResult::aliasGEP(const GEPOperator *GEP1, uint64_t V1Size,
   // Statically, we can see that the base objects are the same, but the
   // pointers have dynamic offsets which we can't resolve. And none of our
   // little tricks above worked.
-  return MayAlias;
+  //
+  // TODO: Returning PartialAlias instead of MayAlias is a mild hack; the
+  // practical effect of this is protecting TBAA in the case of dynamic
+  // indices into arrays of unions or malloc'd memory.
+  return PartialAlias;
 }
 
 static AliasResult MergeAliasResults(AliasResult A, AliasResult B) {
@@ -1517,8 +1478,8 @@ AliasResult BasicAAResult::aliasCheck(const Value *V1, uint64_t V1Size,
     return NoAlias;
 
   // Strip off any casts if they exist.
-  V1 = V1->stripPointerCastsAndBarriers();
-  V2 = V2->stripPointerCastsAndBarriers();
+  V1 = V1->stripPointerCasts();
+  V2 = V2->stripPointerCasts();
 
   // If V1 or V2 is undef, the result is NoAlias because we can always pick a
   // value for undef that aliases nothing in the program.

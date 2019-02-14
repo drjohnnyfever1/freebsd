@@ -1,4 +1,4 @@
-//===- MCAsmInfoDarwin.cpp - Darwin asm properties ------------------------===//
+//===-- MCAsmInfoDarwin.cpp - Darwin asm properties -------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,10 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCAsmInfoDarwin.h"
-#include "llvm/BinaryFormat/MachO.h"
-#include "llvm/MC/MCDirectives.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionMachO.h"
-
 using namespace llvm;
 
 bool MCAsmInfoDarwin::isSectionAtomizableBySymbols(

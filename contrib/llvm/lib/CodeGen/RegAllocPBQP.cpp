@@ -1,4 +1,4 @@
-//===- RegAllocPBQP.cpp ---- PBQP Register Allocator ----------------------===//
+//===------ RegAllocPBQP.cpp ---- PBQP Register Allocator -------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -32,59 +32,30 @@
 #include "llvm/CodeGen/RegAllocPBQP.h"
 #include "RegisterCoalescer.h"
 #include "Spiller.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
-#include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/CodeGen/LiveStackAnalysis.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/PBQP/Graph.h"
-#include "llvm/CodeGen/PBQP/Math.h"
-#include "llvm/CodeGen/PBQP/Solution.h"
-#include "llvm/CodeGen/PBQPRAConstraint.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
-#include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/VirtRegMap.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/Pass.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Printable.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
-#include <algorithm>
-#include <cassert>
-#include <cstddef>
 #include <limits>
-#include <map>
 #include <memory>
 #include <queue>
 #include <set>
 #include <sstream>
-#include <string>
-#include <system_error>
-#include <tuple>
-#include <utility>
 #include <vector>
 
 using namespace llvm;
@@ -115,6 +86,7 @@ namespace {
 /// Programming problems.
 class RegAllocPBQP : public MachineFunctionPass {
 public:
+
   static char ID;
 
   /// Construct a PBQP register allocator.
@@ -141,13 +113,14 @@ public:
   }
 
 private:
-  using LI2NodeMap = std::map<const LiveInterval *, unsigned>;
-  using Node2LIMap = std::vector<const LiveInterval *>;
-  using AllowedSet = std::vector<unsigned>;
-  using AllowedSetMap = std::vector<AllowedSet>;
-  using RegPair = std::pair<unsigned, unsigned>;
-  using CoalesceMap = std::map<RegPair, PBQP::PBQPNum>;
-  using RegSet = std::set<unsigned>;
+
+  typedef std::map<const LiveInterval*, unsigned> LI2NodeMap;
+  typedef std::vector<const LiveInterval*> Node2LIMap;
+  typedef std::vector<unsigned> AllowedSet;
+  typedef std::vector<AllowedSet> AllowedSetMap;
+  typedef std::pair<unsigned, unsigned> RegPair;
+  typedef std::map<RegPair, PBQP::PBQPNum> CoalesceMap;
+  typedef std::set<unsigned> RegSet;
 
   char *customPassID;
 
@@ -214,12 +187,13 @@ public:
 /// @brief Add interference edges between overlapping vregs.
 class Interference : public PBQPRAConstraint {
 private:
-  using AllowedRegVecPtr = const PBQP::RegAlloc::AllowedRegVector *;
-  using IKey = std::pair<AllowedRegVecPtr, AllowedRegVecPtr>;
-  using IMatrixCache = DenseMap<IKey, PBQPRAGraph::MatrixPtr>;
-  using DisjointAllowedRegsCache = DenseSet<IKey>;
-  using IEdgeKey = std::pair<PBQP::GraphBase::NodeId, PBQP::GraphBase::NodeId>;
-  using IEdgeCache = DenseSet<IEdgeKey>;
+
+  typedef const PBQP::RegAlloc::AllowedRegVector* AllowedRegVecPtr;
+  typedef std::pair<AllowedRegVecPtr, AllowedRegVecPtr> IKey;
+  typedef DenseMap<IKey, PBQPRAGraph::MatrixPtr> IMatrixCache;
+  typedef DenseSet<IKey> DisjointAllowedRegsCache;
+  typedef std::pair<PBQP::GraphBase::NodeId, PBQP::GraphBase::NodeId> IEdgeKey;
+  typedef DenseSet<IEdgeKey> IEdgeCache;
 
   bool haveDisjointAllowedRegs(const PBQPRAGraph &G, PBQPRAGraph::NodeId NId,
                                PBQPRAGraph::NodeId MId,
@@ -254,8 +228,8 @@ private:
   // for the fast interference graph construction algorithm. The last is there
   // to save us from looking up node ids via the VRegToNode map in the graph
   // metadata.
-  using IntervalInfo =
-      std::tuple<LiveInterval*, size_t, PBQP::GraphBase::NodeId>;
+  typedef std::tuple<LiveInterval*, size_t, PBQP::GraphBase::NodeId>
+    IntervalInfo;
 
   static SlotIndex getStartPoint(const IntervalInfo &I) {
     return std::get<0>(I)->segments[std::get<1>(I)].start;
@@ -302,6 +276,7 @@ private:
   }
 
 public:
+
   void apply(PBQPRAGraph &G) override {
     // The following is loosely based on the linear scan algorithm introduced in
     // "Linear Scan Register Allocation" by Poletto and Sarkar. This version
@@ -322,10 +297,9 @@ public:
     // Cache known disjoint allowed registers pairs
     DisjointAllowedRegsCache D;
 
-    using IntervalSet = std::set<IntervalInfo, decltype(&lowestEndPoint)>;
-    using IntervalQueue =
-        std::priority_queue<IntervalInfo, std::vector<IntervalInfo>,
-                            decltype(&lowestStartPoint)>;
+    typedef std::set<IntervalInfo, decltype(&lowestEndPoint)> IntervalSet;
+    typedef std::priority_queue<IntervalInfo, std::vector<IntervalInfo>,
+                                decltype(&lowestStartPoint)> IntervalQueue;
     IntervalSet Active(lowestEndPoint);
     IntervalQueue Inactive(lowestStartPoint);
 
@@ -389,6 +363,7 @@ public:
   }
 
 private:
+
   // Create an Interference edge and add it to the graph, unless it is
   // a null matrix, meaning the nodes' allowed registers do not have any
   // interference. This case occurs frequently between integer and floating
@@ -397,6 +372,7 @@ private:
   bool createInterferenceEdge(PBQPRAGraph &G,
                               PBQPRAGraph::NodeId NId, PBQPRAGraph::NodeId MId,
                               IMatrixCache &C) {
+
     const TargetRegisterInfo &TRI =
         *G.getMetadata().MF.getSubtarget().getRegisterInfo();
     const auto &NRegs = G.getNodeMetadata(NId).getAllowedRegs();
@@ -433,6 +409,7 @@ private:
   }
 };
 
+
 class Coalescing : public PBQPRAConstraint {
 public:
   void apply(PBQPRAGraph &G) override {
@@ -444,6 +421,7 @@ public:
     // gives the Ok.
     for (const auto &MBB : MF) {
       for (const auto &MI : MBB) {
+
         // Skip not-coalescable or already coalesced copies.
         if (!CP.setRegisters(&MI) || CP.getSrcReg() == CP.getDstReg())
           continue;
@@ -501,6 +479,7 @@ public:
   }
 
 private:
+
   void addVirtRegCoalesce(
                     PBQPRAGraph::RawMatrix &CostMat,
                     const PBQPRAGraph::NodeMetadata::AllowedRegVector &Allowed1,
@@ -517,15 +496,14 @@ private:
       }
     }
   }
+
 };
 
-} // end anonymous namespace
+} // End anonymous namespace.
 
 // Out-of-line destructor/anchor for PBQPRAConstraint.
-PBQPRAConstraint::~PBQPRAConstraint() = default;
-
+PBQPRAConstraint::~PBQPRAConstraint() {}
 void PBQPRAConstraint::anchor() {}
-
 void PBQPRAConstraintList::anchor() {}
 
 void RegAllocPBQP::getAnalysisUsage(AnalysisUsage &au) const {
@@ -576,7 +554,7 @@ void RegAllocPBQP::findVRegIntervalsToAlloc(const MachineFunction &MF,
 
 static bool isACalleeSavedRegister(unsigned reg, const TargetRegisterInfo &TRI,
                                    const MachineFunction &MF) {
-  const MCPhysReg *CSR = MF.getRegInfo().getCalleeSavedRegs();
+  const MCPhysReg *CSR = TRI.getCalleeSavedRegs(&MF);
   for (unsigned i = 0; CSR[i] != 0; ++i)
     if (TRI.regsOverlap(reg, CSR[i]))
       return true;
@@ -661,6 +639,7 @@ void RegAllocPBQP::spillVReg(unsigned VReg,
                              SmallVectorImpl<unsigned> &NewIntervals,
                              MachineFunction &MF, LiveIntervals &LIS,
                              VirtRegMap &VRM, Spiller &VRegSpiller) {
+
   VRegsToAlloc.erase(VReg);
   LiveRangeEdit LRE(&LIS.getInterval(VReg), NewIntervals, MF, LIS, &VRM,
                     nullptr, &DeadRemats);
@@ -738,15 +717,7 @@ void RegAllocPBQP::finalizeAlloc(MachineFunction &MF,
 
     if (PReg == 0) {
       const TargetRegisterClass &RC = *MRI.getRegClass(LI.reg);
-      const ArrayRef<MCPhysReg> RawPRegOrder = RC.getRawAllocationOrder(MF);
-      for (unsigned CandidateReg : RawPRegOrder) {
-        if (!VRM.getRegInfo().isReserved(CandidateReg)) {
-          PReg = CandidateReg;
-          break;
-        }
-      }
-      assert(PReg &&
-             "No un-reserved physical registers in this register class");
+      PReg = RC.getRawAllocationOrder(MF).front();
     }
 
     VRM.assignVirt2Phys(LI.reg, PReg);
@@ -806,6 +777,7 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
 
   // If there are non-empty intervals allocate them using pbqp.
   if (!VRegsToAlloc.empty()) {
+
     const TargetSubtargetInfo &Subtarget = MF.getSubtarget();
     std::unique_ptr<PBQPRAConstraintList> ConstraintsRoot =
       llvm::make_unique<PBQPRAConstraintList>();
@@ -868,8 +840,7 @@ static Printable PrintNodeInfo(PBQP::RegAlloc::PBQPRAGraph::NodeId NId,
   });
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-LLVM_DUMP_METHOD void PBQP::RegAlloc::PBQPRAGraph::dump(raw_ostream &OS) const {
+void PBQP::RegAlloc::PBQPRAGraph::dump(raw_ostream &OS) const {
   for (auto NId : nodeIds()) {
     const Vector &Costs = getNodeCosts(NId);
     assert(Costs.getLength() != 0 && "Empty vector in graph.");
@@ -890,10 +861,7 @@ LLVM_DUMP_METHOD void PBQP::RegAlloc::PBQPRAGraph::dump(raw_ostream &OS) const {
   }
 }
 
-LLVM_DUMP_METHOD void PBQP::RegAlloc::PBQPRAGraph::dump() const {
-  dump(dbgs());
-}
-#endif
+LLVM_DUMP_METHOD void PBQP::RegAlloc::PBQPRAGraph::dump() const { dump(dbgs()); }
 
 void PBQP::RegAlloc::PBQPRAGraph::printDot(raw_ostream &OS) const {
   OS << "graph {\n";
@@ -924,3 +892,5 @@ FunctionPass *llvm::createPBQPRegisterAllocator(char *customPassID) {
 FunctionPass* llvm::createDefaultPBQPRegisterAllocator() {
   return createPBQPRegisterAllocator();
 }
+
+#undef DEBUG_TYPE

@@ -22,10 +22,10 @@ namespace llvm {
 
 /// Represents a location in source code.
 class SMLoc {
-  const char *Ptr = nullptr;
+  const char *Ptr;
 
 public:
-  SMLoc() = default;
+  SMLoc() : Ptr(nullptr) {}
 
   bool isValid() const { return Ptr != nullptr; }
 

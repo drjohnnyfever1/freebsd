@@ -14,7 +14,6 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Phases.h"
-#include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/StringMap.h"
@@ -63,7 +62,7 @@ enum LTOKind {
 /// Driver - Encapsulate logic for constructing compilation processes
 /// from a set of gcc-driver-like command line arguments.
 class Driver {
-  std::unique_ptr<llvm::opt::OptTable> Opts;
+  llvm::opt::OptTable *Opts;
 
   DiagnosticsEngine &Diags;
 
@@ -216,11 +215,6 @@ public:
   /// Use lazy precompiled headers for PCH support.
   unsigned CCCUsePCH : 1;
 
-  /// Force clang to emit reproducer for driver invocation. This is enabled
-  /// indirectly by setting FORCE_CLANG_DIAGNOSTICS_CRASH environment variable
-  /// or when using the -gen-reproducer driver flag.
-  unsigned GenReproducer : 1;
-
 private:
   /// Certain options suppress the 'no input files' warning.
   unsigned SuppressMissingInputWarning : 1;
@@ -233,7 +227,7 @@ private:
   /// This maps from the string representation of a triple to a ToolChain
   /// created targeting that triple. The driver owns all the ToolChain objects
   /// stored in it, and will clean them up when torn down.
-  mutable llvm::StringMap<std::unique_ptr<ToolChain>> ToolChains;
+  mutable llvm::StringMap<ToolChain *> ToolChains;
 
 private:
   /// TranslateInputArgs - Create a new derived argument list from the input
@@ -270,6 +264,7 @@ public:
   Driver(StringRef ClangExecutable, StringRef DefaultTargetTriple,
          DiagnosticsEngine &Diags,
          IntrusiveRefCntPtr<vfs::FileSystem> VFS = nullptr);
+  ~Driver();
 
   /// @name Accessors
   /// @{
@@ -309,8 +304,13 @@ public:
   bool isSaveTempsObj() const { return SaveTemps == SaveTempsObj; }
 
   bool embedBitcodeEnabled() const { return BitcodeEmbed != EmbedNone; }
-  bool embedBitcodeInObject() const { return (BitcodeEmbed == EmbedBitcode); }
-  bool embedBitcodeMarkerOnly() const { return (BitcodeEmbed == EmbedMarker); }
+  bool embedBitcodeInObject() const {
+    // LTO has no object file output so ignore embed bitcode option in LTO.
+    return (BitcodeEmbed == EmbedBitcode) && !isUsingLTO();
+  }
+  bool embedBitcodeMarkerOnly() const {
+    return (BitcodeEmbed == EmbedMarker) && !isUsingLTO();
+  }
 
   /// Compute the desired OpenMP runtime from the flags provided.
   OpenMPRuntimeKind getOpenMPRuntime(const llvm::opt::ArgList &Args) const;
@@ -341,8 +341,7 @@ public:
 
   /// ParseArgStrings - Parse the given list of strings into an
   /// ArgList.
-  llvm::opt::InputArgList ParseArgStrings(ArrayRef<const char *> Args,
-                                          bool &ContainsError);
+  llvm::opt::InputArgList ParseArgStrings(ArrayRef<const char *> Args);
 
   /// BuildInputs - Construct the list of inputs and their types from 
   /// the given arguments.

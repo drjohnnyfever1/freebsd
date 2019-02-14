@@ -74,7 +74,7 @@ const uint32_t *
 AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                           CallingConv::ID CC) const {
   if (CC == CallingConv::GHC)
-    // This is academic because all GHC calls are (supposed to be) tail calls
+    // This is academic becase all GHC calls are (supposed to be) tail calls
     return CSR_AArch64_NoRegs_RegMask;
   if (CC == CallingConv::AnyReg)
     return CSR_AArch64_AllRegs_RegMask;
@@ -94,7 +94,7 @@ const uint32_t *AArch64RegisterInfo::getTLSCallPreservedMask() const {
   if (TT.isOSDarwin())
     return CSR_AArch64_TLS_Darwin_RegMask;
 
-  assert(TT.isOSBinFormatELF() && "Invalid target");
+  assert(TT.isOSBinFormatELF() && "only expect Darwin or ELF TLS");
   return CSR_AArch64_TLS_ELF_RegMask;
 }
 
@@ -118,17 +118,25 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   // FIXME: avoid re-calculating this every time.
   BitVector Reserved(getNumRegs());
+  markSuperRegs(Reserved, AArch64::SP);
+  markSuperRegs(Reserved, AArch64::XZR);
   markSuperRegs(Reserved, AArch64::WSP);
   markSuperRegs(Reserved, AArch64::WZR);
 
-  if (TFI->hasFP(MF) || TT.isOSDarwin())
+  if (TFI->hasFP(MF) || TT.isOSDarwin()) {
+    markSuperRegs(Reserved, AArch64::FP);
     markSuperRegs(Reserved, AArch64::W29);
+  }
 
-  if (MF.getSubtarget<AArch64Subtarget>().isX18Reserved())
-    markSuperRegs(Reserved, AArch64::W18); // Platform register
+  if (MF.getSubtarget<AArch64Subtarget>().isX18Reserved()) {
+    markSuperRegs(Reserved, AArch64::X18); // Platform register
+    markSuperRegs(Reserved, AArch64::W18);
+  }
 
-  if (hasBasePointer(MF))
+  if (hasBasePointer(MF)) {
+    markSuperRegs(Reserved, AArch64::X19);
     markSuperRegs(Reserved, AArch64::W19);
+  }
 
   assert(checkAllSuperRegsMarked(Reserved));
   return Reserved;
@@ -167,7 +175,7 @@ bool AArch64RegisterInfo::isConstantPhysReg(unsigned PhysReg) const {
 const TargetRegisterClass *
 AArch64RegisterInfo::getPointerRegClass(const MachineFunction &MF,
                                       unsigned Kind) const {
-  return &AArch64::GPR64spRegClass;
+  return &AArch64::GPR64RegClass;
 }
 
 const TargetRegisterClass *

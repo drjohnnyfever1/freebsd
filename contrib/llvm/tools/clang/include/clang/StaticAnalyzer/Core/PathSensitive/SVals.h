@@ -41,22 +41,6 @@ class MemRegionManager;
 class ProgramStateManager;
 class SValBuilder;
 
-namespace nonloc {
-/// Sub-kinds for NonLoc values.
-enum Kind {
-#define NONLOC_SVAL(Id, Parent) Id ## Kind,
-#include "clang/StaticAnalyzer/Core/PathSensitive/SVals.def"
-};
-}
-
-namespace loc {
-/// Sub-kinds for Loc values.
-enum Kind {
-#define LOC_SVAL(Id, Parent) Id ## Kind,
-#include "clang/StaticAnalyzer/Core/PathSensitive/SVals.def"
-};
-}
-
 /// SVal - This represents a symbolic expression, which can be either
 ///  an L-value or an R-value.
 ///
@@ -91,7 +75,10 @@ public:
   template<typename T>
   T castAs() const {
     assert(T::isKind(*this));
-    return *static_cast<const T *>(this);
+    T t;
+    SVal& sv = t;
+    sv = *this;
+    return t;
   }
 
   /// \brief Convert to the specified SVal type, returning None if this SVal is
@@ -100,7 +87,10 @@ public:
   Optional<T> getAs() const {
     if (!T::isKind(*this))
       return None;
-    return *static_cast<const T *>(this);
+    T t;
+    SVal& sv = t;
+    sv = *this;
+    return t;
   }
 
   /// BufferTy - A temporary buffer to hold a set of SVals.
@@ -283,11 +273,6 @@ protected:
 public:
   void dumpToStream(raw_ostream &Out) const;
 
-  static inline bool isCompoundType(QualType T) {
-    return T->isArrayType() || T->isRecordType() ||
-           T->isComplexType() || T->isVectorType();
-  }
-
 private:
   friend class SVal;
   static bool isKind(const SVal& V) {
@@ -322,11 +307,15 @@ private:
 
 namespace nonloc {
 
+enum Kind {
+#define NONLOC_SVAL(Id, Parent) Id ## Kind,
+#include "clang/StaticAnalyzer/Core/PathSensitive/SVals.def"
+};
+
 /// \brief Represents symbolic expression.
 class SymbolVal : public NonLoc {
 public:
-  SymbolVal() = delete;
-  SymbolVal(SymbolRef sym) : NonLoc(SymbolValKind, sym) { assert(sym); }
+  SymbolVal(SymbolRef sym) : NonLoc(SymbolValKind, sym) {}
 
   SymbolRef getSymbol() const {
     return (const SymExpr*) Data;
@@ -338,6 +327,7 @@ public:
 
 private:
   friend class SVal;
+  SymbolVal() {}
   static bool isKind(const SVal& V) {
     return V.getBaseKind() == NonLocKind &&
            V.getSubKind() == SymbolValKind;
@@ -383,11 +373,7 @@ class LocAsInteger : public NonLoc {
 
   explicit LocAsInteger(const std::pair<SVal, uintptr_t> &data)
       : NonLoc(LocAsIntegerKind, &data) {
-    // We do not need to represent loc::ConcreteInt as LocAsInteger,
-    // as it'd collapse into a nonloc::ConcreteInt instead.
-    assert(data.first.getBaseKind() == LocKind &&
-           (data.first.getSubKind() == loc::MemRegionValKind ||
-            data.first.getSubKind() == loc::GotoLabelKind));
+    assert (data.first.getAs<Loc>());
   }
 
 public:
@@ -527,11 +513,14 @@ private:
 
 namespace loc {
 
+enum Kind {
+#define LOC_SVAL(Id, Parent) Id ## Kind,
+#include "clang/StaticAnalyzer/Core/PathSensitive/SVals.def"
+};
+
 class GotoLabel : public Loc {
 public:
-  explicit GotoLabel(const LabelDecl *Label) : Loc(GotoLabelKind, Label) {
-    assert(Label);
-  }
+  explicit GotoLabel(LabelDecl *Label) : Loc(GotoLabelKind, Label) {}
 
   const LabelDecl *getLabel() const {
     return static_cast<const LabelDecl*>(Data);
@@ -552,9 +541,7 @@ private:
 
 class MemRegionVal : public Loc {
 public:
-  explicit MemRegionVal(const MemRegion* r) : Loc(MemRegionValKind, r) {
-    assert(r);
-  }
+  explicit MemRegionVal(const MemRegion* r) : Loc(MemRegionValKind, r) {}
 
   /// \brief Get the underlining region.
   const MemRegion* getRegion() const {

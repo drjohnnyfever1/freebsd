@@ -20,7 +20,6 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/APSIntType.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/SVals.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/StoreRef.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/MemRegion.h"
 
 namespace clang {
 namespace ento {
@@ -30,9 +29,8 @@ class CompoundValData : public llvm::FoldingSetNode {
   llvm::ImmutableList<SVal> L;
 
 public:
-  CompoundValData(QualType t, llvm::ImmutableList<SVal> l) : T(t), L(l) {
-    assert(NonLoc::isCompoundType(t));
-  }
+  CompoundValData(QualType t, llvm::ImmutableList<SVal> l)
+    : T(t), L(l) {}
 
   typedef llvm::ImmutableList<SVal>::iterator iterator;
   iterator begin() const { return L.begin(); }
@@ -49,9 +47,7 @@ class LazyCompoundValData : public llvm::FoldingSetNode {
   const TypedValueRegion *region;
 public:
   LazyCompoundValData(const StoreRef &st, const TypedValueRegion *r)
-      : store(st), region(r) {
-    assert(NonLoc::isCompoundType(r->getValueType()));
-  }
+    : store(st), region(r) {}
 
   const void *getStore() const { return store.getStore(); }
   const TypedValueRegion *getRegion() const { return region; }
@@ -124,7 +120,7 @@ public:
   /// Returns the type of the APSInt used to store values of the given QualType.
   APSIntType getAPSIntType(QualType T) const {
     assert(T->isIntegralOrEnumerationType() || Loc::isLocType(T));
-    return APSIntType(Ctx.getIntWidth(T),
+    return APSIntType(Ctx.getTypeSize(T),
                       !T->isSignedIntegerOrEnumerationType());
   }
 
@@ -178,11 +174,6 @@ public:
     llvm::APSInt X = V;
     --X;
     return getValue(X);
-  }
-
-  inline const llvm::APSInt& getZeroWithTypeSize(QualType T) {
-    assert(T->isScalarType());
-    return getValue(0, Ctx.getTypeSize(T), true);
   }
 
   inline const llvm::APSInt& getZeroWithPtrWidth(bool isUnsigned = true) {

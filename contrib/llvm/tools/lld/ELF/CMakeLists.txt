@@ -7,33 +7,20 @@ if(NOT LLD_BUILT_STANDALONE)
 endif()
 
 add_lld_library(lldELF
-  Arch/AArch64.cpp
-  Arch/AMDGPU.cpp
-  Arch/ARM.cpp
-  Arch/AVR.cpp
-  Arch/Mips.cpp
-  Arch/MipsArchTree.cpp
-  Arch/PPC.cpp
-  Arch/PPC64.cpp
-  Arch/SPARCV9.cpp
-  Arch/X86.cpp
-  Arch/X86_64.cpp
   Driver.cpp
   DriverUtils.cpp
   EhFrame.cpp
   Error.cpp
-  Filesystem.cpp
   GdbIndex.cpp
   ICF.cpp
   InputFiles.cpp
   InputSection.cpp
   LTO.cpp
   LinkerScript.cpp
-  MapFile.cpp
   MarkLive.cpp
+  Mips.cpp
   OutputSections.cpp
   Relocations.cpp
-  ScriptLexer.cpp
   ScriptParser.cpp
   Strings.cpp
   SymbolTable.cpp
@@ -46,7 +33,6 @@ add_lld_library(lldELF
   LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
   Analysis
-  BinaryFormat
   BitReader
   BitWriter
   Codegen
@@ -67,7 +53,7 @@ add_lld_library(lldELF
   LINK_LIBS
   lldConfig
   lldCore
-  ${LLVM_PTHREAD_LIB}
+  ${PTHREAD_LIB}
 
   DEPENDS
   ELFOptionsTableGen

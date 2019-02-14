@@ -26,18 +26,13 @@ namespace std {
 struct nothrow_t {};
 }  // namespace std
 
-// TODO(alekseys): throw std::bad_alloc instead of dying on OOM.
 CXX_OPERATOR_ATTRIBUTE
 void *operator new(size_t size) {
-  void *res = scudoMalloc(size, FromNew);
-  if (UNLIKELY(!res)) DieOnFailure::OnOOM();
-  return res;
+  return scudoMalloc(size, FromNew);
 }
 CXX_OPERATOR_ATTRIBUTE
 void *operator new[](size_t size) {
-  void *res = scudoMalloc(size, FromNewArray);
-  if (UNLIKELY(!res)) DieOnFailure::OnOOM();
-  return res;
+  return scudoMalloc(size, FromNewArray);
 }
 CXX_OPERATOR_ATTRIBUTE
 void *operator new(size_t size, std::nothrow_t const&) {

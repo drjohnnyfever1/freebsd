@@ -20,7 +20,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "processimpdefs"
+#define DEBUG_TYPE "processimplicitdefs"
 
 namespace {
 /// Process IMPLICIT_DEF instructions and make sure there is one implicit_def
@@ -51,7 +51,9 @@ public:
 char ProcessImplicitDefs::ID = 0;
 char &llvm::ProcessImplicitDefsID = ProcessImplicitDefs::ID;
 
-INITIALIZE_PASS(ProcessImplicitDefs, DEBUG_TYPE,
+INITIALIZE_PASS_BEGIN(ProcessImplicitDefs, "processimpdefs",
+                "Process Implicit Definitions", false, false)
+INITIALIZE_PASS_END(ProcessImplicitDefs, "processimpdefs",
                 "Process Implicit Definitions", false, false)
 
 void ProcessImplicitDefs::getAnalysisUsage(AnalysisUsage &AU) const {

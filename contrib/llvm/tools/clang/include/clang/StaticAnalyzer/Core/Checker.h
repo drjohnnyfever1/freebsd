@@ -321,11 +321,9 @@ class RegionChanges {
                       const InvalidatedSymbols *invalidated,
                       ArrayRef<const MemRegion *> Explicits,
                       ArrayRef<const MemRegion *> Regions,
-                      const LocationContext *LCtx,
                       const CallEvent *Call) {
-    return ((const CHECKER *) checker)->checkRegionChanges(state, invalidated,
-                                                           Explicits, Regions,
-                                                           LCtx, Call);
+    return ((const CHECKER *)checker)->checkRegionChanges(state, invalidated,
+                                                      Explicits, Regions, Call);
   }
 
 public:

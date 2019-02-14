@@ -116,7 +116,7 @@ public:
 
   /// \brief Called before a source file is processed by a FrontEndAction.
   /// \see clang::FrontendAction::BeginSourceFileAction
-  virtual bool handleBeginSource(CompilerInstance &CI) {
+  virtual bool handleBeginSource(CompilerInstance &CI, StringRef Filename) {
     return true;
   }
 
@@ -202,15 +202,12 @@ buildASTFromCode(const Twine &Code, const Twine &FileName = "input.cc",
 /// \param PCHContainerOps The PCHContainerOperations for loading and creating
 /// clang modules.
 ///
-/// \param Adjuster A function to filter the command line arguments as specified.
-///
 /// \return The resulting AST or null if an error occurred.
 std::unique_ptr<ASTUnit> buildASTFromCodeWithArgs(
     const Twine &Code, const std::vector<std::string> &Args,
     const Twine &FileName = "input.cc", const Twine &ToolName = "clang-tool",
     std::shared_ptr<PCHContainerOperations> PCHContainerOps =
-      std::make_shared<PCHContainerOperations>(),
-    ArgumentsAdjuster Adjuster = getClangStripDependencyFileAdjuster());
+        std::make_shared<PCHContainerOperations>());
 
 /// \brief Utility to run a FrontendAction in a single clang invocation.
 class ToolInvocation {
@@ -391,11 +388,12 @@ inline std::unique_ptr<FrontendActionFactory> newFrontendActionFactory(
       }
 
     protected:
-      bool BeginSourceFileAction(CompilerInstance &CI) override {
-        if (!clang::ASTFrontendAction::BeginSourceFileAction(CI))
+      bool BeginSourceFileAction(CompilerInstance &CI,
+                                 StringRef Filename) override {
+        if (!clang::ASTFrontendAction::BeginSourceFileAction(CI, Filename))
           return false;
         if (Callbacks)
-          return Callbacks->handleBeginSource(CI);
+          return Callbacks->handleBeginSource(CI, Filename);
         return true;
       }
       void EndSourceFileAction() override {

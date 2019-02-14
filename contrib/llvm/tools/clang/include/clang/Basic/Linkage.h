@@ -45,17 +45,6 @@ enum Linkage : unsigned char {
   /// translation units because of types defined in a inline function.
   VisibleNoLinkage,
 
-  /// \brief Internal linkage according to the Modules TS, but can be referred
-  /// to from other translation units indirectly through inline functions and
-  /// templates in the module interface.
-  ModuleInternalLinkage,
-
-  /// \brief Module linkage, which indicates that the entity can be referred
-  /// to from other translation units within the same module, and indirectly
-  /// from arbitrary other translation units through inline functions and
-  /// templates in the module interface.
-  ModuleLinkage,
-
   /// \brief External linkage, which indicates that the entity can
   /// be referred to from other translation units.
   ExternalLinkage
@@ -85,20 +74,15 @@ inline bool isDiscardableGVALinkage(GVALinkage L) {
 }
 
 inline bool isExternallyVisible(Linkage L) {
-  return L >= VisibleNoLinkage;
+  return L == ExternalLinkage || L == VisibleNoLinkage;
 }
 
 inline Linkage getFormalLinkage(Linkage L) {
-  switch (L) {
-  case UniqueExternalLinkage:
+  if (L == UniqueExternalLinkage)
     return ExternalLinkage;
-  case VisibleNoLinkage:
+  if (L == VisibleNoLinkage)
     return NoLinkage;
-  case ModuleInternalLinkage:
-    return InternalLinkage;
-  default:
-    return L;
-  }
+  return L;
 }
 
 inline bool isExternalFormalLinkage(Linkage L) {

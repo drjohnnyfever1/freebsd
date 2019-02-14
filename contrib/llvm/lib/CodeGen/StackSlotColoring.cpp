@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -21,7 +22,6 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
@@ -32,7 +32,7 @@
 #include <vector>
 using namespace llvm;
 
-#define DEBUG_TYPE "stack-slot-coloring"
+#define DEBUG_TYPE "stackslotcoloring"
 
 static cl::opt<bool>
 DisableSharing("no-stack-slot-sharing",
@@ -116,12 +116,12 @@ namespace {
 char StackSlotColoring::ID = 0;
 char &llvm::StackSlotColoringID = StackSlotColoring::ID;
 
-INITIALIZE_PASS_BEGIN(StackSlotColoring, DEBUG_TYPE,
+INITIALIZE_PASS_BEGIN(StackSlotColoring, "stack-slot-coloring",
                 "Stack Slot Coloring", false, false)
 INITIALIZE_PASS_DEPENDENCY(SlotIndexes)
 INITIALIZE_PASS_DEPENDENCY(LiveStacks)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
-INITIALIZE_PASS_END(StackSlotColoring, DEBUG_TYPE,
+INITIALIZE_PASS_END(StackSlotColoring, "stack-slot-coloring",
                 "Stack Slot Coloring", false, false)
 
 namespace {

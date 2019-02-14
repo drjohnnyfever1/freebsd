@@ -14,12 +14,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/Pass.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
@@ -520,25 +520,12 @@ bool Scalarizer::visitGetElementPtrInst(GetElementPtrInst &GEPI) {
   unsigned NumElems = VT->getNumElements();
   unsigned NumIndices = GEPI.getNumIndices();
 
-  // The base pointer might be scalar even if it's a vector GEP. In those cases,
-  // splat the pointer into a vector value, and scatter that vector.
-  Value *Op0 = GEPI.getOperand(0);
-  if (!Op0->getType()->isVectorTy())
-    Op0 = Builder.CreateVectorSplat(NumElems, Op0);
-  Scatterer Base = scatter(&GEPI, Op0);
+  Scatterer Base = scatter(&GEPI, GEPI.getOperand(0));
 
   SmallVector<Scatterer, 8> Ops;
   Ops.resize(NumIndices);
-  for (unsigned I = 0; I < NumIndices; ++I) {
-    Value *Op = GEPI.getOperand(I + 1);
-
-    // The indices might be scalars even if it's a vector GEP. In those cases,
-    // splat the scalar into a vector value, and scatter that vector.
-    if (!Op->getType()->isVectorTy())
-      Op = Builder.CreateVectorSplat(NumElems, Op);
-
-    Ops[I] = scatter(&GEPI, Op);
-  }
+  for (unsigned I = 0; I < NumIndices; ++I)
+    Ops[I] = scatter(&GEPI, GEPI.getOperand(I + 1));
 
   ValueVector Res;
   Res.resize(NumElems);

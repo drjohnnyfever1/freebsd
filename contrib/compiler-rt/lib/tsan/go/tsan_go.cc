@@ -214,7 +214,7 @@ void __tsan_go_start(ThreadState *parent, ThreadState **pthr, void *pc) {
   ThreadState *thr = AllocGoroutine();
   *pthr = thr;
   int goid = ThreadCreate(parent, (uptr)pc, 0, true);
-  ThreadStart(thr, goid, 0, /*workerthread*/ false);
+  ThreadStart(thr, goid, 0);
 }
 
 void __tsan_go_end(ThreadState *thr) {
@@ -247,17 +247,13 @@ void __tsan_finalizer_goroutine(ThreadState *thr) {
 }
 
 void __tsan_mutex_before_lock(ThreadState *thr, uptr addr, uptr write) {
-  if (write)
-    MutexPreLock(thr, 0, addr);
-  else
-    MutexPreReadLock(thr, 0, addr);
 }
 
 void __tsan_mutex_after_lock(ThreadState *thr, uptr addr, uptr write) {
   if (write)
-    MutexPostLock(thr, 0, addr);
+    MutexLock(thr, 0, addr);
   else
-    MutexPostReadLock(thr, 0, addr);
+    MutexReadLock(thr, 0, addr);
 }
 
 void __tsan_mutex_before_unlock(ThreadState *thr, uptr addr, uptr write) {

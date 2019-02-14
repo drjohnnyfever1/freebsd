@@ -11,9 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/BitVector.h"
+#include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -30,7 +31,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
@@ -557,7 +557,7 @@ bool LoopReroll::isLoopControlIV(Loop *L, Instruction *IV) {
             Instruction *UUser = dyn_cast<Instruction>(UU);
             // Skip SExt if we are extending an nsw value
             // TODO: Allow ZExt too
-            if (BO->hasNoSignedWrap() && UUser && UUser->hasOneUse() &&
+            if (BO->hasNoSignedWrap() && UUser && UUser->getNumUses() == 1 &&
                 isa<SExtInst>(UUser))
               UUser = dyn_cast<Instruction>(*(UUser->user_begin()));
             if (!isCompareUsedByBranch(UUser))
@@ -852,7 +852,7 @@ collectPossibleRoots(Instruction *Base, std::map<int64_t,Instruction*> &Roots) {
   for (auto &KV : Roots) {
     if (KV.first == 0)
       continue;
-    if (!KV.second->hasNUses(NumBaseUses)) {
+    if (KV.second->getNumUses() != NumBaseUses) {
       DEBUG(dbgs() << "LRR: Aborting - Root and Base #users not the same: "
             << "#Base=" << NumBaseUses << ", #Root=" <<
             KV.second->getNumUses() << "\n");
@@ -867,7 +867,7 @@ void LoopReroll::DAGRootTracker::
 findRootsRecursive(Instruction *I, SmallInstructionSet SubsumedInsts) {
   // Does the user look like it could be part of a root set?
   // All its users must be simple arithmetic ops.
-  if (I->hasNUsesOrMore(IL_MaxRerollIterations + 1))
+  if (I->getNumUses() > IL_MaxRerollIterations)
     return;
 
   if (I != IV && findRootsBase(I, SubsumedInsts))

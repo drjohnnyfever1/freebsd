@@ -14,7 +14,9 @@
 
 #include "llvm-c/Core.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/Attributes.h"
+#include "AttributeSetNode.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -49,7 +51,6 @@ void llvm::initializeCore(PassRegistry &Registry) {
   initializePrintModulePassWrapperPass(Registry);
   initializePrintFunctionPassWrapperPass(Registry);
   initializePrintBasicBlockPassPass(Registry);
-  initializeSafepointIRVerifierPass(Registry);
   initializeVerifierLegacyPassPass(Registry);
 }
 
@@ -258,8 +259,7 @@ void LLVMSetTarget(LLVMModuleRef M, const char *Triple) {
 }
 
 void LLVMDumpModule(LLVMModuleRef M) {
-  unwrap(M)->print(errs(), nullptr,
-                   /*ShouldPreserveUseListOrder=*/false, /*IsForDebug=*/true);
+  unwrap(M)->dump();
 }
 
 LLVMBool LLVMPrintModuleToFile(LLVMModuleRef M, const char *Filename,
@@ -358,11 +358,9 @@ LLVMContextRef LLVMGetTypeContext(LLVMTypeRef Ty) {
   return wrap(&unwrap(Ty)->getContext());
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-LLVM_DUMP_METHOD void LLVMDumpType(LLVMTypeRef Ty) {
+void LLVMDumpType(LLVMTypeRef Ty) {
   return unwrap(Ty)->dump();
 }
-#endif
 
 char *LLVMPrintTypeToString(LLVMTypeRef Ty) {
   std::string buf;
@@ -568,14 +566,6 @@ LLVMTypeRef LLVMGetTypeByName(LLVMModuleRef M, const char *Name) {
 
 /*--.. Operations on array, pointer, and vector types (sequence types) .....--*/
 
-void LLVMGetSubtypes(LLVMTypeRef Tp, LLVMTypeRef *Arr) {
-    int i = 0;
-    for (auto *T : unwrap(Tp)->subtypes()) {
-        Arr[i] = wrap(T);
-        i++;
-    }
-}
-
 LLVMTypeRef LLVMArrayType(LLVMTypeRef ElementType, unsigned ElementCount) {
   return wrap(ArrayType::get(unwrap(ElementType), ElementCount));
 }
@@ -593,10 +583,6 @@ LLVMTypeRef LLVMGetElementType(LLVMTypeRef WrappedTy) {
   if (auto *PTy = dyn_cast<PointerType>(Ty))
     return wrap(PTy->getElementType());
   return wrap(cast<SequentialType>(Ty)->getElementType());
-}
-
-unsigned LLVMGetNumContainedTypes(LLVMTypeRef Tp) {
-    return unwrap(Tp)->getNumContainedTypes();
 }
 
 unsigned LLVMGetArrayLength(LLVMTypeRef ArrayTy) {
@@ -654,8 +640,8 @@ void LLVMSetValueName(LLVMValueRef Val, const char *Name) {
   unwrap(Val)->setName(Name);
 }
 
-LLVM_DUMP_METHOD void LLVMDumpValue(LLVMValueRef Val) {
-  unwrap(Val)->print(errs(), /*IsForDebug=*/true);
+void LLVMDumpValue(LLVMValueRef Val) {
+  unwrap(Val)->dump();
 }
 
 char* LLVMPrintValueToString(LLVMValueRef Val) {
@@ -873,19 +859,6 @@ LLVMValueRef LLVMMDNodeInContext(LLVMContextRef C, LLVMValueRef *Vals,
 
 LLVMValueRef LLVMMDNode(LLVMValueRef *Vals, unsigned Count) {
   return LLVMMDNodeInContext(LLVMGetGlobalContext(), Vals, Count);
-}
-
-LLVMValueRef LLVMMetadataAsValue(LLVMContextRef C, LLVMMetadataRef MD) {
-  return wrap(MetadataAsValue::get(*unwrap(C), unwrap(MD)));
-}
-
-LLVMMetadataRef LLVMValueAsMetadata(LLVMValueRef Val) {
-  auto *V = unwrap(Val);
-  if (auto *C = dyn_cast<Constant>(V))
-    return wrap(ConstantAsMetadata::get(C));
-  if (auto *MAV = dyn_cast<MetadataAsValue>(V))
-    return wrap(MAV->getMetadata());
-  return wrap(ValueAsMetadata::get(V));
 }
 
 const char *LLVMGetMDString(LLVMValueRef V, unsigned *Length) {
@@ -1871,14 +1844,18 @@ void LLVMAddAttributeAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx,
 }
 
 unsigned LLVMGetAttributeCountAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx) {
-  auto AS = unwrap<Function>(F)->getAttributes().getAttributes(Idx);
-  return AS.getNumAttributes();
+  auto *ASN = AttributeSetNode::get(unwrap<Function>(F)->getAttributes(), Idx);
+  if (!ASN)
+    return 0;
+  return ASN->getNumAttributes();
 }
 
 void LLVMGetAttributesAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx,
                               LLVMAttributeRef *Attrs) {
-  auto AS = unwrap<Function>(F)->getAttributes().getAttributes(Idx);
-  for (auto A : AS)
+  auto *ASN = AttributeSetNode::get(unwrap<Function>(F)->getAttributes(), Idx);
+  if (!ASN)
+    return;
+  for (auto A: make_range(ASN->begin(), ASN->end()))
     *Attrs++ = wrap(A);
 }
 
@@ -1908,8 +1885,13 @@ void LLVMRemoveStringAttributeAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx,
 void LLVMAddTargetDependentFunctionAttr(LLVMValueRef Fn, const char *A,
                                         const char *V) {
   Function *Func = unwrap<Function>(Fn);
-  Attribute Attr = Attribute::get(Func->getContext(), A, V);
-  Func->addAttribute(AttributeList::FunctionIndex, Attr);
+  AttributeSet::AttrIndex Idx =
+    AttributeSet::AttrIndex(AttributeSet::FunctionIndex);
+  AttrBuilder B;
+
+  B.addAttribute(A, V);
+  AttributeSet Set = AttributeSet::get(Func->getContext(), Idx, B);
+  Func->addAttributes(Idx, Set);
 }
 
 /*--.. Operations on parameters ............................................--*/
@@ -1928,8 +1910,10 @@ void LLVMGetParams(LLVMValueRef FnRef, LLVMValueRef *ParamRefs) {
 }
 
 LLVMValueRef LLVMGetParam(LLVMValueRef FnRef, unsigned index) {
-  Function *Fn = unwrap<Function>(FnRef);
-  return wrap(&Fn->arg_begin()[index]);
+  Function::arg_iterator AI = unwrap<Function>(FnRef)->arg_begin();
+  while (index --> 0)
+    AI++;
+  return wrap(&*AI);
 }
 
 LLVMValueRef LLVMGetParamParent(LLVMValueRef V) {
@@ -1954,22 +1938,25 @@ LLVMValueRef LLVMGetLastParam(LLVMValueRef Fn) {
 
 LLVMValueRef LLVMGetNextParam(LLVMValueRef Arg) {
   Argument *A = unwrap<Argument>(Arg);
-  Function *Fn = A->getParent();
-  if (A->getArgNo() + 1 >= Fn->arg_size())
+  Function::arg_iterator I(A);
+  if (++I == A->getParent()->arg_end())
     return nullptr;
-  return wrap(&Fn->arg_begin()[A->getArgNo() + 1]);
+  return wrap(&*I);
 }
 
 LLVMValueRef LLVMGetPreviousParam(LLVMValueRef Arg) {
   Argument *A = unwrap<Argument>(Arg);
-  if (A->getArgNo() == 0)
+  Function::arg_iterator I(A);
+  if (I == A->getParent()->arg_begin())
     return nullptr;
-  return wrap(&A->getParent()->arg_begin()[A->getArgNo() - 1]);
+  return wrap(&*--I);
 }
 
 void LLVMSetParamAlignment(LLVMValueRef Arg, unsigned align) {
   Argument *A = unwrap<Argument>(Arg);
-  A->addAttr(Attribute::getWithAlignment(A->getContext(), align));
+  AttrBuilder B;
+  B.addAlignmentAttr(align);
+  A->addAttr(AttributeSet::get(A->getContext(),A->getArgNo() + 1, B));
 }
 
 /*--.. Operations on basic blocks ..........................................--*/
@@ -2176,8 +2163,12 @@ void LLVMSetInstructionCallConv(LLVMValueRef Instr, unsigned CC) {
 void LLVMSetInstrParamAlignment(LLVMValueRef Instr, unsigned index,
                                 unsigned align) {
   CallSite Call = CallSite(unwrap<Instruction>(Instr));
-  Attribute AlignAttr = Attribute::getWithAlignment(Call->getContext(), align);
-  Call.addAttribute(index, AlignAttr);
+  AttrBuilder B;
+  B.addAlignmentAttr(align);
+  Call.setAttributes(Call.getAttributes()
+                       .addAttributes(Call->getContext(), index,
+                                      AttributeSet::get(Call->getContext(),
+                                                        index, B)));
 }
 
 void LLVMAddCallSiteAttribute(LLVMValueRef C, LLVMAttributeIndex Idx,
@@ -2188,15 +2179,19 @@ void LLVMAddCallSiteAttribute(LLVMValueRef C, LLVMAttributeIndex Idx,
 unsigned LLVMGetCallSiteAttributeCount(LLVMValueRef C,
                                        LLVMAttributeIndex Idx) {
   auto CS = CallSite(unwrap<Instruction>(C));
-  auto AS = CS.getAttributes().getAttributes(Idx);
-  return AS.getNumAttributes();
+  auto *ASN = AttributeSetNode::get(CS.getAttributes(), Idx);
+  if (!ASN)
+    return 0;
+  return ASN->getNumAttributes();
 }
 
 void LLVMGetCallSiteAttributes(LLVMValueRef C, LLVMAttributeIndex Idx,
                                LLVMAttributeRef *Attrs) {
   auto CS = CallSite(unwrap<Instruction>(C));
-  auto AS = CS.getAttributes().getAttributes(Idx);
-  for (auto A : AS)
+  auto *ASN = AttributeSetNode::get(CS.getAttributes(), Idx);
+  if (!ASN)
+    return;
+  for (auto A: make_range(ASN->begin(), ASN->end()))
     *Attrs++ = wrap(A);
 }
 
@@ -2755,14 +2750,11 @@ static LLVMAtomicOrdering mapToLLVMOrdering(AtomicOrdering Ordering) {
   llvm_unreachable("Invalid AtomicOrdering value!");
 }
 
-// TODO: Should this and other atomic instructions support building with
-// "syncscope"?
 LLVMValueRef LLVMBuildFence(LLVMBuilderRef B, LLVMAtomicOrdering Ordering,
                             LLVMBool isSingleThread, const char *Name) {
   return wrap(
     unwrap(B)->CreateFence(mapFromLLVMOrdering(Ordering),
-                           isSingleThread ? SyncScope::SingleThread
-                                          : SyncScope::System,
+                           isSingleThread ? SingleThread : CrossThread,
                            Name));
 }
 
@@ -3044,8 +3036,7 @@ LLVMValueRef LLVMBuildAtomicRMW(LLVMBuilderRef B,LLVMAtomicRMWBinOp op,
     case LLVMAtomicRMWBinOpUMin: intop = AtomicRMWInst::UMin; break;
   }
   return wrap(unwrap(B)->CreateAtomicRMW(intop, unwrap(PTR), unwrap(Val),
-    mapFromLLVMOrdering(ordering), singleThread ? SyncScope::SingleThread
-                                                : SyncScope::System));
+    mapFromLLVMOrdering(ordering), singleThread ? SingleThread : CrossThread));
 }
 
 LLVMValueRef LLVMBuildAtomicCmpXchg(LLVMBuilderRef B, LLVMValueRef Ptr,
@@ -3057,7 +3048,7 @@ LLVMValueRef LLVMBuildAtomicCmpXchg(LLVMBuilderRef B, LLVMValueRef Ptr,
   return wrap(unwrap(B)->CreateAtomicCmpXchg(unwrap(Ptr), unwrap(Cmp),
                 unwrap(New), mapFromLLVMOrdering(SuccessOrdering),
                 mapFromLLVMOrdering(FailureOrdering),
-                singleThread ? SyncScope::SingleThread : SyncScope::System));
+                singleThread ? SingleThread : CrossThread));
 }
 
 
@@ -3065,18 +3056,17 @@ LLVMBool LLVMIsAtomicSingleThread(LLVMValueRef AtomicInst) {
   Value *P = unwrap<Value>(AtomicInst);
 
   if (AtomicRMWInst *I = dyn_cast<AtomicRMWInst>(P))
-    return I->getSyncScopeID() == SyncScope::SingleThread;
-  return cast<AtomicCmpXchgInst>(P)->getSyncScopeID() ==
-             SyncScope::SingleThread;
+    return I->getSynchScope() == SingleThread;
+  return cast<AtomicCmpXchgInst>(P)->getSynchScope() == SingleThread;
 }
 
 void LLVMSetAtomicSingleThread(LLVMValueRef AtomicInst, LLVMBool NewValue) {
   Value *P = unwrap<Value>(AtomicInst);
-  SyncScope::ID SSID = NewValue ? SyncScope::SingleThread : SyncScope::System;
+  SynchronizationScope Sync = NewValue ? SingleThread : CrossThread;
 
   if (AtomicRMWInst *I = dyn_cast<AtomicRMWInst>(P))
-    return I->setSyncScopeID(SSID);
-  return cast<AtomicCmpXchgInst>(P)->setSyncScopeID(SSID);
+    return I->setSynchScope(Sync);
+  return cast<AtomicCmpXchgInst>(P)->setSynchScope(Sync);
 }
 
 LLVMAtomicOrdering LLVMGetCmpXchgSuccessOrdering(LLVMValueRef CmpXchgInst)  {

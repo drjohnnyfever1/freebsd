@@ -15,14 +15,12 @@
 # error "Define SCUDO_FLAG prior to including this file!"
 #endif
 
-// Default value is set in scudo_flags.cpp based on architecture.
-SCUDO_FLAG(int, QuarantineSizeMb, -1,
+SCUDO_FLAG(int, QuarantineSizeMb, 64,
            "Size (in Mb) of quarantine used to delay the actual deallocation "
            "of chunks. Lower value may reduce memory usage but decrease the "
            "effectiveness of the mitigation.")
 
-// Default value is set in scudo_flags.cpp based on architecture.
-SCUDO_FLAG(int, ThreadLocalQuarantineSizeKb, -1,
+SCUDO_FLAG(int, ThreadLocalQuarantineSizeKb, 1024,
           "Size (in Kb) of per-thread cache used to offload the global "
           "quarantine. Lower value may reduce memory usage but might increase "
           "the contention on the global quarantine.")

@@ -8,4 +8,3 @@ infrastructure project.
 
 lld is open source software. You may freely distribute it under the terms of
 the license agreement found in LICENSE.txt.
-

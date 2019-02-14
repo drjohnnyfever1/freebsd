@@ -34,7 +34,6 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 
@@ -407,9 +406,9 @@ SDValue XCoreTargetLowering::lowerLoadWordFromAlignedBasePlusOffset(
 
 static bool isWordAligned(SDValue Value, SelectionDAG &DAG)
 {
-  KnownBits Known;
-  DAG.computeKnownBits(Value, Known);
-  return Known.countMinTrailingZeros() >= 2;
+  APInt KnownZero, KnownOne;
+  DAG.computeKnownBits(Value, KnownZero, KnownOne);
+  return KnownZero.countTrailingOnes() >= 2;
 }
 
 SDValue XCoreTargetLowering::
@@ -484,7 +483,7 @@ LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
   Args.push_back(Entry);
 
   TargetLowering::CallLoweringInfo CLI(DAG);
-  CLI.setDebugLoc(DL).setChain(Chain).setLibCallee(
+  CLI.setDebugLoc(DL).setChain(Chain).setCallee(
       CallingConv::C, IntPtrTy,
       DAG.getExternalSymbol("__misaligned_load",
                             getPointerTy(DAG.getDataLayout())),
@@ -1131,7 +1130,8 @@ SDValue XCoreTargetLowering::LowerCCCCallTo(
   unsigned NumBytes = RetCCInfo.getNextStackOffset();
   auto PtrVT = getPointerTy(DAG.getDataLayout());
 
-  Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, dl);
+  Chain = DAG.getCALLSEQ_START(Chain,
+                               DAG.getConstant(NumBytes, dl, PtrVT, true), dl);
 
   SmallVector<std::pair<unsigned, SDValue>, 4> RegsToPass;
   SmallVector<SDValue, 12> MemOpChains;
@@ -1601,12 +1601,13 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
       if (OutVal.hasOneUse()) {
         unsigned BitWidth = OutVal.getValueSizeInBits();
         APInt DemandedMask = APInt::getLowBitsSet(BitWidth, 8);
-        KnownBits Known;
+        APInt KnownZero, KnownOne;
         TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
                                               !DCI.isBeforeLegalizeOps());
         const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-        if (TLI.ShrinkDemandedConstant(OutVal, DemandedMask, TLO) ||
-            TLI.SimplifyDemandedBits(OutVal, DemandedMask, Known, TLO))
+        if (TLO.ShrinkDemandedConstant(OutVal, DemandedMask) ||
+            TLI.SimplifyDemandedBits(OutVal, DemandedMask, KnownZero, KnownOne,
+                                     TLO))
           DCI.CommitTargetLoweringOpt(TLO);
       }
       break;
@@ -1617,12 +1618,13 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
       if (Time.hasOneUse()) {
         unsigned BitWidth = Time.getValueSizeInBits();
         APInt DemandedMask = APInt::getLowBitsSet(BitWidth, 16);
-        KnownBits Known;
+        APInt KnownZero, KnownOne;
         TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
                                               !DCI.isBeforeLegalizeOps());
         const TargetLowering &TLI = DAG.getTargetLoweringInfo();
-        if (TLI.ShrinkDemandedConstant(Time, DemandedMask, TLO) ||
-            TLI.SimplifyDemandedBits(Time, DemandedMask, Known, TLO))
+        if (TLO.ShrinkDemandedConstant(Time, DemandedMask) ||
+            TLI.SimplifyDemandedBits(Time, DemandedMask, KnownZero, KnownOne,
+                                     TLO))
           DCI.CommitTargetLoweringOpt(TLO);
       }
       break;
@@ -1653,11 +1655,11 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
     // fold (ladd x, 0, y) -> 0, add x, y iff carry is unused and y has only the
     // low bit set
     if (N1C && N1C->isNullValue() && N->hasNUsesOfValue(0, 1)) {
-      KnownBits Known;
+      APInt KnownZero, KnownOne;
       APInt Mask = APInt::getHighBitsSet(VT.getSizeInBits(),
                                          VT.getSizeInBits() - 1);
-      DAG.computeKnownBits(N2, Known);
-      if ((Known.Zero & Mask) == Mask) {
+      DAG.computeKnownBits(N2, KnownZero, KnownOne);
+      if ((KnownZero & Mask) == Mask) {
         SDValue Carry = DAG.getConstant(0, dl, VT);
         SDValue Result = DAG.getNode(ISD::ADD, dl, VT, N0, N2);
         SDValue Ops[] = { Result, Carry };
@@ -1676,11 +1678,11 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
 
     // fold (lsub 0, 0, x) -> x, -x iff x has only the low bit set
     if (N0C && N0C->isNullValue() && N1C && N1C->isNullValue()) {
-      KnownBits Known;
+      APInt KnownZero, KnownOne;
       APInt Mask = APInt::getHighBitsSet(VT.getSizeInBits(),
                                          VT.getSizeInBits() - 1);
-      DAG.computeKnownBits(N2, Known);
-      if ((Known.Zero & Mask) == Mask) {
+      DAG.computeKnownBits(N2, KnownZero, KnownOne);
+      if ((KnownZero & Mask) == Mask) {
         SDValue Borrow = N2;
         SDValue Result = DAG.getNode(ISD::SUB, dl, VT,
                                      DAG.getConstant(0, dl, VT), N2);
@@ -1692,11 +1694,11 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
     // fold (lsub x, 0, y) -> 0, sub x, y iff borrow is unused and y has only the
     // low bit set
     if (N1C && N1C->isNullValue() && N->hasNUsesOfValue(0, 1)) {
-      KnownBits Known;
+      APInt KnownZero, KnownOne;
       APInt Mask = APInt::getHighBitsSet(VT.getSizeInBits(),
                                          VT.getSizeInBits() - 1);
-      DAG.computeKnownBits(N2, Known);
-      if ((Known.Zero & Mask) == Mask) {
+      DAG.computeKnownBits(N2, KnownZero, KnownOne);
+      if ((KnownZero & Mask) == Mask) {
         SDValue Borrow = DAG.getConstant(0, dl, VT);
         SDValue Result = DAG.getNode(ISD::SUB, dl, VT, N0, N2);
         SDValue Ops[] = { Result, Borrow };
@@ -1820,19 +1822,19 @@ SDValue XCoreTargetLowering::PerformDAGCombine(SDNode *N,
 }
 
 void XCoreTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
-                                                        KnownBits &Known,
-                                                        const APInt &DemandedElts,
+                                                        APInt &KnownZero,
+                                                        APInt &KnownOne,
                                                         const SelectionDAG &DAG,
                                                         unsigned Depth) const {
-  Known.resetAll();
+  KnownZero = KnownOne = APInt(KnownZero.getBitWidth(), 0);
   switch (Op.getOpcode()) {
   default: break;
   case XCoreISD::LADD:
   case XCoreISD::LSUB:
     if (Op.getResNo() == 1) {
       // Top bits of carry / borrow are clear.
-      Known.Zero = APInt::getHighBitsSet(Known.getBitWidth(),
-                                         Known.getBitWidth() - 1);
+      KnownZero = APInt::getHighBitsSet(KnownZero.getBitWidth(),
+                                        KnownZero.getBitWidth() - 1);
     }
     break;
   case ISD::INTRINSIC_W_CHAIN:
@@ -1841,24 +1843,24 @@ void XCoreTargetLowering::computeKnownBitsForTargetNode(const SDValue Op,
       switch (IntNo) {
       case Intrinsic::xcore_getts:
         // High bits are known to be zero.
-        Known.Zero = APInt::getHighBitsSet(Known.getBitWidth(),
-                                           Known.getBitWidth() - 16);
+        KnownZero = APInt::getHighBitsSet(KnownZero.getBitWidth(),
+                                          KnownZero.getBitWidth() - 16);
         break;
       case Intrinsic::xcore_int:
       case Intrinsic::xcore_inct:
         // High bits are known to be zero.
-        Known.Zero = APInt::getHighBitsSet(Known.getBitWidth(),
-                                           Known.getBitWidth() - 8);
+        KnownZero = APInt::getHighBitsSet(KnownZero.getBitWidth(),
+                                          KnownZero.getBitWidth() - 8);
         break;
       case Intrinsic::xcore_testct:
         // Result is either 0 or 1.
-        Known.Zero = APInt::getHighBitsSet(Known.getBitWidth(),
-                                           Known.getBitWidth() - 1);
+        KnownZero = APInt::getHighBitsSet(KnownZero.getBitWidth(),
+                                          KnownZero.getBitWidth() - 1);
         break;
       case Intrinsic::xcore_testwct:
         // Result is in the range 0 - 4.
-        Known.Zero = APInt::getHighBitsSet(Known.getBitWidth(),
-                                           Known.getBitWidth() - 3);
+        KnownZero = APInt::getHighBitsSet(KnownZero.getBitWidth(),
+                                          KnownZero.getBitWidth() - 3);
         break;
       }
     }

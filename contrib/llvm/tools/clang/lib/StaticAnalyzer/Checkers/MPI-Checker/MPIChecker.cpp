@@ -153,9 +153,9 @@ void MPIChecker::allRegionsUsedByWait(
   MemRegionManager *const RegionManager = MR->getMemRegionManager();
 
   if (FuncClassifier->isMPI_Waitall(CE.getCalleeIdentifier())) {
-    const SubRegion *SuperRegion{nullptr};
+    const MemRegion *SuperRegion{nullptr};
     if (const ElementRegion *const ER = MR->getAs<ElementRegion>()) {
-      SuperRegion = cast<SubRegion>(ER->getSuperRegion());
+      SuperRegion = ER->getSuperRegion();
     }
 
     // A single request is passed to MPI_Waitall.

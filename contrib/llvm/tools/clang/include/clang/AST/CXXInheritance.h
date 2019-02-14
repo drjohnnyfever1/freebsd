@@ -127,11 +127,7 @@ class CXXBasePaths {
   /// class subobjects for that class type. The key of the map is
   /// the cv-unqualified canonical type of the base class subobject.
   llvm::SmallDenseMap<QualType, std::pair<bool, unsigned>, 8> ClassSubobjects;
-
-  /// VisitedDependentRecords - Records the dependent records that have been
-  /// already visited.
-  llvm::SmallDenseSet<const CXXRecordDecl *, 4> VisitedDependentRecords;
-
+  
   /// FindAmbiguities - Whether Sema::IsDerivedFrom should try find
   /// ambiguous paths while it is looking for a path from a derived
   /// type to a base type.
@@ -165,8 +161,7 @@ class CXXBasePaths {
   void ComputeDeclsFound();
 
   bool lookupInBases(ASTContext &Context, const CXXRecordDecl *Record,
-                     CXXRecordDecl::BaseMatchesCallback BaseMatches,
-                     bool LookupInDependent = false);
+                     CXXRecordDecl::BaseMatchesCallback BaseMatches);
 
 public:
   typedef std::list<CXXBasePath>::iterator paths_iterator;

@@ -43,8 +43,7 @@ void StackTrace::Print() const {
       if (dedup_frames-- > 0) {
         if (dedup_token.length())
           dedup_token.append("--");
-        if (cur->info.function != nullptr)
-          dedup_token.append(cur->info.function);
+        dedup_token.append(cur->info.function);
       }
     }
     frames->ClearAll();

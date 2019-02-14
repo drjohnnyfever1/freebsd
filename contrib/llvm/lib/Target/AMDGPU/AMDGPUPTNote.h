@@ -19,13 +19,12 @@
 
 namespace AMDGPU {
 
-namespace ElfNote {
+namespace PT_NOTE {
 
 const char SectionName[] = ".note";
 
 const char NoteName[] = "AMD";
 
-// TODO: Move this enum to include/llvm/Support so it can be used in tools?
 enum NoteType{
     NT_AMDGPU_HSA_CODE_OBJECT_VERSION = 1,
     NT_AMDGPU_HSA_HSAIL = 2,
@@ -33,7 +32,7 @@ enum NoteType{
     NT_AMDGPU_HSA_PRODUCER = 4,
     NT_AMDGPU_HSA_PRODUCER_OPTIONS = 5,
     NT_AMDGPU_HSA_EXTENSION = 6,
-    NT_AMDGPU_HSA_CODE_OBJECT_METADATA = 10,
+    NT_AMDGPU_HSA_RUNTIME_METADATA = 7,
     NT_AMDGPU_HSA_HLDEBUG_DEBUG = 101,
     NT_AMDGPU_HSA_HLDEBUG_TARGET = 102
 };

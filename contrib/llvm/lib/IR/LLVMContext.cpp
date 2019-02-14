@@ -13,11 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/LLVMContext.h"
-#include "LLVMContextImpl.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "LLVMContextImpl.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/Metadata.h"
@@ -58,7 +58,6 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
     {MD_type, "type"},
     {MD_section_prefix, "section_prefix"},
     {MD_absolute_symbol, "absolute_symbol"},
-    {MD_associated, "associated"},
   };
 
   for (auto &MDKind : MDKinds) {
@@ -81,18 +80,6 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
   assert(GCTransitionEntry->second == LLVMContext::OB_gc_transition &&
          "gc-transition operand bundle id drifted!");
   (void)GCTransitionEntry;
-
-  SyncScope::ID SingleThreadSSID =
-      pImpl->getOrInsertSyncScopeID("singlethread");
-  assert(SingleThreadSSID == SyncScope::SingleThread &&
-         "singlethread synchronization scope ID drifted!");
-  (void)SingleThreadSSID;
-
-  SyncScope::ID SystemSSID =
-      pImpl->getOrInsertSyncScopeID("");
-  assert(SystemSSID == SyncScope::System &&
-         "system synchronization scope ID drifted!");
-  (void)SystemSSID;
 }
 
 LLVMContext::~LLVMContext() { delete pImpl; }
@@ -137,18 +124,11 @@ void LLVMContext::setDiagnosticHandler(DiagnosticHandlerTy DiagnosticHandler,
   pImpl->RespectDiagnosticFilters = RespectFilters;
 }
 
-void LLVMContext::setDiagnosticsHotnessRequested(bool Requested) {
-  pImpl->DiagnosticsHotnessRequested = Requested;
+void LLVMContext::setDiagnosticHotnessRequested(bool Requested) {
+  pImpl->DiagnosticHotnessRequested = Requested;
 }
-bool LLVMContext::getDiagnosticsHotnessRequested() const {
-  return pImpl->DiagnosticsHotnessRequested;
-}
-
-void LLVMContext::setDiagnosticsHotnessThreshold(uint64_t Threshold) {
-  pImpl->DiagnosticsHotnessThreshold = Threshold;
-}
-uint64_t LLVMContext::getDiagnosticsHotnessThreshold() const {
-  return pImpl->DiagnosticsHotnessThreshold;
+bool LLVMContext::getDiagnosticHotnessRequested() const {
+  return pImpl->DiagnosticHotnessRequested;
 }
 
 yaml::Output *LLVMContext::getDiagnosticsOutputFile() {
@@ -265,14 +245,6 @@ void LLVMContext::getOperandBundleTags(SmallVectorImpl<StringRef> &Tags) const {
 
 uint32_t LLVMContext::getOperandBundleTagID(StringRef Tag) const {
   return pImpl->getOperandBundleTagID(Tag);
-}
-
-SyncScope::ID LLVMContext::getOrInsertSyncScopeID(StringRef SSN) {
-  return pImpl->getOrInsertSyncScopeID(SSN);
-}
-
-void LLVMContext::getSyncScopeNames(SmallVectorImpl<StringRef> &SSNs) const {
-  pImpl->getSyncScopeNames(SSNs);
 }
 
 void LLVMContext::setGC(const Function &Fn, std::string GCName) {

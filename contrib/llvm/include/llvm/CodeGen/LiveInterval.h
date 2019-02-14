@@ -1,4 +1,4 @@
-//===- llvm/CodeGen/LiveInterval.h - Interval representation ----*- C++ -*-===//
+//===-- llvm/CodeGen/LiveInterval.h - Interval representation ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -21,30 +21,22 @@
 #ifndef LLVM_CODEGEN_LIVEINTERVAL_H
 #define LLVM_CODEGEN_LIVEINTERVAL_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntEqClasses.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/SlotIndexes.h"
-#include "llvm/MC/LaneBitmask.h"
 #include "llvm/Support/Allocator.h"
-#include "llvm/Support/MathExtras.h"
-#include <algorithm>
+#include "llvm/Target/TargetRegisterInfo.h"
 #include <cassert>
-#include <cstddef>
-#include <functional>
-#include <memory>
+#include <climits>
 #include <set>
-#include <tuple>
-#include <utility>
 
 namespace llvm {
-
   class CoalescerPair;
   class LiveIntervals;
+  class MachineInstr;
   class MachineRegisterInfo;
+  class TargetRegisterInfo;
   class raw_ostream;
+  template <typename T, unsigned Small> class SmallPtrSet;
 
   /// VNInfo - Value Number Information.
   /// This class holds information about a machine level values, including
@@ -52,7 +44,7 @@ namespace llvm {
   ///
   class VNInfo {
   public:
-    using Allocator = BumpPtrAllocator;
+    typedef BumpPtrAllocator Allocator;
 
     /// The ID number of this value.
     unsigned id;
@@ -61,10 +53,14 @@ namespace llvm {
     SlotIndex def;
 
     /// VNInfo constructor.
-    VNInfo(unsigned i, SlotIndex d) : id(i), def(d) {}
+    VNInfo(unsigned i, SlotIndex d)
+      : id(i), def(d)
+    { }
 
     /// VNInfo constructor, copies values from orig, except for the value number.
-    VNInfo(unsigned i, const VNInfo &orig) : id(i), def(orig.def) {}
+    VNInfo(unsigned i, const VNInfo &orig)
+      : id(i), def(orig.def)
+    { }
 
     /// Copy from the parameter into this VNInfo.
     void copyFrom(VNInfo &src) {
@@ -156,16 +152,16 @@ namespace llvm {
   /// segment with a new value number is used.
   class LiveRange {
   public:
+
     /// This represents a simple continuous liveness interval for a value.
     /// The start point is inclusive, the end point exclusive. These intervals
     /// are rendered as [start,end).
     struct Segment {
       SlotIndex start;  // Start point of the interval (inclusive)
       SlotIndex end;    // End point of the interval (exclusive)
-      VNInfo *valno = nullptr; // identifier for the value contained in this
-                               // segment.
+      VNInfo *valno;    // identifier for the value contained in this segment.
 
-      Segment() = default;
+      Segment() : valno(nullptr) {}
 
       Segment(SlotIndex S, SlotIndex E, VNInfo *V)
         : start(S), end(E), valno(V) {
@@ -193,8 +189,8 @@ namespace llvm {
       void dump() const;
     };
 
-    using Segments = SmallVector<Segment, 2>;
-    using VNInfoList = SmallVector<VNInfo *, 2>;
+    typedef SmallVector<Segment, 2> Segments;
+    typedef SmallVector<VNInfo *, 2> VNInfoList;
 
     Segments segments;   // the liveness segments
     VNInfoList valnos;   // value#'s
@@ -202,24 +198,22 @@ namespace llvm {
     // The segment set is used temporarily to accelerate initial computation
     // of live ranges of physical registers in computeRegUnitRange.
     // After that the set is flushed to the segment vector and deleted.
-    using SegmentSet = std::set<Segment>;
+    typedef std::set<Segment> SegmentSet;
     std::unique_ptr<SegmentSet> segmentSet;
 
-    using iterator = Segments::iterator;
-    using const_iterator = Segments::const_iterator;
-
+    typedef Segments::iterator iterator;
     iterator begin() { return segments.begin(); }
     iterator end()   { return segments.end(); }
 
+    typedef Segments::const_iterator const_iterator;
     const_iterator begin() const { return segments.begin(); }
     const_iterator end() const  { return segments.end(); }
 
-    using vni_iterator = VNInfoList::iterator;
-    using const_vni_iterator = VNInfoList::const_iterator;
-
+    typedef VNInfoList::iterator vni_iterator;
     vni_iterator vni_begin() { return valnos.begin(); }
     vni_iterator vni_end()   { return valnos.end(); }
 
+    typedef VNInfoList::const_iterator const_vni_iterator;
     const_vni_iterator vni_begin() const { return valnos.begin(); }
     const_vni_iterator vni_end() const   { return valnos.end(); }
 
@@ -233,22 +227,15 @@ namespace llvm {
     LiveRange(const LiveRange &Other, BumpPtrAllocator &Allocator) {
       assert(Other.segmentSet == nullptr &&
              "Copying of LiveRanges with active SegmentSets is not supported");
-      assign(Other, Allocator);
-    }
 
-    /// Copies values numbers and live segments from \p Other into this range.
-    void assign(const LiveRange &Other, BumpPtrAllocator &Allocator) {
-      if (this == &Other)
-        return;
-
-      assert(Other.segmentSet == nullptr &&
-             "Copying of LiveRanges with active SegmentSets is not supported");
       // Duplicate valnos.
-      for (const VNInfo *VNI : Other.valnos)
+      for (const VNInfo *VNI : Other.valnos) {
         createValueCopy(VNI, Allocator);
+      }
       // Now we can copy segments and remap their valnos.
-      for (const Segment &S : Other.segments)
+      for (const Segment &S : Other.segments) {
         segments.push_back(Segment(S.start, S.end, valnos[S.valno->id]));
+      }
     }
 
     /// advanceTo - Advance the specified iterator to point to the Segment
@@ -637,37 +624,40 @@ namespace llvm {
   /// or stack slot.
   class LiveInterval : public LiveRange {
   public:
-    using super = LiveRange;
+    typedef LiveRange super;
 
     /// A live range for subregisters. The LaneMask specifies which parts of the
     /// super register are covered by the interval.
     /// (@sa TargetRegisterInfo::getSubRegIndexLaneMask()).
     class SubRange : public LiveRange {
     public:
-      SubRange *Next = nullptr;
+      SubRange *Next;
       LaneBitmask LaneMask;
 
       /// Constructs a new SubRange object.
-      SubRange(LaneBitmask LaneMask) : LaneMask(LaneMask) {}
+      SubRange(LaneBitmask LaneMask)
+        : Next(nullptr), LaneMask(LaneMask) {
+      }
 
       /// Constructs a new SubRange object by copying liveness from @p Other.
       SubRange(LaneBitmask LaneMask, const LiveRange &Other,
                BumpPtrAllocator &Allocator)
-        : LiveRange(Other, Allocator), LaneMask(LaneMask) {}
+        : LiveRange(Other, Allocator), Next(nullptr), LaneMask(LaneMask) {
+      }
 
       void print(raw_ostream &OS) const;
       void dump() const;
     };
 
   private:
-    SubRange *SubRanges = nullptr; ///< Single linked list of subregister live
-                                   /// ranges.
+    SubRange *SubRanges; ///< Single linked list of subregister live ranges.
 
   public:
     const unsigned reg;  // the register or stack slot of this interval.
     float weight;        // weight of this interval
 
-    LiveInterval(unsigned Reg, float Weight) : reg(Reg), weight(Weight) {}
+    LiveInterval(unsigned Reg, float Weight)
+      : SubRanges(nullptr), reg(Reg), weight(Weight) {}
 
     ~LiveInterval() {
       clearSubRanges();
@@ -676,10 +666,8 @@ namespace llvm {
     template<typename T>
     class SingleLinkedListIterator {
       T *P;
-
     public:
       SingleLinkedListIterator<T>(T *P) : P(P) {}
-
       SingleLinkedListIterator<T> &operator++() {
         P = P->Next;
         return *this;
@@ -703,9 +691,7 @@ namespace llvm {
       }
     };
 
-    using subrange_iterator = SingleLinkedListIterator<SubRange>;
-    using const_subrange_iterator = SingleLinkedListIterator<const SubRange>;
-
+    typedef SingleLinkedListIterator<SubRange> subrange_iterator;
     subrange_iterator subrange_begin() {
       return subrange_iterator(SubRanges);
     }
@@ -713,6 +699,7 @@ namespace llvm {
       return subrange_iterator(nullptr);
     }
 
+    typedef SingleLinkedListIterator<const SubRange> const_subrange_iterator;
     const_subrange_iterator subrange_begin() const {
       return const_subrange_iterator(SubRanges);
     }
@@ -765,12 +752,12 @@ namespace llvm {
 
     /// isSpillable - Can this interval be spilled?
     bool isSpillable() const {
-      return weight != huge_valf;
+      return weight != llvm::huge_valf;
     }
 
     /// markNotSpillable - Mark interval as not spillable
     void markNotSpillable() {
-      weight = huge_valf;
+      weight = llvm::huge_valf;
     }
 
     /// For a given lane mask @p LaneMask, compute indexes at which the
@@ -779,19 +766,6 @@ namespace llvm {
                                LaneBitmask LaneMask,
                                const MachineRegisterInfo &MRI,
                                const SlotIndexes &Indexes) const;
-
-    /// Refines the subranges to support \p LaneMask. This may only be called
-    /// for LI.hasSubrange()==true. Subregister ranges are split or created
-    /// until \p LaneMask can be matched exactly. \p Mod is executed on the
-    /// matching subranges.
-    ///
-    /// Example:
-    ///    Given an interval with subranges with lanemasks L0F00, L00F0 and
-    ///    L000F, refining for mask L0018. Will split the L00F0 lane into
-    ///    L00E0 and L0010 and the L000F lane into L0007 and L0008. The Mod
-    ///    function will be applied to the L0010 and L0008 subranges.
-    void refineSubRanges(BumpPtrAllocator &Allocator, LaneBitmask LaneMask,
-                         std::function<void(LiveInterval::SubRange&)> Mod);
 
     bool operator<(const LiveInterval& other) const {
       const SlotIndex &thisIndex = beginIndex();
@@ -937,7 +911,5 @@ namespace llvm {
     void Distribute(LiveInterval &LI, LiveInterval *LIV[],
                     MachineRegisterInfo &MRI);
   };
-
-} // end namespace llvm
-
-#endif // LLVM_CODEGEN_LIVEINTERVAL_H
+}
+#endif

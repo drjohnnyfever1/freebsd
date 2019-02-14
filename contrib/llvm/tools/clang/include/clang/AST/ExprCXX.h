@@ -54,16 +54,18 @@ class CXXOperatorCallExpr : public CallExpr {
   OverloadedOperatorKind Operator;
   SourceRange Range;
 
-  // Only meaningful for floating point types.
-  FPOptions FPFeatures;
+  // Record the FP_CONTRACT state that applies to this operator call. Only
+  // meaningful for floating point types. For other types this value can be
+  // set to false.
+  unsigned FPContractable : 1;
 
   SourceRange getSourceRangeImpl() const LLVM_READONLY;
 public:
   CXXOperatorCallExpr(ASTContext& C, OverloadedOperatorKind Op, Expr *fn,
                       ArrayRef<Expr*> args, QualType t, ExprValueKind VK,
-                      SourceLocation operatorloc, FPOptions FPFeatures)
+                      SourceLocation operatorloc, bool fpContractable)
     : CallExpr(C, CXXOperatorCallExprClass, fn, args, t, VK, operatorloc),
-      Operator(Op), FPFeatures(FPFeatures) {
+      Operator(Op), FPContractable(fpContractable) {
     Range = getSourceRangeImpl();
   }
   explicit CXXOperatorCallExpr(ASTContext& C, EmptyShell Empty) :
@@ -111,15 +113,11 @@ public:
 
   // Set the FP contractability status of this operator. Only meaningful for
   // operations on floating point types.
-  void setFPFeatures(FPOptions F) { FPFeatures = F; }
-
-  FPOptions getFPFeatures() const { return FPFeatures; }
+  void setFPContractable(bool FPC) { FPContractable = FPC; }
 
   // Get the FP contractability status of this operator. Only meaningful for
   // operations on floating point types.
-  bool isFPContractableWithinStatement() const {
-    return FPFeatures.allowFPContractWithinStatement();
-  }
+  bool isFPContractable() const { return FPContractable; }
 
   friend class ASTStmtReader;
   friend class ASTStmtWriter;
@@ -1472,8 +1470,7 @@ class CXXTemporaryObjectExpr : public CXXConstructExpr {
 public:
   CXXTemporaryObjectExpr(const ASTContext &C,
                          CXXConstructorDecl *Cons,
-                         QualType Type,
-                         TypeSourceInfo *TSI,
+                         TypeSourceInfo *Type,
                          ArrayRef<Expr *> Args,
                          SourceRange ParenOrBraceRange,
                          bool HadMultipleCandidates,
@@ -4125,18 +4122,16 @@ class CoroutineSuspendExpr : public Expr {
 
   enum SubExpr { Common, Ready, Suspend, Resume, Count };
   Stmt *SubExprs[SubExpr::Count];
-  OpaqueValueExpr *OpaqueValue = nullptr;
 
   friend class ASTStmtReader;
 public:
   CoroutineSuspendExpr(StmtClass SC, SourceLocation KeywordLoc, Expr *Common,
-                       Expr *Ready, Expr *Suspend, Expr *Resume,
-                       OpaqueValueExpr *OpaqueValue)
+                       Expr *Ready, Expr *Suspend, Expr *Resume)
       : Expr(SC, Resume->getType(), Resume->getValueKind(),
              Resume->getObjectKind(), Resume->isTypeDependent(),
              Resume->isValueDependent(), Common->isInstantiationDependent(),
              Common->containsUnexpandedParameterPack()),
-        KeywordLoc(KeywordLoc), OpaqueValue(OpaqueValue) {
+        KeywordLoc(KeywordLoc) {
     SubExprs[SubExpr::Common] = Common;
     SubExprs[SubExpr::Ready] = Ready;
     SubExprs[SubExpr::Suspend] = Suspend;
@@ -4165,8 +4160,6 @@ public:
   Expr *getCommonExpr() const {
     return static_cast<Expr*>(SubExprs[SubExpr::Common]);
   }
-  /// \brief getOpaqueValue - Return the opaque value placeholder.
-  OpaqueValueExpr *getOpaqueValue() const { return OpaqueValue; }
 
   Expr *getReadyExpr() const {
     return static_cast<Expr*>(SubExprs[SubExpr::Ready]);
@@ -4200,17 +4193,11 @@ class CoawaitExpr : public CoroutineSuspendExpr {
   friend class ASTStmtReader;
 public:
   CoawaitExpr(SourceLocation CoawaitLoc, Expr *Operand, Expr *Ready,
-              Expr *Suspend, Expr *Resume, OpaqueValueExpr *OpaqueValue,
-              bool IsImplicit = false)
+              Expr *Suspend, Expr *Resume)
       : CoroutineSuspendExpr(CoawaitExprClass, CoawaitLoc, Operand, Ready,
-                             Suspend, Resume, OpaqueValue) {
-    CoawaitBits.IsImplicit = IsImplicit;
-  }
-  CoawaitExpr(SourceLocation CoawaitLoc, QualType Ty, Expr *Operand,
-              bool IsImplicit = false)
-      : CoroutineSuspendExpr(CoawaitExprClass, CoawaitLoc, Ty, Operand) {
-    CoawaitBits.IsImplicit = IsImplicit;
-  }
+                             Suspend, Resume) {}
+  CoawaitExpr(SourceLocation CoawaitLoc, QualType Ty, Expr *Operand)
+      : CoroutineSuspendExpr(CoawaitExprClass, CoawaitLoc, Ty, Operand) {}
   CoawaitExpr(EmptyShell Empty)
       : CoroutineSuspendExpr(CoawaitExprClass, Empty) {}
 
@@ -4219,56 +4206,8 @@ public:
     return getCommonExpr();
   }
 
-  bool isImplicit() const { return CoawaitBits.IsImplicit; }
-  void setIsImplicit(bool value = true) { CoawaitBits.IsImplicit = value; }
-
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CoawaitExprClass;
-  }
-};
-
-/// \brief Represents a 'co_await' expression while the type of the promise
-/// is dependent.
-class DependentCoawaitExpr : public Expr {
-  SourceLocation KeywordLoc;
-  Stmt *SubExprs[2];
-
-  friend class ASTStmtReader;
-
-public:
-  DependentCoawaitExpr(SourceLocation KeywordLoc, QualType Ty, Expr *Op,
-                       UnresolvedLookupExpr *OpCoawait)
-      : Expr(DependentCoawaitExprClass, Ty, VK_RValue, OK_Ordinary,
-             /*TypeDependent*/ true, /*ValueDependent*/ true,
-             /*InstantiationDependent*/ true,
-             Op->containsUnexpandedParameterPack()),
-        KeywordLoc(KeywordLoc) {
-    // NOTE: A co_await expression is dependent on the coroutines promise
-    // type and may be dependent even when the `Op` expression is not.
-    assert(Ty->isDependentType() &&
-           "wrong constructor for non-dependent co_await/co_yield expression");
-    SubExprs[0] = Op;
-    SubExprs[1] = OpCoawait;
-  }
-
-  DependentCoawaitExpr(EmptyShell Empty)
-      : Expr(DependentCoawaitExprClass, Empty) {}
-
-  Expr *getOperand() const { return cast<Expr>(SubExprs[0]); }
-  UnresolvedLookupExpr *getOperatorCoawaitLookup() const {
-    return cast<UnresolvedLookupExpr>(SubExprs[1]);
-  }
-  SourceLocation getKeywordLoc() const { return KeywordLoc; }
-
-  SourceLocation getLocStart() const LLVM_READONLY { return KeywordLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY {
-    return getOperand()->getLocEnd();
-  }
-
-  child_range children() { return child_range(SubExprs, SubExprs + 2); }
-
-  static bool classof(const Stmt *T) {
-    return T->getStmtClass() == DependentCoawaitExprClass;
   }
 };
 
@@ -4277,9 +4216,9 @@ class CoyieldExpr : public CoroutineSuspendExpr {
   friend class ASTStmtReader;
 public:
   CoyieldExpr(SourceLocation CoyieldLoc, Expr *Operand, Expr *Ready,
-              Expr *Suspend, Expr *Resume, OpaqueValueExpr *OpaqueValue)
+              Expr *Suspend, Expr *Resume)
       : CoroutineSuspendExpr(CoyieldExprClass, CoyieldLoc, Operand, Ready,
-                             Suspend, Resume, OpaqueValue) {}
+                             Suspend, Resume) {}
   CoyieldExpr(SourceLocation CoyieldLoc, QualType Ty, Expr *Operand)
       : CoroutineSuspendExpr(CoyieldExprClass, CoyieldLoc, Ty, Operand) {}
   CoyieldExpr(EmptyShell Empty)

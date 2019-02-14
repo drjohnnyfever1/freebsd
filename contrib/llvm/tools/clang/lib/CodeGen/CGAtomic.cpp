@@ -95,7 +95,7 @@ namespace {
         BFI.StorageOffset += OffsetInChars;
         LVal = LValue::MakeBitfield(Address(Addr, lvalue.getAlignment()),
                                     BFI, lvalue.getType(),
-                                    lvalue.getBaseInfo());
+                                    lvalue.getAlignmentSource());
         LVal.setTBAAInfo(lvalue.getTBAAInfo());
         AtomicTy = C.getIntTypeForBitwidth(AtomicSizeInBits, OrigBFI.IsSigned);
         if (AtomicTy.isNull()) {
@@ -203,7 +203,7 @@ namespace {
         addr = CGF.Builder.CreateStructGEP(addr, 0, CharUnits());
 
       return LValue::MakeAddr(addr, getValueType(), CGF.getContext(),
-                              LVal.getBaseInfo(), LVal.getTBAAInfo());
+                              LVal.getAlignmentSource(), LVal.getTBAAInfo());
     }
 
     /// \brief Emits atomic load.
@@ -1181,15 +1181,15 @@ RValue AtomicInfo::convertAtomicTempToRValue(Address addr,
   if (LVal.isBitField())
     return CGF.EmitLoadOfBitfieldLValue(
         LValue::MakeBitfield(addr, LVal.getBitFieldInfo(), LVal.getType(),
-                             LVal.getBaseInfo()), loc);
+                             LVal.getAlignmentSource()));
   if (LVal.isVectorElt())
     return CGF.EmitLoadOfLValue(
         LValue::MakeVectorElt(addr, LVal.getVectorIdx(), LVal.getType(),
-                              LVal.getBaseInfo()), loc);
+                              LVal.getAlignmentSource()), loc);
   assert(LVal.isExtVectorElt());
   return CGF.EmitLoadOfExtVectorElementLValue(LValue::MakeExtVectorElt(
       addr, LVal.getExtVectorElts(), LVal.getType(),
-      LVal.getBaseInfo()));
+      LVal.getAlignmentSource()));
 }
 
 RValue AtomicInfo::ConvertIntToValueOrAtomic(llvm::Value *IntVal,
@@ -1506,26 +1506,26 @@ EmitAtomicUpdateValue(CodeGenFunction &CGF, AtomicInfo &Atomics, RValue OldRVal,
       UpdateLVal =
           LValue::MakeBitfield(Ptr, AtomicLVal.getBitFieldInfo(),
                                AtomicLVal.getType(),
-                               AtomicLVal.getBaseInfo());
+                               AtomicLVal.getAlignmentSource());
       DesiredLVal =
           LValue::MakeBitfield(DesiredAddr, AtomicLVal.getBitFieldInfo(),
                                AtomicLVal.getType(),
-                               AtomicLVal.getBaseInfo());
+                               AtomicLVal.getAlignmentSource());
     } else if (AtomicLVal.isVectorElt()) {
       UpdateLVal = LValue::MakeVectorElt(Ptr, AtomicLVal.getVectorIdx(),
                                          AtomicLVal.getType(),
-                                         AtomicLVal.getBaseInfo());
+                                         AtomicLVal.getAlignmentSource());
       DesiredLVal = LValue::MakeVectorElt(
           DesiredAddr, AtomicLVal.getVectorIdx(), AtomicLVal.getType(),
-          AtomicLVal.getBaseInfo());
+          AtomicLVal.getAlignmentSource());
     } else {
       assert(AtomicLVal.isExtVectorElt());
       UpdateLVal = LValue::MakeExtVectorElt(Ptr, AtomicLVal.getExtVectorElts(),
                                             AtomicLVal.getType(),
-                                            AtomicLVal.getBaseInfo());
+                                            AtomicLVal.getAlignmentSource());
       DesiredLVal = LValue::MakeExtVectorElt(
           DesiredAddr, AtomicLVal.getExtVectorElts(), AtomicLVal.getType(),
-          AtomicLVal.getBaseInfo());
+          AtomicLVal.getAlignmentSource());
     }
     UpdateLVal.setTBAAInfo(AtomicLVal.getTBAAInfo());
     DesiredLVal.setTBAAInfo(AtomicLVal.getTBAAInfo());
@@ -1612,17 +1612,17 @@ static void EmitAtomicUpdateValue(CodeGenFunction &CGF, AtomicInfo &Atomics,
     DesiredLVal =
         LValue::MakeBitfield(DesiredAddr, AtomicLVal.getBitFieldInfo(),
                              AtomicLVal.getType(),
-                             AtomicLVal.getBaseInfo());
+                             AtomicLVal.getAlignmentSource());
   } else if (AtomicLVal.isVectorElt()) {
     DesiredLVal =
         LValue::MakeVectorElt(DesiredAddr, AtomicLVal.getVectorIdx(),
                               AtomicLVal.getType(),
-                              AtomicLVal.getBaseInfo());
+                              AtomicLVal.getAlignmentSource());
   } else {
     assert(AtomicLVal.isExtVectorElt());
     DesiredLVal = LValue::MakeExtVectorElt(
         DesiredAddr, AtomicLVal.getExtVectorElts(), AtomicLVal.getType(),
-        AtomicLVal.getBaseInfo());
+        AtomicLVal.getAlignmentSource());
   }
   DesiredLVal.setTBAAInfo(AtomicLVal.getTBAAInfo());
   // Store new value in the corresponding memory area

@@ -22,11 +22,11 @@
 #ifndef LLVM_ANALYSIS_DEMANDED_BITS_H
 #define LLVM_ANALYSIS_DEMANDED_BITS_H
 
+#include "llvm/Pass.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Pass.h"
 
 namespace llvm {
 
@@ -35,7 +35,6 @@ class Function;
 class Instruction;
 class DominatorTree;
 class AssumptionCache;
-struct KnownBits;
 
 class DemandedBits {
 public:
@@ -59,7 +58,8 @@ private:
   void determineLiveOperandBits(const Instruction *UserI,
     const Instruction *I, unsigned OperandNo,
     const APInt &AOut, APInt &AB,
-    KnownBits &Known, KnownBits &Known2);
+    APInt &KnownZero, APInt &KnownOne,
+    APInt &KnownZero2, APInt &KnownOne2);
 
   bool Analyzed;
 

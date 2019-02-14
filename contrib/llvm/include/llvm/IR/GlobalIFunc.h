@@ -47,16 +47,12 @@ public:
                              LinkageTypes Linkage, const Twine &Name,
                              Constant *Resolver, Module *Parent);
 
-  void copyAttributesFrom(const GlobalIFunc *Src) {
-    GlobalValue::copyAttributesFrom(Src);
-  }
-
   /// This method unlinks 'this' from the containing module, but does not
   /// delete it.
-  void removeFromParent();
+  void removeFromParent() final;
 
   /// This method unlinks 'this' from the containing module and deletes it.
-  void eraseFromParent();
+  void eraseFromParent() final;
 
   /// These methods retrieve and set ifunc resolver function.
   void setResolver(Constant *Resolver) {
@@ -70,7 +66,7 @@ public:
   }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
-  static bool classof(const Value *V) {
+  static inline bool classof(const Value *V) {
     return V->getValueID() == Value::GlobalIFuncVal;
   }
 };

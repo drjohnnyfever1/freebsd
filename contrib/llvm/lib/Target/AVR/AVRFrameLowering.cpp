@@ -57,19 +57,11 @@ void AVRFrameLowering::emitPrologue(MachineFunction &MF,
   DebugLoc DL = (MBBI != MBB.end()) ? MBBI->getDebugLoc() : DebugLoc();
   const AVRSubtarget &STI = MF.getSubtarget<AVRSubtarget>();
   const AVRInstrInfo &TII = *STI.getInstrInfo();
-  bool HasFP = hasFP(MF);
 
   // Interrupt handlers re-enable interrupts in function entry.
   if (CallConv == CallingConv::AVR_INTR) {
     BuildMI(MBB, MBBI, DL, TII.get(AVR::BSETs))
         .addImm(0x07)
-        .setMIFlag(MachineInstr::FrameSetup);
-  }
-
-  // Save the frame pointer if we have one.
-  if (HasFP) {
-    BuildMI(MBB, MBBI, DL, TII.get(AVR::PUSHWRr))
-        .addReg(AVR::R29R28, RegState::Kill)
         .setMIFlag(MachineInstr::FrameSetup);
   }
 
@@ -80,7 +72,6 @@ void AVRFrameLowering::emitPrologue(MachineFunction &MF,
     BuildMI(MBB, MBBI, DL, TII.get(AVR::PUSHWRr))
         .addReg(AVR::R1R0, RegState::Kill)
         .setMIFlag(MachineInstr::FrameSetup);
-
     BuildMI(MBB, MBBI, DL, TII.get(AVR::INRdA), AVR::R0)
         .addImm(0x3f)
         .setMIFlag(MachineInstr::FrameSetup);
@@ -95,7 +86,7 @@ void AVRFrameLowering::emitPrologue(MachineFunction &MF,
   }
 
   // Early exit if the frame pointer is not needed in this function.
-  if (!HasFP) {
+  if (!hasFP(MF)) {
     return;
   }
 
@@ -174,9 +165,6 @@ void AVRFrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, MBBI, DL, TII.get(AVR::POPWRd), AVR::R1R0);
   }
 
-  if (hasFP(MF))
-    BuildMI(MBB, MBBI, DL, TII.get(AVR::POPWRd), AVR::R29R28);
-
   // Early exit if there is no need to restore the frame pointer.
   if (!FrameSize) {
     return;
@@ -251,7 +239,7 @@ bool AVRFrameLowering::spillCalleeSavedRegisters(
     unsigned Reg = CSI[i - 1].getReg();
     bool IsNotLiveIn = !MBB.isLiveIn(Reg);
 
-    assert(TRI->getRegSizeInBits(*TRI->getMinimalPhysRegClass(Reg)) == 8 &&
+    assert(TRI->getMinimalPhysRegClass(Reg)->getSize() == 1 &&
            "Invalid register size");
 
     // Add the callee-saved register as live-in only if it is not already a
@@ -289,7 +277,7 @@ bool AVRFrameLowering::restoreCalleeSavedRegisters(
   for (const CalleeSavedInfo &CCSI : CSI) {
     unsigned Reg = CCSI.getReg();
 
-    assert(TRI->getRegSizeInBits(*TRI->getMinimalPhysRegClass(Reg)) == 8 &&
+    assert(TRI->getMinimalPhysRegClass(Reg)->getSize() == 1 &&
            "Invalid register size");
 
     BuildMI(MBB, MI, DL, TII.get(AVR::POPRd), Reg);
@@ -375,7 +363,7 @@ MachineBasicBlock::iterator AVRFrameLowering::eliminateCallFramePseudoInstr(
 
   DebugLoc DL = MI->getDebugLoc();
   unsigned int Opcode = MI->getOpcode();
-  int Amount = TII.getFrameSize(*MI);
+  int Amount = MI->getOperand(0).getImm();
 
   // Adjcallstackup does not need to allocate stack space for the call, instead
   // we insert push instructions that will allocate the necessary stack.
@@ -419,9 +407,12 @@ void AVRFrameLowering::determineCalleeSaves(MachineFunction &MF,
                                             RegScavenger *RS) const {
   TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
 
-  // If we have a frame pointer, the Y register needs to be saved as well.
-  // We don't do that here however - the prologue and epilogue generation
-  // code will handle it specially.
+  // Spill register Y when it is used as the frame pointer.
+  if (hasFP(MF)) {
+    SavedRegs.set(AVR::R29R28);
+    SavedRegs.set(AVR::R29);
+    SavedRegs.set(AVR::R28);
+  }
 }
 /// The frame analyzer pass.
 ///

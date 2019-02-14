@@ -23,7 +23,6 @@ HexagonMCAsmInfo::HexagonMCAsmInfo(const Triple &TT) {
   Data32bitsDirective = "\t.word\t";
   Data64bitsDirective = nullptr;  // .xword is only supported by V9.
   CommentString = "//";
-  SupportsDebugInformation = true;
 
   LCOMMDirectiveAlignmentType = LCOMM::ByteAlignment;
   InlineAsmStart = "# InlineAsm Start";
@@ -31,8 +30,8 @@ HexagonMCAsmInfo::HexagonMCAsmInfo(const Triple &TT) {
   ZeroDirective = "\t.space\t";
   AscizDirective = "\t.string\t";
 
+  SupportsDebugInformation = true;
   MinInstAlignment = 4;
   UsesELFSectionDirectiveForBSS  = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
-  UseLogicalShr = false;
 }

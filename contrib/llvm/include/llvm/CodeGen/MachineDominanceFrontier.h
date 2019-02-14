@@ -11,36 +11,34 @@
 #define LLVM_CODEGEN_MACHINEDOMINANCEFRONTIER_H
 
 #include "llvm/Analysis/DominanceFrontier.h"
-#include "llvm/Analysis/DominanceFrontierImpl.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/Support/GenericDomTree.h"
-#include <vector>
+
 
 namespace llvm {
 
 class MachineDominanceFrontier : public MachineFunctionPass {
   ForwardDominanceFrontierBase<MachineBasicBlock> Base;
-
 public:
- using DomTreeT = DomTreeBase<MachineBasicBlock>;
- using DomTreeNodeT = DomTreeNodeBase<MachineBasicBlock>;
- using DomSetType = DominanceFrontierBase<MachineBasicBlock, false>::DomSetType;
- using iterator = DominanceFrontierBase<MachineBasicBlock, false>::iterator;
- using const_iterator =
-     DominanceFrontierBase<MachineBasicBlock, false>::const_iterator;
+  typedef DominatorTreeBase<MachineBasicBlock> DomTreeT;
+  typedef DomTreeNodeBase<MachineBasicBlock> DomTreeNodeT;
+  typedef DominanceFrontierBase<MachineBasicBlock>::DomSetType DomSetType;
+  typedef DominanceFrontierBase<MachineBasicBlock>::iterator iterator;
+  typedef DominanceFrontierBase<MachineBasicBlock>::const_iterator const_iterator;
 
- MachineDominanceFrontier(const MachineDominanceFrontier &) = delete;
- MachineDominanceFrontier &operator=(const MachineDominanceFrontier &) = delete;
+  void operator=(const MachineDominanceFrontier &) = delete;
+  MachineDominanceFrontier(const MachineDominanceFrontier &) = delete;
 
- static char ID;
+  static char ID;
 
- MachineDominanceFrontier();
+  MachineDominanceFrontier();
 
- DominanceFrontierBase<MachineBasicBlock, false> &getBase() { return Base; }
+  DominanceFrontierBase<MachineBasicBlock> &getBase() {
+    return Base;
+  }
 
- inline const std::vector<MachineBasicBlock *> &getRoots() const {
-   return Base.getRoots();
+  inline const std::vector<MachineBasicBlock*> &getRoots() const {
+    return Base.getRoots();
   }
 
   MachineBasicBlock *getRoot() const {
@@ -95,7 +93,7 @@ public:
     return Base.compareDomSet(DS1, DS2);
   }
 
-  bool compare(DominanceFrontierBase<MachineBasicBlock, false> &Other) const {
+  bool compare(DominanceFrontierBase<MachineBasicBlock> &Other) const {
     return Base.compare(Other);
   }
 
@@ -106,6 +104,6 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 };
 
-} // end namespace llvm
+}
 
-#endif // LLVM_CODEGEN_MACHINEDOMINANCEFRONTIER_H
+#endif

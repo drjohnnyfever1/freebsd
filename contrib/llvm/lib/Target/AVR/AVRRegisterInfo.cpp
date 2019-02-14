@@ -51,6 +51,8 @@ AVRRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
 
 BitVector AVRRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
+  const AVRTargetMachine &TM = static_cast<const AVRTargetMachine&>(MF.getTarget());
+  const TargetFrameLowering *TFI = TM.getSubtargetImpl()->getFrameLowering();
 
   // Reserve the intermediate result registers r1 and r2
   // The result of instructions like 'mul' is always stored here.
@@ -63,18 +65,12 @@ BitVector AVRRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(AVR::SPH);
   Reserved.set(AVR::SP);
 
-  // We tenatively reserve the frame pointer register r29:r28 because the
-  // function may require one, but we cannot tell until register allocation
-  // is complete, which can be too late.
-  //
-  // Instead we just unconditionally reserve the Y register.
-  //
-  // TODO: Write a pass to enumerate functions which reserved the Y register
-  //       but didn't end up needing a frame pointer. In these, we can
-  //       convert one or two of the spills inside to use the Y register.
-  Reserved.set(AVR::R28);
-  Reserved.set(AVR::R29);
-  Reserved.set(AVR::R29R28);
+  // Reserve the frame pointer registers r28 and r29 if the function requires one.
+  if (TFI->hasFP(MF)) {
+    Reserved.set(AVR::R28);
+    Reserved.set(AVR::R29);
+    Reserved.set(AVR::R29R28);
+  }
 
   return Reserved;
 }
@@ -82,12 +78,11 @@ BitVector AVRRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 const TargetRegisterClass *
 AVRRegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
                                            const MachineFunction &MF) const {
-  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-  if (TRI->isTypeLegalForClass(*RC, MVT::i16)) {
+  if (RC->hasType(MVT::i16)) {
     return &AVR::DREGSRegClass;
   }
 
-  if (TRI->isTypeLegalForClass(*RC, MVT::i8)) {
+  if (RC->hasType(MVT::i8)) {
     return &AVR::GPR8RegClass;
   }
 
@@ -95,8 +90,7 @@ AVRRegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
 }
 
 /// Fold a frame offset shared between two add instructions into a single one.
-static void foldFrameOffset(MachineBasicBlock::iterator &II, int &Offset, unsigned DstReg) {
-  MachineInstr &MI = *II;
+static void foldFrameOffset(MachineInstr &MI, int &Offset, unsigned DstReg) {
   int Opcode = MI.getOpcode();
 
   // Don't bother trying if the next instruction is not an add or a sub.
@@ -121,7 +115,6 @@ static void foldFrameOffset(MachineBasicBlock::iterator &II, int &Offset, unsign
   }
 
   // Finally remove the instruction.
-  II++;
   MI.eraseFromParent();
 }
 
@@ -160,8 +153,6 @@ void AVRRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     unsigned DstReg = MI.getOperand(0).getReg();
     assert(DstReg != AVR::R29R28 && "Dest reg cannot be the frame pointer");
 
-    II++; // Skip over the FRMIDX (and now MOVW) instruction.
-
     // Generally, to load a frame address two add instructions are emitted that
     // could get folded into a single one:
     //  movw    r31:r30, r29:r28
@@ -170,8 +161,7 @@ void AVRRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     // to:
     //  movw    r31:r30, r29:r28
     //  adiw    r31:r30, 45
-    if (II != MBB.end())
-      foldFrameOffset(II, Offset, DstReg);
+    foldFrameOffset(*std::next(II), Offset, DstReg);
 
     // Select the best opcode based on DstReg and the offset size.
     switch (DstReg) {
@@ -192,7 +182,7 @@ void AVRRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     }
     }
 
-    MachineInstr *New = BuildMI(MBB, II, dl, TII.get(Opcode), DstReg)
+    MachineInstr *New = BuildMI(MBB, std::next(II), dl, TII.get(Opcode), DstReg)
                             .addReg(DstReg, RegState::Kill)
                             .addImm(Offset);
     New->getOperand(3).setIsDead();
@@ -273,3 +263,4 @@ void AVRRegisterInfo::splitReg(unsigned Reg,
 }
 
 } // end of namespace llvm
+

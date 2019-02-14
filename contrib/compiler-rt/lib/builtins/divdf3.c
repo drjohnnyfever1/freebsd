@@ -19,6 +19,8 @@
 #define DOUBLE_PRECISION
 #include "fp_lib.h"
 
+ARM_EABI_FNALIAS(ddiv, divdf3)
+
 COMPILER_RT_ABI fp_t
 __divdf3(fp_t a, fp_t b) {
     
@@ -181,10 +183,3 @@ __divdf3(fp_t a, fp_t b) {
         return result;
     }
 }
-
-#if defined(__ARM_EABI__)
-AEABI_RTABI fp_t __aeabi_ddiv(fp_t a, fp_t b) {
-  return __divdf3(a, b);
-}
-#endif
-

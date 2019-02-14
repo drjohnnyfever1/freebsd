@@ -24,7 +24,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/config.h"
@@ -124,7 +123,7 @@ public:
   void ResetAllOptionOccurrences();
 
   bool ParseCommandLineOptions(int argc, const char *const *argv,
-                               StringRef Overview, raw_ostream *Errs = nullptr);
+                               StringRef Overview, bool IgnoreErrors);
 
   void addLiteralOption(Option &Opt, SubCommand *SC, StringRef Name) {
     if (Opt.hasArgStr())
@@ -1014,9 +1013,9 @@ void cl::ParseEnvironmentOptions(const char *progName, const char *envVar,
 }
 
 bool cl::ParseCommandLineOptions(int argc, const char *const *argv,
-                                 StringRef Overview, raw_ostream *Errs) {
+                                 StringRef Overview, bool IgnoreErrors) {
   return GlobalParser->ParseCommandLineOptions(argc, argv, Overview,
-                                               Errs);
+                                               IgnoreErrors);
 }
 
 void CommandLineParser::ResetAllOptionOccurrences() {
@@ -1031,7 +1030,7 @@ void CommandLineParser::ResetAllOptionOccurrences() {
 bool CommandLineParser::ParseCommandLineOptions(int argc,
                                                 const char *const *argv,
                                                 StringRef Overview,
-                                                raw_ostream *Errs) {
+                                                bool IgnoreErrors) {
   assert(hasOptions() && "No options specified!");
 
   // Expand response files.
@@ -1046,9 +1045,6 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
   ProgramName = sys::path::filename(StringRef(argv[0]));
 
   ProgramOverview = Overview;
-  bool IgnoreErrors = Errs;
-  if (!Errs)
-    Errs = &errs();
   bool ErrorParsing = false;
 
   // Check out the positional arguments to collect information about them.
@@ -1101,14 +1097,15 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
         // not specified after an option that eats all extra arguments, or this
         // one will never get any!
         //
-        if (!IgnoreErrors)
+        if (!IgnoreErrors) {
           Opt->error("error - option can never match, because "
                      "another positional argument will match an "
                      "unbounded number of values, and this option"
                      " does not require a value!");
-        *Errs << ProgramName << ": CommandLine Error: Option '" << Opt->ArgStr
-              << "' is all messed up!\n";
-        *Errs << PositionalOpts.size();
+          errs() << ProgramName << ": CommandLine Error: Option '"
+                 << Opt->ArgStr << "' is all messed up!\n";
+          errs() << PositionalOpts.size();
+        }
         ErrorParsing = true;
       }
       UnboundedFound |= EatsUnboundedNumberOfValues(Opt);
@@ -1203,13 +1200,15 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
 
     if (!Handler) {
       if (SinkOpts.empty()) {
-        *Errs << ProgramName << ": Unknown command line argument '" << argv[i]
-              << "'.  Try: '" << argv[0] << " -help'\n";
+        if (!IgnoreErrors) {
+          errs() << ProgramName << ": Unknown command line argument '"
+                 << argv[i] << "'.  Try: '" << argv[0] << " -help'\n";
 
-        if (NearestHandler) {
-          // If we know a near match, report it as well.
-          *Errs << ProgramName << ": Did you mean '-" << NearestHandlerString
-                 << "'?\n";
+          if (NearestHandler) {
+            // If we know a near match, report it as well.
+            errs() << ProgramName << ": Did you mean '-" << NearestHandlerString
+                   << "'?\n";
+          }
         }
 
         ErrorParsing = true;
@@ -1232,18 +1231,22 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
 
   // Check and handle positional arguments now...
   if (NumPositionalRequired > PositionalVals.size()) {
-      *Errs << ProgramName
+    if (!IgnoreErrors) {
+      errs() << ProgramName
              << ": Not enough positional command line arguments specified!\n"
              << "Must specify at least " << NumPositionalRequired
              << " positional argument" << (NumPositionalRequired > 1 ? "s" : "")
-             << ": See: " << argv[0] << " -help\n";
+             << ": See: " << argv[0] << " - help\n";
+    }
 
     ErrorParsing = true;
   } else if (!HasUnlimitedPositionals &&
              PositionalVals.size() > PositionalOpts.size()) {
-    *Errs << ProgramName << ": Too many positional arguments specified!\n"
-          << "Can specify at most " << PositionalOpts.size()
-          << " positional arguments: See: " << argv[0] << " -help\n";
+    if (!IgnoreErrors) {
+      errs() << ProgramName << ": Too many positional arguments specified!\n"
+             << "Can specify at most " << PositionalOpts.size()
+             << " positional arguments: See: " << argv[0] << " -help\n";
+    }
     ErrorParsing = true;
 
   } else if (!ConsumeAfterOpt) {
@@ -1401,8 +1404,8 @@ static StringRef getValueStr(const Option &O, StringRef DefaultMsg) {
 // Return the width of the option tag for printing...
 size_t alias::getOptionWidth() const { return ArgStr.size() + 6; }
 
-void Option::printHelpStr(StringRef HelpStr, size_t Indent,
-                                 size_t FirstLineIndentedBy) {
+static void printHelpStr(StringRef HelpStr, size_t Indent,
+                         size_t FirstLineIndentedBy) {
   std::pair<StringRef, StringRef> Split = HelpStr.split('\n');
   outs().indent(Indent - FirstLineIndentedBy) << " - " << Split.first << "\n";
   while (!Split.second.empty()) {
@@ -1445,7 +1448,7 @@ void basic_parser_impl::printOptionInfo(const Option &O,
   if (!ValName.empty())
     outs() << "=<" << getValueStr(O, ValName) << '>';
 
-  Option::printHelpStr(O.HelpStr, GlobalWidth, getOptionWidth(O));
+  printHelpStr(O.HelpStr, GlobalWidth, getOptionWidth(O));
 }
 
 void basic_parser_impl::printOptionName(const Option &O,
@@ -1523,9 +1526,13 @@ bool parser<unsigned long long>::parse(Option &O, StringRef ArgName,
 // parser<double>/parser<float> implementation
 //
 static bool parseDouble(Option &O, StringRef Arg, double &Value) {
-  if (to_float(Arg, Value))
-    return false;
-  return O.error("'" + Arg + "' value invalid for floating point argument!");
+  SmallString<32> TmpStr(Arg.begin(), Arg.end());
+  const char *ArgStart = TmpStr.c_str();
+  char *End;
+  Value = strtod(ArgStart, &End);
+  if (*End != 0)
+    return O.error("'" + Arg + "' value invalid for floating point argument!");
+  return false;
 }
 
 bool parser<double>::parse(Option &O, StringRef ArgName, StringRef Arg,
@@ -1580,7 +1587,7 @@ void generic_parser_base::printOptionInfo(const Option &O,
                                           size_t GlobalWidth) const {
   if (O.hasArgStr()) {
     outs() << "  -" << O.ArgStr;
-    Option::printHelpStr(O.HelpStr, GlobalWidth, O.ArgStr.size() + 6);
+    printHelpStr(O.HelpStr, GlobalWidth, O.ArgStr.size() + 6);
 
     for (unsigned i = 0, e = getNumOptions(); i != e; ++i) {
       size_t NumSpaces = GlobalWidth - getOption(i).size() - 8;
@@ -1593,7 +1600,7 @@ void generic_parser_base::printOptionInfo(const Option &O,
     for (unsigned i = 0, e = getNumOptions(); i != e; ++i) {
       auto Option = getOption(i);
       outs() << "    -" << Option;
-      Option::printHelpStr(getDescription(i), GlobalWidth, Option.size() + 8);
+      printHelpStr(getDescription(i), GlobalWidth, Option.size() + 8);
     }
   }
 }
@@ -1849,11 +1856,10 @@ public:
 
   // Helper function for printOptions().
   // It shall return a negative value if A's name should be lexicographically
-  // ordered before B's name. It returns a value greater than zero if B's name
-  // should be ordered before A's name, and it returns 0 otherwise.
+  // ordered before B's name. It returns a value greater equal zero otherwise.
   static int OptionCategoryCompare(OptionCategory *const *A,
                                    OptionCategory *const *B) {
-    return (*A)->getName().compare((*B)->getName());
+    return (*A)->getName() == (*B)->getName();
   }
 
   // Make sure we inherit our base class's operator=()
@@ -2066,15 +2072,12 @@ public:
 #ifndef NDEBUG
     OS << " with assertions";
 #endif
-#if LLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO
     std::string CPU = sys::getHostCPUName();
     if (CPU == "generic")
       CPU = "(unknown)";
     OS << ".\n"
        << "  Default target: " << sys::getDefaultTargetTriple() << '\n'
-       << "  Host CPU: " << CPU;
-#endif
-    OS << '\n';
+       << "  Host CPU: " << CPU << '\n';
   }
   void operator=(bool OptionWasSpecified) {
     if (!OptionWasSpecified)
@@ -2179,6 +2182,5 @@ void cl::ResetAllOptionOccurrences() {
 
 void LLVMParseCommandLineOptions(int argc, const char *const *argv,
                                  const char *Overview) {
-  llvm::cl::ParseCommandLineOptions(argc, argv, StringRef(Overview),
-                                    &llvm::nulls());
+  llvm::cl::ParseCommandLineOptions(argc, argv, StringRef(Overview), true);
 }

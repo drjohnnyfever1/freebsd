@@ -1,4 +1,4 @@
-//===- DWARFDebugAbbrev.h ---------------------------------------*- C++ -*-===//
+//===-- DWARFDebugAbbrev.h --------------------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,18 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEBUGINFO_DWARFDEBUGABBREV_H
-#define LLVM_DEBUGINFO_DWARFDEBUGABBREV_H
+#ifndef LLVM_LIB_DEBUGINFO_DWARFDEBUGABBREV_H
+#define LLVM_LIB_DEBUGINFO_DWARFDEBUGABBREV_H
 
 #include "llvm/DebugInfo/DWARF/DWARFAbbreviationDeclaration.h"
-#include "llvm/Support/DataExtractor.h"
-#include <cstdint>
 #include <map>
 #include <vector>
 
 namespace llvm {
-
-class raw_ostream;
 
 class DWARFAbbreviationDeclarationSet {
   uint32_t Offset;
@@ -27,8 +23,8 @@ class DWARFAbbreviationDeclarationSet {
   uint32_t FirstAbbrCode;
   std::vector<DWARFAbbreviationDeclaration> Decls;
 
-  using const_iterator =
-      std::vector<DWARFAbbreviationDeclaration>::const_iterator;
+  typedef std::vector<DWARFAbbreviationDeclaration>::const_iterator
+      const_iterator;
 
 public:
   DWARFAbbreviationDeclarationSet();
@@ -53,8 +49,8 @@ private:
 };
 
 class DWARFDebugAbbrev {
-  using DWARFAbbreviationDeclarationSetMap =
-      std::map<uint64_t, DWARFAbbreviationDeclarationSet>;
+  typedef std::map<uint64_t, DWARFAbbreviationDeclarationSet>
+    DWARFAbbreviationDeclarationSetMap;
 
   DWARFAbbreviationDeclarationSetMap AbbrDeclSets;
   mutable DWARFAbbreviationDeclarationSetMap::const_iterator PrevAbbrOffsetPos;
@@ -80,6 +76,6 @@ private:
   void clear();
 };
 
-} // end namespace llvm
+}
 
-#endif // LLVM_DEBUGINFO_DWARFDEBUGABBREV_H
+#endif

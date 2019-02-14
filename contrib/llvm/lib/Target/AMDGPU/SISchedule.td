@@ -53,11 +53,6 @@ class SISchedMachineModel : SchedMachineModel {
   let MicroOpBufferSize = 1;
   let IssueWidth = 1;
   let PostRAScheduler = 1;
-
-  // FIXME:Approximate 2 * branch cost.  Try to hack around bad
-  // early-ifcvt heuristics. These need improvement to avoid the OOE
-  // heuristics.
-  int MispredictPenalty = 20;
 }
 
 def SIFullSpeedModel : SISchedMachineModel;

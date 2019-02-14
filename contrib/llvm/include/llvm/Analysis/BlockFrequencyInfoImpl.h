@@ -1164,8 +1164,9 @@ template <class BT> struct BlockEdgesAdder {
   void operator()(IrreducibleGraph &G, IrreducibleGraph::IrrNode &Irr,
                   const LoopData *OuterLoop) {
     const BlockT *BB = BFI.RPOT[Irr.Node.Index];
-    for (const auto Succ : children<const BlockT *>(BB))
-      G.addEdge(Irr, BFI.getNode(Succ), OuterLoop);
+    for (auto I = Successor::child_begin(BB), E = Successor::child_end(BB);
+         I != E; ++I)
+      G.addEdge(Irr, BFI.getNode(*I), OuterLoop);
   }
 };
 }
@@ -1209,9 +1210,10 @@ BlockFrequencyInfoImpl<BT>::propagateMassToSuccessors(LoopData *OuterLoop,
       return false;
   } else {
     const BlockT *BB = getBlock(Node);
-    for (const auto Succ : children<const BlockT *>(BB))
-      if (!addToDist(Dist, OuterLoop, Node, getNode(Succ),
-                     getWeightFromBranchProb(BPI->getEdgeProbability(BB, Succ))))
+    for (auto SI = Successor::child_begin(BB), SE = Successor::child_end(BB);
+         SI != SE; ++SI)
+      if (!addToDist(Dist, OuterLoop, Node, getNode(*SI),
+                     getWeightFromBranchProb(BPI->getEdgeProbability(BB, SI))))
         // Irreducible backedge.
         return false;
   }
@@ -1289,14 +1291,11 @@ struct BFIDOTGraphTraitsBase : public DefaultDOTGraphTraits {
   }
 
   std::string getNodeLabel(NodeRef Node, const BlockFrequencyInfoT *Graph,
-                           GVDAGType GType, int layout_order = -1) {
+                           GVDAGType GType) {
     std::string Result;
     raw_string_ostream OS(Result);
 
-    if (layout_order != -1)
-      OS << Node->getName() << "[" << layout_order << "] : ";
-    else
-      OS << Node->getName() << " : ";
+    OS << Node->getName().str() << " : ";
     switch (GType) {
     case GVDT_Fraction:
       Graph->printBlockFreq(OS, Node);
@@ -1353,4 +1352,4 @@ struct BFIDOTGraphTraitsBase : public DefaultDOTGraphTraits {
 
 #undef DEBUG_TYPE
 
-#endif // LLVM_ANALYSIS_BLOCKFREQUENCYINFOIMPL_H
+#endif

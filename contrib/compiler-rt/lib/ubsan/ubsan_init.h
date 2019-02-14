@@ -15,9 +15,6 @@
 
 namespace __ubsan {
 
-// Get the full tool name for UBSan.
-const char *GetSanititizerToolName();
-
 // Initialize UBSan as a standalone tool. Typically should be called early
 // during initialization.
 void InitAsStandalone();

@@ -16,8 +16,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/ToolDrivers/llvm-dlltool/DlltoolDriver.h"
-#include "llvm/ToolDrivers/llvm-lib/LibDriver.h"
+#include "llvm/LibDriver/LibDriver.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Object/MachO.h"
@@ -53,7 +52,7 @@ static StringRef ToolName;
 
 // Show the error message and exit.
 LLVM_ATTRIBUTE_NORETURN static void fail(Twine Error) {
-  errs() << ToolName << ": " << Error << ".\n";
+  outs() << ToolName << ": " << Error << ".\n";
   exit(1);
 }
 
@@ -88,14 +87,13 @@ static cl::opt<bool> MRI("M", cl::desc(""));
 static cl::opt<std::string> Plugin("plugin", cl::desc("plugin (ignored for compatibility"));
 
 namespace {
-enum Format { Default, GNU, BSD, DARWIN };
+enum Format { Default, GNU, BSD };
 }
 
 static cl::opt<Format>
     FormatOpt("format", cl::desc("Archive format to create"),
               cl::values(clEnumValN(Default, "default", "default"),
                          clEnumValN(GNU, "gnu", "gnu"),
-                         clEnumValN(DARWIN, "darwin", "darwin"),
                          clEnumValN(BSD, "bsd", "bsd")));
 
 static std::string Options;
@@ -169,7 +167,7 @@ LLVM_ATTRIBUTE_NORETURN static void
 show_help(const std::string &msg) {
   errs() << ToolName << ": " << msg << "\n\n";
   cl::PrintHelpMessage();
-  exit(1);
+  std::exit(1);
 }
 
 // Extract the member filename from the command line for the [relpos] argument
@@ -378,9 +376,7 @@ static void doExtract(StringRef Name, const object::Archive::Child &C) {
   sys::fs::perms Mode = ModeOrErr.get();
 
   int FD;
-  failIfError(sys::fs::openFileForWrite(sys::path::filename(Name), FD,
-                                        sys::fs::F_None, Mode),
-              Name);
+  failIfError(sys::fs::openFileForWrite(Name, FD, sys::fs::F_None, Mode), Name);
 
   {
     raw_fd_ostream file(FD, false);
@@ -466,7 +462,7 @@ static void performReadOperation(ArchiveOperation Operation,
     return;
   for (StringRef Name : Members)
     errs() << Name << " was not found\n";
-  exit(1);
+  std::exit(1);
 }
 
 static void addMember(std::vector<NewArchiveMember> &Members,
@@ -474,10 +470,6 @@ static void addMember(std::vector<NewArchiveMember> &Members,
   Expected<NewArchiveMember> NMOrErr =
       NewArchiveMember::getFile(FileName, Deterministic);
   failIfError(NMOrErr.takeError(), FileName);
-
-  // Use the basename of the object path for the member name.
-  NMOrErr->MemberName = sys::path::filename(NMOrErr->MemberName);
-
   if (Pos == -1)
     Members.push_back(std::move(*NMOrErr));
   else
@@ -499,7 +491,7 @@ static void addMember(std::vector<NewArchiveMember> &Members,
 
 enum InsertAction {
   IA_AddOldMember,
-  IA_AddNewMember,
+  IA_AddNewMeber,
   IA_Delete,
   IA_MoveOldMember,
   IA_MoveNewMember
@@ -531,7 +523,7 @@ static InsertAction computeInsertAction(ArchiveOperation Operation,
     StringRef PosName = sys::path::filename(RelPos);
     if (!OnlyUpdate) {
       if (PosName.empty())
-        return IA_AddNewMember;
+        return IA_AddNewMeber;
       return IA_MoveNewMember;
     }
 
@@ -548,7 +540,7 @@ static InsertAction computeInsertAction(ArchiveOperation Operation,
     }
 
     if (PosName.empty())
-      return IA_AddNewMember;
+      return IA_AddNewMeber;
     return IA_MoveNewMember;
   }
   llvm_unreachable("No such operation");
@@ -585,7 +577,7 @@ computeNewArchiveMembers(ArchiveOperation Operation,
       case IA_AddOldMember:
         addMember(Ret, Child);
         break;
-      case IA_AddNewMember:
+      case IA_AddNewMeber:
         addMember(Ret, *MemberI);
         break;
       case IA_Delete:
@@ -631,9 +623,8 @@ computeNewArchiveMembers(ArchiveOperation Operation,
 }
 
 static object::Archive::Kind getDefaultForHost() {
-  return Triple(sys::getProcessTriple()).isOSDarwin()
-             ? object::Archive::K_DARWIN
-             : object::Archive::K_GNU;
+  return Triple(sys::getProcessTriple()).isOSDarwin() ? object::Archive::K_BSD
+                                                      : object::Archive::K_GNU;
 }
 
 static object::Archive::Kind getKindFromMember(const NewArchiveMember &Member) {
@@ -642,7 +633,7 @@ static object::Archive::Kind getKindFromMember(const NewArchiveMember &Member) {
 
   if (OptionalObject)
     return isa<object::MachOObjectFile>(**OptionalObject)
-               ? object::Archive::K_DARWIN
+               ? object::Archive::K_BSD
                : object::Archive::K_GNU;
 
   // squelch the error in case we had a non-object file
@@ -680,11 +671,6 @@ performWriteOperation(ArchiveOperation Operation,
     if (Thin)
       fail("Only the gnu format has a thin mode");
     Kind = object::Archive::K_BSD;
-    break;
-  case DARWIN:
-    if (Thin)
-      fail("Only the gnu format has a thin mode");
-    Kind = object::Archive::K_DARWIN;
     break;
   }
 
@@ -864,9 +850,6 @@ int main(int argc, char **argv) {
   llvm::InitializeAllAsmParsers();
 
   StringRef Stem = sys::path::stem(ToolName);
-  if (Stem.find("dlltool") != StringRef::npos)
-    return dlltoolDriverMain(makeArrayRef(argv, argc));
-
   if (Stem.find("ranlib") == StringRef::npos &&
       Stem.find("lib") != StringRef::npos)
     return libDriverMain(makeArrayRef(argv, argc));
@@ -882,5 +865,5 @@ int main(int argc, char **argv) {
     return ranlib_main();
   if (Stem.find("ar") != StringRef::npos)
     return ar_main();
-  fail("Not ranlib, ar, lib or dlltool!");
+  fail("Not ranlib, ar or lib!");
 }

@@ -135,13 +135,13 @@ static bool hasMemoryWrite(Instruction *I, const TargetLibraryInfo &TLI) {
   if (auto CS = CallSite(I)) {
     if (Function *F = CS.getCalledFunction()) {
       StringRef FnName = F->getName();
-      if (TLI.has(LibFunc_strcpy) && FnName == TLI.getName(LibFunc_strcpy))
+      if (TLI.has(LibFunc::strcpy) && FnName == TLI.getName(LibFunc::strcpy))
         return true;
-      if (TLI.has(LibFunc_strncpy) && FnName == TLI.getName(LibFunc_strncpy))
+      if (TLI.has(LibFunc::strncpy) && FnName == TLI.getName(LibFunc::strncpy))
         return true;
-      if (TLI.has(LibFunc_strcat) && FnName == TLI.getName(LibFunc_strcat))
+      if (TLI.has(LibFunc::strcat) && FnName == TLI.getName(LibFunc::strcat))
         return true;
-      if (TLI.has(LibFunc_strncat) && FnName == TLI.getName(LibFunc_strncat))
+      if (TLI.has(LibFunc::strncat) && FnName == TLI.getName(LibFunc::strncat))
         return true;
     }
   }
@@ -287,14 +287,19 @@ static uint64_t getPointerSize(const Value *V, const DataLayout &DL,
 }
 
 namespace {
-enum OverwriteResult { OW_Begin, OW_Complete, OW_End, OW_Unknown };
+enum OverwriteResult {
+  OverwriteBegin,
+  OverwriteComplete,
+  OverwriteEnd,
+  OverwriteUnknown
+};
 }
 
-/// Return 'OW_Complete' if a store to the 'Later' location completely
-/// overwrites a store to the 'Earlier' location, 'OW_End' if the end of the
-/// 'Earlier' location is completely overwritten by 'Later', 'OW_Begin' if the
-/// beginning of the 'Earlier' location is overwritten by 'Later', or
-/// 'OW_Unknown' if nothing can be determined.
+/// Return 'OverwriteComplete' if a store to the 'Later' location completely
+/// overwrites a store to the 'Earlier' location, 'OverwriteEnd' if the end of
+/// the 'Earlier' location is completely overwritten by 'Later',
+/// 'OverwriteBegin' if the beginning of the 'Earlier' location is overwritten
+/// by 'Later', or 'OverwriteUnknown' if nothing can be determined.
 static OverwriteResult isOverwrite(const MemoryLocation &Later,
                                    const MemoryLocation &Earlier,
                                    const DataLayout &DL,
@@ -305,7 +310,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // If we don't know the sizes of either access, then we can't do a comparison.
   if (Later.Size == MemoryLocation::UnknownSize ||
       Earlier.Size == MemoryLocation::UnknownSize)
-    return OW_Unknown;
+    return OverwriteUnknown;
 
   const Value *P1 = Earlier.Ptr->stripPointerCasts();
   const Value *P2 = Later.Ptr->stripPointerCasts();
@@ -315,7 +320,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   if (P1 == P2) {
     // Make sure that the Later size is >= the Earlier size.
     if (Later.Size >= Earlier.Size)
-      return OW_Complete;
+      return OverwriteComplete;
   }
 
   // Check to see if the later store is to the entire object (either a global,
@@ -327,13 +332,13 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // If we can't resolve the same pointers to the same object, then we can't
   // analyze them at all.
   if (UO1 != UO2)
-    return OW_Unknown;
+    return OverwriteUnknown;
 
   // If the "Later" store is to a recognizable object, get its size.
   uint64_t ObjectSize = getPointerSize(UO2, DL, TLI);
   if (ObjectSize != MemoryLocation::UnknownSize)
     if (ObjectSize == Later.Size && ObjectSize >= Earlier.Size)
-      return OW_Complete;
+      return OverwriteComplete;
 
   // Okay, we have stores to two completely different pointers.  Try to
   // decompose the pointer into a "base + constant_offset" form.  If the base
@@ -345,7 +350,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
 
   // If the base pointers still differ, we have two completely different stores.
   if (BP1 != BP2)
-    return OW_Unknown;
+    return OverwriteUnknown;
 
   // The later store completely overlaps the earlier store if:
   //
@@ -365,7 +370,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   if (EarlierOff >= LaterOff &&
       Later.Size >= Earlier.Size &&
       uint64_t(EarlierOff - LaterOff) + Earlier.Size <= Later.Size)
-    return OW_Complete;
+    return OverwriteComplete;
 
   // We may now overlap, although the overlap is not complete. There might also
   // be other incomplete overlaps, and together, they might cover the complete
@@ -423,7 +428,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
                       ") Composite Later [" <<
                       ILI->second << ", " << ILI->first << ")\n");
       ++NumCompletePartials;
-      return OW_Complete;
+      return OverwriteComplete;
     }
   }
 
@@ -438,7 +443,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   if (!EnablePartialOverwriteTracking &&
       (LaterOff > EarlierOff && LaterOff < int64_t(EarlierOff + Earlier.Size) &&
        int64_t(LaterOff + Later.Size) >= int64_t(EarlierOff + Earlier.Size)))
-    return OW_End;
+    return OverwriteEnd;
 
   // Finally, we also need to check if the later store overwrites the beginning
   // of the earlier store.
@@ -453,11 +458,11 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
       (LaterOff <= EarlierOff && int64_t(LaterOff + Later.Size) > EarlierOff)) {
     assert(int64_t(LaterOff + Later.Size) <
                int64_t(EarlierOff + Earlier.Size) &&
-           "Expect to be handled as OW_Complete");
-    return OW_Begin;
+           "Expect to be handled as OverwriteComplete");
+    return OverwriteBegin;
   }
   // Otherwise, they don't completely overlap.
-  return OW_Unknown;
+  return OverwriteUnknown;
 }
 
 /// If 'Inst' might be a self read (i.e. a noop copy of a
@@ -546,7 +551,7 @@ static bool memoryIsNotModifiedBetween(Instruction *FirstI,
       Instruction *I = &*BI;
       if (I->mayWriteToMemory() && I != SecondI) {
         auto Res = AA->getModRefInfo(I, MemLoc);
-        if (Res & MRI_Mod)
+        if (Res != MRI_NoModRef)
           return false;
       }
     }
@@ -904,7 +909,7 @@ static bool tryToShortenBegin(Instruction *EarlierWrite,
 
   if (LaterStart <= EarlierStart && LaterStart + LaterSize > EarlierStart) {
     assert(LaterStart + LaterSize < EarlierStart + EarlierSize &&
-           "Should have been handled as OW_Complete");
+           "Should have been handled as OverwriteComplete");
     if (tryToShorten(EarlierWrite, EarlierStart, EarlierSize, LaterStart,
                      LaterSize, false)) {
       IntervalMap.erase(OII);
@@ -1100,7 +1105,7 @@ static bool eliminateDeadStores(BasicBlock &BB, AliasAnalysis *AA,
         OverwriteResult OR =
             isOverwrite(Loc, DepLoc, DL, *TLI, DepWriteOffset, InstWriteOffset,
                         DepWrite, IOL);
-        if (OR == OW_Complete) {
+        if (OR == OverwriteComplete) {
           DEBUG(dbgs() << "DSE: Remove Dead Store:\n  DEAD: "
                 << *DepWrite << "\n  KILLER: " << *Inst << '\n');
 
@@ -1112,15 +1117,15 @@ static bool eliminateDeadStores(BasicBlock &BB, AliasAnalysis *AA,
           // We erased DepWrite; start over.
           InstDep = MD->getDependency(Inst);
           continue;
-        } else if ((OR == OW_End && isShortenableAtTheEnd(DepWrite)) ||
-                   ((OR == OW_Begin &&
+        } else if ((OR == OverwriteEnd && isShortenableAtTheEnd(DepWrite)) ||
+                   ((OR == OverwriteBegin &&
                      isShortenableAtTheBeginning(DepWrite)))) {
           assert(!EnablePartialOverwriteTracking && "Do not expect to perform "
                                                     "when partial-overwrite "
                                                     "tracking is enabled");
           int64_t EarlierSize = DepLoc.Size;
           int64_t LaterSize = Loc.Size;
-          bool IsOverwriteEnd = (OR == OW_End);
+          bool IsOverwriteEnd = (OR == OverwriteEnd);
           MadeChange |= tryToShorten(DepWrite, DepWriteOffset, EarlierSize,
                                     InstWriteOffset, LaterSize, IsOverwriteEnd);
         }
@@ -1181,9 +1186,8 @@ PreservedAnalyses DSEPass::run(Function &F, FunctionAnalysisManager &AM) {
 
   if (!eliminateDeadStores(F, AA, MD, DT, TLI))
     return PreservedAnalyses::all();
-
   PreservedAnalyses PA;
-  PA.preserveSet<CFGAnalyses>();
+  PA.preserve<DominatorTreeAnalysis>();
   PA.preserve<GlobalsAA>();
   PA.preserve<MemoryDependenceAnalysis>();
   return PA;

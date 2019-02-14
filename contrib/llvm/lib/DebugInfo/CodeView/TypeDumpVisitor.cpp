@@ -1,4 +1,5 @@
-//===-- TypeDumpVisitor.cpp - CodeView type info dumper ----------*- C++-*-===//
+//===-- TypeDumpVisitor.cpp - CodeView type info dumper -----------*- C++
+//-*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,13 +11,15 @@
 #include "llvm/DebugInfo/CodeView/TypeDumpVisitor.h"
 
 #include "llvm/ADT/SmallString.h"
+#include "llvm/DebugInfo/CodeView/CVTypeDumper.h"
 #include "llvm/DebugInfo/CodeView/CVTypeVisitor.h"
-#include "llvm/DebugInfo/CodeView/Formatters.h"
-#include "llvm/DebugInfo/CodeView/TypeCollection.h"
+#include "llvm/DebugInfo/CodeView/TypeDatabase.h"
+#include "llvm/DebugInfo/CodeView/TypeDatabaseVisitor.h"
+#include "llvm/DebugInfo/CodeView/TypeDeserializer.h"
 #include "llvm/DebugInfo/CodeView/TypeIndex.h"
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
-#include "llvm/Support/BinaryByteStream.h"
-#include "llvm/Support/FormatVariadic.h"
+#include "llvm/DebugInfo/CodeView/TypeVisitorCallbackPipeline.h"
+#include "llvm/DebugInfo/MSF/ByteStream.h"
 #include "llvm/Support/ScopedPrinter.h"
 
 using namespace llvm;
@@ -24,7 +27,7 @@ using namespace llvm::codeview;
 
 static const EnumEntry<TypeLeafKind> LeafTypeNames[] = {
 #define CV_TYPE(enum, val) {#enum, enum},
-#include "llvm/DebugInfo/CodeView/CodeViewTypes.def"
+#include "llvm/DebugInfo/CodeView/TypeRecords.def"
 };
 
 #define ENUM_ENTRY(enum_class, enum)                                           \
@@ -142,10 +145,6 @@ static const EnumEntry<uint8_t> FunctionOptionEnum[] = {
     ENUM_ENTRY(FunctionOptions, ConstructorWithVirtualBases),
 };
 
-static const EnumEntry<uint16_t> LabelTypeEnum[] = {
-    ENUM_ENTRY(LabelType, Near), ENUM_ENTRY(LabelType, Far),
-};
-
 #undef ENUM_ENTRY
 
 static StringRef getLeafTypeName(TypeLeafKind LT) {
@@ -153,7 +152,7 @@ static StringRef getLeafTypeName(TypeLeafKind LT) {
 #define TYPE_RECORD(ename, value, name)                                        \
   case ename:                                                                  \
     return #name;
-#include "llvm/DebugInfo/CodeView/CodeViewTypes.def"
+#include "llvm/DebugInfo/CodeView/TypeRecords.def"
   default:
     break;
   }
@@ -161,20 +160,13 @@ static StringRef getLeafTypeName(TypeLeafKind LT) {
 }
 
 void TypeDumpVisitor::printTypeIndex(StringRef FieldName, TypeIndex TI) const {
-  codeview::printTypeIndex(*W, FieldName, TI, TpiTypes);
-}
-
-void TypeDumpVisitor::printItemIndex(StringRef FieldName, TypeIndex TI) const {
-  codeview::printTypeIndex(*W, FieldName, TI, getSourceTypes());
+  CVTypeDumper::printTypeIndex(*W, FieldName, TI, TypeDB);
 }
 
 Error TypeDumpVisitor::visitTypeBegin(CVType &Record) {
-  return visitTypeBegin(Record, TypeIndex::fromArrayIndex(TpiTypes.size()));
-}
-
-Error TypeDumpVisitor::visitTypeBegin(CVType &Record, TypeIndex Index) {
   W->startLine() << getLeafTypeName(Record.Type);
-  W->getOStream() << " (" << HexNumber(Index.getIndex()) << ")";
+  W->getOStream() << " (" << HexNumber(TypeDB.getNextTypeIndex().getIndex())
+                  << ")";
   W->getOStream() << " {\n";
   W->indent();
   W->printEnum("TypeLeafKind", unsigned(Record.Type),
@@ -211,14 +203,15 @@ Error TypeDumpVisitor::visitMemberEnd(CVMemberRecord &Record) {
 
 Error TypeDumpVisitor::visitKnownRecord(CVType &CVR,
                                         FieldListRecord &FieldList) {
-  if (auto EC = codeview::visitMemberRecordStream(FieldList.Data, *this))
+  CVTypeVisitor Visitor(*this);
+  if (auto EC = Visitor.visitFieldListMemberStream(FieldList.Data))
     return EC;
 
   return Error::success();
 }
 
 Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, StringIdRecord &String) {
-  printItemIndex("Id", String.getId());
+  printTypeIndex("Id", String.getId());
   W->printString("StringData", String.getString());
   return Error::success();
 }
@@ -230,17 +223,6 @@ Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, ArgListRecord &Args) {
   ListScope Arguments(*W, "Arguments");
   for (uint32_t I = 0; I < Size; ++I) {
     printTypeIndex("ArgType", Indices[I]);
-  }
-  return Error::success();
-}
-
-Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, StringListRecord &Strs) {
-  auto Indices = Strs.getIndices();
-  uint32_t Size = Indices.size();
-  W->printNumber("NumStrings", Size);
-  ListScope Arguments(*W, "Strings");
-  for (uint32_t I = 0; I < Size; ++I) {
-    printItemIndex("String", Indices[I]);
   }
   return Error::success();
 }
@@ -347,14 +329,14 @@ Error TypeDumpVisitor::visitKnownRecord(CVType &CVR,
 }
 
 Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, FuncIdRecord &Func) {
-  printItemIndex("ParentScope", Func.getParentScope());
+  printTypeIndex("ParentScope", Func.getParentScope());
   printTypeIndex("FunctionType", Func.getFunctionType());
   W->printString("Name", Func.getName());
   return Error::success();
 }
 
 Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, TypeServer2Record &TS) {
-  W->printString("Guid", formatv("{0}", TS.getGuid()).str());
+  W->printBinary("Signature", TS.getGuid());
   W->printNumber("Age", TS.getAge());
   W->printString("Name", TS.getName());
   return Error::success();
@@ -408,7 +390,7 @@ Error TypeDumpVisitor::visitKnownRecord(CVType &CVR,
 Error TypeDumpVisitor::visitKnownRecord(CVType &CVR,
                                         UdtSourceLineRecord &Line) {
   printTypeIndex("UDT", Line.getUDT());
-  printItemIndex("SourceFile", Line.getSourceFile());
+  printTypeIndex("SourceFile", Line.getSourceFile());
   W->printNumber("LineNumber", Line.getLineNumber());
   return Error::success();
 }
@@ -416,7 +398,7 @@ Error TypeDumpVisitor::visitKnownRecord(CVType &CVR,
 Error TypeDumpVisitor::visitKnownRecord(CVType &CVR,
                                         UdtModSourceLineRecord &Line) {
   printTypeIndex("UDT", Line.getUDT());
-  printItemIndex("SourceFile", Line.getSourceFile());
+  printTypeIndex("SourceFile", Line.getSourceFile());
   W->printNumber("LineNumber", Line.getLineNumber());
   W->printNumber("Module", Line.getModule());
   return Error::success();
@@ -427,7 +409,7 @@ Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, BuildInfoRecord &Args) {
 
   ListScope Arguments(*W, "Arguments");
   for (auto Arg : Args.getArgs()) {
-    printItemIndex("ArgType", Arg);
+    printTypeIndex("ArgType", Arg);
   }
   return Error::success();
 }
@@ -546,10 +528,5 @@ Error TypeDumpVisitor::visitKnownMember(CVMemberRecord &CVR,
 Error TypeDumpVisitor::visitKnownMember(CVMemberRecord &CVR,
                                         ListContinuationRecord &Cont) {
   printTypeIndex("ContinuationIndex", Cont.getContinuationIndex());
-  return Error::success();
-}
-
-Error TypeDumpVisitor::visitKnownRecord(CVType &CVR, LabelRecord &LR) {
-  W->printEnum("Mode", uint16_t(LR.Mode), makeArrayRef(LabelTypeEnum));
   return Error::success();
 }

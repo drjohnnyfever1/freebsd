@@ -29,10 +29,8 @@ public:
 
   /// Paired begin/end actions for all symbols. Receives all record data,
   /// including the fixed-length record prefix.  visitSymbolBegin() should
-  /// return the type of the Symbol, or an error if it cannot be determined.
-  virtual Error visitSymbolBegin(CVSymbol &Record, uint32_t Offset) {
-    return Error::success();
-  }
+  /// return
+  /// the type of the Symbol, or an error if it cannot be determined.
   virtual Error visitSymbolBegin(CVSymbol &Record) { return Error::success(); }
   virtual Error visitSymbolEnd(CVSymbol &Record) { return Error::success(); }
 
@@ -41,7 +39,7 @@ public:
     return Error::success();                                                   \
   }
 #define SYMBOL_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
-#include "llvm/DebugInfo/CodeView/CodeViewSymbols.def"
+#include "CVSymbolTypes.def"
 };
 
 } // end namespace codeview

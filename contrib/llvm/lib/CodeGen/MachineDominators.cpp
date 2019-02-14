@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
@@ -31,7 +31,7 @@ static cl::opt<bool, true> VerifyMachineDomInfoX(
 
 namespace llvm {
 template class DomTreeNodeBase<MachineBasicBlock>;
-template class DominatorTreeBase<MachineBasicBlock, false>; // DomTreeBase
+template class DominatorTreeBase<MachineBasicBlock>;
 }
 
 char MachineDominatorTree::ID = 0;
@@ -49,29 +49,32 @@ void MachineDominatorTree::getAnalysisUsage(AnalysisUsage &AU) const {
 bool MachineDominatorTree::runOnMachineFunction(MachineFunction &F) {
   CriticalEdgesToSplit.clear();
   NewBBs.clear();
-  DT.reset(new DomTreeBase<MachineBasicBlock>());
   DT->recalculate(F);
+
   return false;
 }
 
 MachineDominatorTree::MachineDominatorTree()
     : MachineFunctionPass(ID) {
   initializeMachineDominatorTreePass(*PassRegistry::getPassRegistry());
+  DT = new DominatorTreeBase<MachineBasicBlock>(false);
+}
+
+MachineDominatorTree::~MachineDominatorTree() {
+  delete DT;
 }
 
 void MachineDominatorTree::releaseMemory() {
-  CriticalEdgesToSplit.clear();
-  DT.reset(nullptr);
+  DT->releaseMemory();
 }
 
 void MachineDominatorTree::verifyAnalysis() const {
-  if (DT && VerifyMachineDomInfo)
+  if (VerifyMachineDomInfo)
     verifyDomTree();
 }
 
 void MachineDominatorTree::print(raw_ostream &OS, const Module*) const {
-  if (DT)
-    DT->print(OS);
+  DT->print(OS);
 }
 
 void MachineDominatorTree::applySplitCriticalEdges() const {
@@ -140,18 +143,15 @@ void MachineDominatorTree::applySplitCriticalEdges() const {
 }
 
 void MachineDominatorTree::verifyDomTree() const {
-  if (!DT)
-    return;
   MachineFunction &F = *getRoot()->getParent();
 
-  DomTreeBase<MachineBasicBlock> OtherDT;
-  OtherDT.recalculate(F);
-  if (getRootNode()->getBlock() != OtherDT.getRootNode()->getBlock() ||
-      DT->compare(OtherDT)) {
+  MachineDominatorTree OtherDT;
+  OtherDT.DT->recalculate(F);
+  if (compare(OtherDT)) {
     errs() << "MachineDominatorTree is not up to date!\nComputed:\n";
-    DT->print(errs());
+    print(errs(), nullptr);
     errs() << "\nActual:\n";
-    OtherDT.print(errs());
+    OtherDT.print(errs(), nullptr);
     abort();
   }
 }

@@ -606,7 +606,8 @@ int main(int argc, char **argv, char * const *envp) {
     // If the program doesn't explicitly call exit, we will need the Exit
     // function later on to make an explicit call, so get the function now.
     Constant *Exit = Mod->getOrInsertFunction("exit", Type::getVoidTy(Context),
-                                                      Type::getInt32Ty(Context));
+                                                      Type::getInt32Ty(Context),
+                                                      nullptr);
 
     // Run static constructors.
     if (!ForceInterpreter) {
@@ -646,7 +647,7 @@ int main(int argc, char **argv, char * const *envp) {
     // else == "if (RemoteMCJIT)"
 
     // Remote target MCJIT doesn't (yet) support static constructors. No reason
-    // it couldn't. This is a limitation of the LLI implementation, not the
+    // it couldn't. This is a limitation of the LLI implemantation, not the
     // MCJIT itself. FIXME.
 
     // Lanch the remote process and get a channel to it.

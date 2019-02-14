@@ -17,35 +17,22 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/X86BaseInfo.h"
-#include "X86FrameLowering.h"
+#include <algorithm>
+
+#include "X86.h"
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
-#include "X86RegisterInfo.h"
 #include "X86Subtarget.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/DebugLoc.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
-#include "llvm/MC/MCDwarf.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <iterator>
 
 using namespace llvm;
 
@@ -57,7 +44,6 @@ static cl::opt<bool>
                cl::init(false), cl::Hidden);
 
 namespace {
-
 class X86CallFrameOptimization : public MachineFunctionPass {
 public:
   X86CallFrameOptimization() : MachineFunctionPass(ID) {}
@@ -67,28 +53,30 @@ public:
 private:
   // Information we know about a particular call site
   struct CallContext {
-    CallContext() : FrameSetup(nullptr), MovVector(4, nullptr) {}
+    CallContext()
+        : FrameSetup(nullptr), Call(nullptr), SPCopy(nullptr), ExpectedDist(0),
+          MovVector(4, nullptr), NoStackParams(false), UsePush(false) {}
 
     // Iterator referring to the frame setup instruction
     MachineBasicBlock::iterator FrameSetup;
 
     // Actual call instruction
-    MachineInstr *Call = nullptr;
+    MachineInstr *Call;
 
     // A copy of the stack pointer
-    MachineInstr *SPCopy = nullptr;
+    MachineInstr *SPCopy;
 
     // The total displacement of all passed parameters
-    int64_t ExpectedDist = 0;
+    int64_t ExpectedDist;
 
     // The sequence of movs used to pass the parameters
     SmallVector<MachineInstr *, 4> MovVector;
 
     // True if this call site has no stack parameters
-    bool NoStackParams = false;
+    bool NoStackParams;
 
     // True if this call site can use push instructions
-    bool UsePush = false;
+    bool UsePush;
   };
 
   typedef SmallVector<CallContext, 8> ContextVector;
@@ -114,7 +102,7 @@ private:
 
   StringRef getPassName() const override { return "X86 Optimize Call Frame"; }
 
-  const X86InstrInfo *TII;
+  const TargetInstrInfo *TII;
   const X86FrameLowering *TFL;
   const X86Subtarget *STI;
   MachineRegisterInfo *MRI;
@@ -124,8 +112,11 @@ private:
 };
 
 char X86CallFrameOptimization::ID = 0;
-
 } // end anonymous namespace
+
+FunctionPass *llvm::createX86CallFrameOptimization() {
+  return new X86CallFrameOptimization();
+}
 
 // This checks whether the transformation is legal.
 // Also returns false in cases where it's potentially legal, but
@@ -336,6 +327,7 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
   // transformation.
   const X86RegisterInfo &RegInfo =
       *static_cast<const X86RegisterInfo *>(STI->getRegisterInfo());
+  unsigned FrameDestroyOpcode = TII->getCallFrameDestroyOpcode();
 
   // We expect to enter this at the beginning of a call sequence
   assert(I->getOpcode() == TII->getCallFrameSetupOpcode());
@@ -344,7 +336,8 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
 
   // How much do we adjust the stack? This puts an upper bound on
   // the number of parameters actually passed on it.
-  unsigned int MaxAdjust = TII->getFrameSize(*FrameSetup) >> Log2SlotSize;
+  unsigned int MaxAdjust =
+      FrameSetup->getOperand(0).getImm() >> Log2SlotSize;
 
   // A zero adjustment means no stack parameters
   if (!MaxAdjust) {
@@ -437,7 +430,7 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
     return;
 
   Context.Call = &*I;
-  if ((++I)->getOpcode() != TII->getCallFrameDestroyOpcode())
+  if ((++I)->getOpcode() != FrameDestroyOpcode)
     return;
 
   // Now, go through the vector, and see that we don't have any gaps,
@@ -467,7 +460,7 @@ void X86CallFrameOptimization::adjustCallSequence(MachineFunction &MF,
   // PEI will end up finalizing the handling of this.
   MachineBasicBlock::iterator FrameSetup = Context.FrameSetup;
   MachineBasicBlock &MBB = *(FrameSetup->getParent());
-  TII->setFrameAdjustment(*FrameSetup, Context.ExpectedDist);
+  FrameSetup->getOperand(1).setImm(Context.ExpectedDist);
 
   DebugLoc DL = FrameSetup->getDebugLoc();
   bool Is64Bit = STI->is64Bit();
@@ -494,10 +487,11 @@ void X86CallFrameOptimization::adjustCallSequence(MachineFunction &MF,
         if (isInt<8>(Val))
           PushOpcode = Is64Bit ? X86::PUSH64i8 : X86::PUSH32i8;
       }
-      Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode)).add(PushOp);
+      Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode))
+                 .addOperand(PushOp);
       break;
     case X86::MOV32mr:
-    case X86::MOV64mr: {
+    case X86::MOV64mr:
       unsigned int Reg = PushOp.getReg();
 
       // If storing a 32-bit vreg on 64-bit targets, extend to a 64-bit vreg
@@ -507,9 +501,9 @@ void X86CallFrameOptimization::adjustCallSequence(MachineFunction &MF,
         Reg = MRI->createVirtualRegister(&X86::GR64RegClass);
         BuildMI(MBB, Context.Call, DL, TII->get(X86::IMPLICIT_DEF), UndefReg);
         BuildMI(MBB, Context.Call, DL, TII->get(X86::INSERT_SUBREG), Reg)
-            .addReg(UndefReg)
-            .add(PushOp)
-            .addImm(X86::sub_32bit);
+          .addReg(UndefReg)
+          .addOperand(PushOp)
+          .addImm(X86::sub_32bit);
       }
 
       // If PUSHrmm is not slow on this target, try to fold the source of the
@@ -535,7 +529,6 @@ void X86CallFrameOptimization::adjustCallSequence(MachineFunction &MF,
                    .getInstr();
       }
       break;
-    }
     }
 
     // For debugging, when using SP-based CFA, we need to adjust the CFA
@@ -595,8 +588,4 @@ MachineInstr *X86CallFrameOptimization::canFoldIntoRegPush(
       return nullptr;
 
   return &DefMI;
-}
-
-FunctionPass *llvm::createX86CallFrameOptimization() {
-  return new X86CallFrameOptimization();
 }

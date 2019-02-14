@@ -34,7 +34,6 @@ class GCNHazardRecognizer final : public ScheduleHazardRecognizer {
   std::list<MachineInstr*> EmittedInstrs;
   const MachineFunction &MF;
   const SISubtarget &ST;
-  const SIInstrInfo &TII;
 
   int getWaitStatesSince(function_ref<bool(MachineInstr *)> IsHazard);
   int getWaitStatesSinceDef(unsigned Reg,
@@ -53,8 +52,6 @@ class GCNHazardRecognizer final : public ScheduleHazardRecognizer {
   int checkVALUHazards(MachineInstr *VALU);
   int checkRWLaneHazards(MachineInstr *RWLane);
   int checkRFEHazards(MachineInstr *RFE);
-  int checkAnyInstHazards(MachineInstr *MI);
-  int checkReadM0Hazards(MachineInstr *SMovRel);
 public:
   GCNHazardRecognizer(const MachineFunction &MF);
   // We can only issue one instruction per cycle.

@@ -12,6 +12,7 @@
 // Other libraries and framework includes
 // Project includes
 #include "lldb/Target/LanguageRuntime.h"
+#include "Plugins/Language/CPlusPlus/CPlusPlusLanguage.h"
 #include "Plugins/Language/ObjC/ObjCLanguage.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/SearchFilter.h"
@@ -89,8 +90,7 @@ ExceptionSearchFilter::DoCopyForBreakpoint(Breakpoint &breakpoint) {
 }
 
 SearchFilter *ExceptionSearchFilter::CreateFromStructuredData(
-    Target &target, const StructuredData::Dictionary &data_dict,
-    Status &error) {
+    Target &target, const StructuredData::Dictionary &data_dict, Error &error) {
   SearchFilter *result = nullptr;
   return result;
 }

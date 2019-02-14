@@ -48,7 +48,7 @@ Regex::~Regex() {
   }
 }
 
-bool Regex::isValid(std::string &Error) const {
+bool Regex::isValid(std::string &Error) {
   if (!error)
     return true;
   

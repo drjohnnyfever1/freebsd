@@ -15,7 +15,6 @@
 
 #include "CoverageFilters.h"
 #include "CoverageReport.h"
-#include "CoverageSummaryInfo.h"
 #include "CoverageViewOptions.h"
 #include "RenderingSupport.h"
 #include "SourceCoverageView.h"
@@ -32,7 +31,6 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/ScopedPrinter.h"
-#include "llvm/Support/Threading.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include <functional>
@@ -100,6 +98,9 @@ private:
   /// \brief If a demangler is available, demangle all symbol names.
   void demangleSymbols(const CoverageMapping &Coverage);
 
+  /// \brief Demangle \p Sym if possible. Otherwise, just return \p Sym.
+  StringRef getSymbolForHumans(StringRef Sym) const;
+
   /// \brief Write out a source file view to the filesystem.
   void writeSourceFileView(StringRef SourceFile, CoverageMapping *Coverage,
                            CoveragePrinter *Printer, bool ShowFilenames);
@@ -135,10 +136,10 @@ private:
   /// The architecture the coverage mapping data targets.
   std::string CoverageArch;
 
-  /// A cache for demangled symbols.
-  DemangleCache DC;
+  /// A cache for demangled symbol names.
+  StringMap<std::string> DemangledNames;
 
-  /// A lock which guards printing to stderr.
+  /// Errors and warnings which have not been printed.
   std::mutex ErrsLock;
 
   /// A container for input source file buffers.
@@ -266,7 +267,7 @@ CodeCoverageTool::createFunctionView(const FunctionRecord &Function,
     return nullptr;
 
   auto Expansions = FunctionCoverage.getExpansions();
-  auto View = SourceCoverageView::create(DC.demangle(Function.Name),
+  auto View = SourceCoverageView::create(getSymbolForHumans(Function.Name),
                                          SourceBuffer.get(), ViewOpts,
                                          std::move(FunctionCoverage));
   attachExpansionSubViews(*View, Expansions, Coverage);
@@ -292,7 +293,7 @@ CodeCoverageTool::createSourceFileView(StringRef SourceFile,
   for (const auto *Function : Coverage.getInstantiations(SourceFile)) {
     std::unique_ptr<SourceCoverageView> SubView{nullptr};
 
-    StringRef Funcname = DC.demangle(Function->Name);
+    StringRef Funcname = getSymbolForHumans(Function->Name);
 
     if (Function->ExecutionCount > 0) {
       auto SubViewCoverage = Coverage.getCoverageForFunction(*Function);
@@ -452,9 +453,14 @@ void CodeCoverageTool::demangleSymbols(const CoverageMapping &Coverage) {
   // Cache the demangled names.
   unsigned I = 0;
   for (const auto &Function : Coverage.getCoveredFunctions())
-    // On Windows, lines in the demangler's output file end with "\r\n".
-    // Splitting by '\n' keeps '\r's, so cut them now.
-    DC.DemangledNames[Function.Name] = Symbols[I++].rtrim();
+    DemangledNames[Function.Name] = Symbols[I++];
+}
+
+StringRef CodeCoverageTool::getSymbolForHumans(StringRef Sym) const {
+  const auto DemangledName = DemangledNames.find(Sym);
+  if (DemangledName == DemangledNames.end())
+    return Sym;
+  return DemangledName->getValue();
 }
 
 void CodeCoverageTool::writeSourceFileView(StringRef SourceFile,
@@ -706,12 +712,6 @@ int CodeCoverageTool::show(int argc, const char **argv,
       "project-title", cl::Optional,
       cl::desc("Set project title for the coverage report"));
 
-  cl::opt<unsigned> NumThreads(
-      "num-threads", cl::init(0),
-      cl::desc("Number of merge threads to use (default: autodetect)"));
-  cl::alias NumThreadsA("j", cl::desc("Alias for --num-threads"),
-                        cl::aliasopt(NumThreads));
-
   auto Err = commandLineParser(argc, argv);
   if (Err)
     return Err;
@@ -797,19 +797,15 @@ int CodeCoverageTool::show(int argc, const char **argv,
     }
   }
 
-  // If NumThreads is not specified, auto-detect a good default.
-  if (NumThreads == 0)
-    NumThreads =
-        std::max(1U, std::min(llvm::heavyweight_hardware_concurrency(),
-                              unsigned(SourceFiles.size())));
-
-  if (!ViewOpts.hasOutputDirectory() || NumThreads == 1) {
+  // FIXME: Sink the hardware_concurrency() == 1 check into ThreadPool.
+  if (!ViewOpts.hasOutputDirectory() ||
+      std::thread::hardware_concurrency() == 1) {
     for (const std::string &SourceFile : SourceFiles)
       writeSourceFileView(SourceFile, Coverage.get(), Printer.get(),
                           ShowFilenames);
   } else {
     // In -output-dir mode, it's safe to use multiple threads to print files.
-    ThreadPool Pool(NumThreads);
+    ThreadPool Pool;
     for (const std::string &SourceFile : SourceFiles)
       Pool.async(&CodeCoverageTool::writeSourceFileView, this, SourceFile,
                  Coverage.get(), Printer.get(), ShowFilenames);
@@ -821,28 +817,22 @@ int CodeCoverageTool::show(int argc, const char **argv,
 
 int CodeCoverageTool::report(int argc, const char **argv,
                              CommandLineParserType commandLineParser) {
-  cl::opt<bool> ShowFunctionSummaries(
-      "show-functions", cl::Optional, cl::init(false),
-      cl::desc("Show coverage summaries for each function"));
-
   auto Err = commandLineParser(argc, argv);
   if (Err)
     return Err;
 
-  if (ViewOpts.Format == CoverageViewOptions::OutputFormat::HTML) {
+  if (ViewOpts.Format == CoverageViewOptions::OutputFormat::HTML)
     error("HTML output for summary reports is not yet supported.");
-    return 1;
-  }
 
   auto Coverage = load();
   if (!Coverage)
     return 1;
 
   CoverageReport Report(ViewOpts, *Coverage.get());
-  if (!ShowFunctionSummaries)
+  if (SourceFiles.empty())
     Report.renderFileReports(llvm::outs());
   else
-    Report.renderFunctionReports(SourceFiles, DC, llvm::outs());
+    Report.renderFunctionReports(SourceFiles, llvm::outs());
   return 0;
 }
 
@@ -852,11 +842,6 @@ int CodeCoverageTool::export_(int argc, const char **argv,
   auto Err = commandLineParser(argc, argv);
   if (Err)
     return Err;
-
-  if (ViewOpts.Format != CoverageViewOptions::OutputFormat::Text) {
-    error("Coverage data can only be exported as textual JSON.");
-    return 1;
-  }
 
   auto Coverage = load();
   if (!Coverage) {

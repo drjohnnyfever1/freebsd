@@ -731,8 +731,7 @@ bool ReduceCrashingInstructions::TestInsts(
       for (BasicBlock::iterator I = FI->begin(), E = FI->end(); I != E;) {
         Instruction *Inst = &*I++;
         if (!Instructions.count(Inst) && !isa<TerminatorInst>(Inst) &&
-            !Inst->isEHPad() && !Inst->getType()->isTokenTy() &&
-            !Inst->isSwiftError()) {
+            !Inst->isEHPad() && !Inst->getType()->isTokenTy()) {
           if (!Inst->getType()->isVoidTy())
             Inst->replaceAllUsesWith(UndefValue::get(Inst->getType()));
           Inst->eraseFromParent();
@@ -1016,8 +1015,7 @@ static Error ReduceInsts(BugDriver &BD,
                 // TODO: Should this be some kind of interrupted error?
                 return Error::success();
 
-              if (I->isEHPad() || I->getType()->isTokenTy() ||
-                  I->isSwiftError())
+              if (I->isEHPad() || I->getType()->isTokenTy())
                 continue;
 
               outs() << "Checking instruction: " << *I;
@@ -1113,7 +1111,7 @@ static Error DebugACrash(BugDriver &BD,
       BD.EmitProgressBitcode(BD.getProgram(), "reduced-blocks");
   }
 
-  if (!DisableSimplifyCFG && !BugpointIsInterrupted) {
+  if (!DisableSimplifyCFG & !BugpointIsInterrupted) {
     std::vector<const BasicBlock *> Blocks;
     for (Function &F : *BD.getProgram())
       for (BasicBlock &BB : F)

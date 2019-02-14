@@ -14,7 +14,7 @@
 
 // C Includes
 // C++ Includes
-#include <mutex>
+#include <mutex> // std::once
 #include <string>
 #include <vector>
 
@@ -65,17 +65,16 @@
 #endif
 
 #include "llvm/Support/Signals.h"
-#include "llvm/Support/Threading.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangFunctionCaller.h"
 #include "Plugins/ExpressionParser/Clang/ClangUserExpression.h"
 #include "Plugins/ExpressionParser/Clang/ClangUtilityFunction.h"
 #include "lldb/Core/ArchSpec.h"
-#include "lldb/Utility/Flags.h"
-
-#include "lldb/Core/DumpDataExtractor.h"
+#include "lldb/Core/Flags.h"
+#include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegularExpression.h"
 #include "lldb/Core/Scalar.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/ThreadSafeDenseMap.h"
@@ -93,10 +92,7 @@
 #include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/LLDBAssert.h"
-#include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegularExpression.h"
 
 #include "Plugins/SymbolFile/DWARF/DWARFASTParserClang.h"
 //#include "Plugins/SymbolFile/PDB/PDBASTParser.h"
@@ -131,8 +127,8 @@ typedef lldb_private::ThreadSafeDenseMap<clang::ASTContext *, ClangASTContext *>
 
 static ClangASTMap &GetASTMap() {
   static ClangASTMap *g_map_ptr = nullptr;
-  static llvm::once_flag g_once_flag;
-  llvm::call_once(g_once_flag, []() {
+  static std::once_flag g_once_flag;
+  std::call_once(g_once_flag, []() {
     g_map_ptr = new ClangASTMap(); // leaked on purpose to avoid spins
   });
   return *g_map_ptr;
@@ -378,9 +374,10 @@ static void ParseLangArgs(LangOptions &Opts, InputKind IK, const char *triple) {
   // Set some properties which depend solely on the input kind; it would be nice
   // to move these to the language standard, and have the driver resolve the
   // input kind + language standard.
-  if (IK.getLanguage() == InputKind::Asm) {
+  if (IK == IK_Asm) {
     Opts.AsmPreprocessor = 1;
-  } else if (IK.isObjectiveC()) {
+  } else if (IK == IK_ObjC || IK == IK_ObjCXX || IK == IK_PreprocessedObjC ||
+             IK == IK_PreprocessedObjCXX) {
     Opts.ObjC1 = Opts.ObjC2 = 1;
   }
 
@@ -388,24 +385,30 @@ static void ParseLangArgs(LangOptions &Opts, InputKind IK, const char *triple) {
 
   if (LangStd == LangStandard::lang_unspecified) {
     // Based on the base language, pick one.
-    switch (IK.getLanguage()) {
-    case InputKind::Unknown:
-    case InputKind::LLVM_IR:
-    case InputKind::RenderScript:
+    switch (IK) {
+    case IK_None:
+    case IK_AST:
+    case IK_LLVM_IR:
+    case IK_RenderScript:
       llvm_unreachable("Invalid input kind!");
-    case InputKind::OpenCL:
-      LangStd = LangStandard::lang_opencl10;
+    case IK_OpenCL:
+      LangStd = LangStandard::lang_opencl;
       break;
-    case InputKind::CUDA:
+    case IK_CUDA:
+    case IK_PreprocessedCuda:
       LangStd = LangStandard::lang_cuda;
       break;
-    case InputKind::Asm:
-    case InputKind::C:
-    case InputKind::ObjC:
+    case IK_Asm:
+    case IK_C:
+    case IK_PreprocessedC:
+    case IK_ObjC:
+    case IK_PreprocessedObjC:
       LangStd = LangStandard::lang_gnu99;
       break;
-    case InputKind::CXX:
-    case InputKind::ObjCXX:
+    case IK_CXX:
+    case IK_PreprocessedCXX:
+    case IK_ObjCXX:
+    case IK_PreprocessedObjCXX:
       LangStd = LangStandard::lang_gnucxx98;
       break;
     }
@@ -425,7 +428,7 @@ static void ParseLangArgs(LangOptions &Opts, InputKind IK, const char *triple) {
   Opts.WChar = true;
 
   // OpenCL has some additional defaults.
-  if (LangStd == LangStandard::lang_opencl10) {
+  if (LangStd == LangStandard::lang_opencl) {
     Opts.OpenCL = 1;
     Opts.AltiVec = 1;
     Opts.CXXOperatorNames = 1;
@@ -777,8 +780,8 @@ IdentifierTable *ClangASTContext::getIdentifierTable() {
 LangOptions *ClangASTContext::getLanguageOptions() {
   if (m_language_options_ap.get() == nullptr) {
     m_language_options_ap.reset(new LangOptions());
-    ParseLangArgs(*m_language_options_ap, InputKind::ObjCXX, GetTargetTriple());
-    //        InitializeLangOptions(*m_language_options_ap, InputKind::ObjCXX);
+    ParseLangArgs(*m_language_options_ap, IK_ObjCXX, GetTargetTriple());
+    //        InitializeLangOptions(*m_language_options_ap, IK_ObjCXX);
   }
   return m_language_options_ap.get();
 }
@@ -951,63 +954,78 @@ ClangASTContext::GetBasicTypeEnumeration(const ConstString &name) {
   if (name) {
     typedef UniqueCStringMap<lldb::BasicType> TypeNameToBasicTypeMap;
     static TypeNameToBasicTypeMap g_type_map;
-    static llvm::once_flag g_once_flag;
-    llvm::call_once(g_once_flag, []() {
+    static std::once_flag g_once_flag;
+    std::call_once(g_once_flag, []() {
       // "void"
-      g_type_map.Append(ConstString("void"), eBasicTypeVoid);
+      g_type_map.Append(ConstString("void").GetStringRef(), eBasicTypeVoid);
 
       // "char"
-      g_type_map.Append(ConstString("char"), eBasicTypeChar);
-      g_type_map.Append(ConstString("signed char"), eBasicTypeSignedChar);
-      g_type_map.Append(ConstString("unsigned char"), eBasicTypeUnsignedChar);
-      g_type_map.Append(ConstString("wchar_t"), eBasicTypeWChar);
-      g_type_map.Append(ConstString("signed wchar_t"), eBasicTypeSignedWChar);
-      g_type_map.Append(ConstString("unsigned wchar_t"),
+      g_type_map.Append(ConstString("char").GetStringRef(), eBasicTypeChar);
+      g_type_map.Append(ConstString("signed char").GetStringRef(),
+                        eBasicTypeSignedChar);
+      g_type_map.Append(ConstString("unsigned char").GetStringRef(),
+                        eBasicTypeUnsignedChar);
+      g_type_map.Append(ConstString("wchar_t").GetStringRef(), eBasicTypeWChar);
+      g_type_map.Append(ConstString("signed wchar_t").GetStringRef(),
+                        eBasicTypeSignedWChar);
+      g_type_map.Append(ConstString("unsigned wchar_t").GetStringRef(),
                         eBasicTypeUnsignedWChar);
       // "short"
-      g_type_map.Append(ConstString("short"), eBasicTypeShort);
-      g_type_map.Append(ConstString("short int"), eBasicTypeShort);
-      g_type_map.Append(ConstString("unsigned short"), eBasicTypeUnsignedShort);
-      g_type_map.Append(ConstString("unsigned short int"),
+      g_type_map.Append(ConstString("short").GetStringRef(), eBasicTypeShort);
+      g_type_map.Append(ConstString("short int").GetStringRef(),
+                        eBasicTypeShort);
+      g_type_map.Append(ConstString("unsigned short").GetStringRef(),
+                        eBasicTypeUnsignedShort);
+      g_type_map.Append(ConstString("unsigned short int").GetStringRef(),
                         eBasicTypeUnsignedShort);
 
       // "int"
-      g_type_map.Append(ConstString("int"), eBasicTypeInt);
-      g_type_map.Append(ConstString("signed int"), eBasicTypeInt);
-      g_type_map.Append(ConstString("unsigned int"), eBasicTypeUnsignedInt);
-      g_type_map.Append(ConstString("unsigned"), eBasicTypeUnsignedInt);
+      g_type_map.Append(ConstString("int").GetStringRef(), eBasicTypeInt);
+      g_type_map.Append(ConstString("signed int").GetStringRef(),
+                        eBasicTypeInt);
+      g_type_map.Append(ConstString("unsigned int").GetStringRef(),
+                        eBasicTypeUnsignedInt);
+      g_type_map.Append(ConstString("unsigned").GetStringRef(),
+                        eBasicTypeUnsignedInt);
 
       // "long"
-      g_type_map.Append(ConstString("long"), eBasicTypeLong);
-      g_type_map.Append(ConstString("long int"), eBasicTypeLong);
-      g_type_map.Append(ConstString("unsigned long"), eBasicTypeUnsignedLong);
-      g_type_map.Append(ConstString("unsigned long int"),
+      g_type_map.Append(ConstString("long").GetStringRef(), eBasicTypeLong);
+      g_type_map.Append(ConstString("long int").GetStringRef(), eBasicTypeLong);
+      g_type_map.Append(ConstString("unsigned long").GetStringRef(),
+                        eBasicTypeUnsignedLong);
+      g_type_map.Append(ConstString("unsigned long int").GetStringRef(),
                         eBasicTypeUnsignedLong);
 
       // "long long"
-      g_type_map.Append(ConstString("long long"), eBasicTypeLongLong);
-      g_type_map.Append(ConstString("long long int"), eBasicTypeLongLong);
-      g_type_map.Append(ConstString("unsigned long long"),
+      g_type_map.Append(ConstString("long long").GetStringRef(),
+                        eBasicTypeLongLong);
+      g_type_map.Append(ConstString("long long int").GetStringRef(),
+                        eBasicTypeLongLong);
+      g_type_map.Append(ConstString("unsigned long long").GetStringRef(),
                         eBasicTypeUnsignedLongLong);
-      g_type_map.Append(ConstString("unsigned long long int"),
+      g_type_map.Append(ConstString("unsigned long long int").GetStringRef(),
                         eBasicTypeUnsignedLongLong);
 
       // "int128"
-      g_type_map.Append(ConstString("__int128_t"), eBasicTypeInt128);
-      g_type_map.Append(ConstString("__uint128_t"), eBasicTypeUnsignedInt128);
+      g_type_map.Append(ConstString("__int128_t").GetStringRef(),
+                        eBasicTypeInt128);
+      g_type_map.Append(ConstString("__uint128_t").GetStringRef(),
+                        eBasicTypeUnsignedInt128);
 
       // Miscellaneous
-      g_type_map.Append(ConstString("bool"), eBasicTypeBool);
-      g_type_map.Append(ConstString("float"), eBasicTypeFloat);
-      g_type_map.Append(ConstString("double"), eBasicTypeDouble);
-      g_type_map.Append(ConstString("long double"), eBasicTypeLongDouble);
-      g_type_map.Append(ConstString("id"), eBasicTypeObjCID);
-      g_type_map.Append(ConstString("SEL"), eBasicTypeObjCSel);
-      g_type_map.Append(ConstString("nullptr"), eBasicTypeNullPtr);
+      g_type_map.Append(ConstString("bool").GetStringRef(), eBasicTypeBool);
+      g_type_map.Append(ConstString("float").GetStringRef(), eBasicTypeFloat);
+      g_type_map.Append(ConstString("double").GetStringRef(), eBasicTypeDouble);
+      g_type_map.Append(ConstString("long double").GetStringRef(),
+                        eBasicTypeLongDouble);
+      g_type_map.Append(ConstString("id").GetStringRef(), eBasicTypeObjCID);
+      g_type_map.Append(ConstString("SEL").GetStringRef(), eBasicTypeObjCSel);
+      g_type_map.Append(ConstString("nullptr").GetStringRef(),
+                        eBasicTypeNullPtr);
       g_type_map.Sort();
     });
 
-    return g_type_map.Find(name, eBasicTypeInvalid);
+    return g_type_map.Find(name.GetStringRef(), eBasicTypeInvalid);
   }
   return eBasicTypeInvalid;
 }
@@ -1394,12 +1412,6 @@ CompilerType ClangASTContext::CreateRecordType(DeclContext *decl_ctx,
   return CompilerType();
 }
 
-namespace {
-  bool IsValueParam(const clang::TemplateArgument &argument) {
-    return argument.getKind() == TemplateArgument::Integral;
-  }
-}
-
 static TemplateParameterList *CreateTemplateParameterList(
     ASTContext *ast,
     const ClangASTContext::TemplateParameterInfos &template_param_infos,
@@ -1407,51 +1419,31 @@ static TemplateParameterList *CreateTemplateParameterList(
   const bool parameter_pack = false;
   const bool is_typename = false;
   const unsigned depth = 0;
-  const size_t num_template_params = template_param_infos.args.size();
-  DeclContext *const decl_context =
-      ast->getTranslationUnitDecl(); // Is this the right decl context?,
+  const size_t num_template_params = template_param_infos.GetSize();
   for (size_t i = 0; i < num_template_params; ++i) {
     const char *name = template_param_infos.names[i];
 
     IdentifierInfo *identifier_info = nullptr;
     if (name && name[0])
       identifier_info = &ast->Idents.get(name);
-    if (IsValueParam(template_param_infos.args[i])) {
+    if (template_param_infos.args[i].getKind() == TemplateArgument::Integral) {
       template_param_decls.push_back(NonTypeTemplateParmDecl::Create(
-          *ast, decl_context,
+          *ast,
+          ast->getTranslationUnitDecl(), // Is this the right decl context?,
+                                         // SourceLocation StartLoc,
           SourceLocation(), SourceLocation(), depth, i, identifier_info,
           template_param_infos.args[i].getIntegralType(), parameter_pack,
           nullptr));
 
     } else {
       template_param_decls.push_back(TemplateTypeParmDecl::Create(
-          *ast, decl_context,
+          *ast,
+          ast->getTranslationUnitDecl(), // Is this the right decl context?
           SourceLocation(), SourceLocation(), depth, i, identifier_info,
           is_typename, parameter_pack));
     }
   }
-  
-  if (template_param_infos.packed_args &&
-      template_param_infos.packed_args->args.size()) {
-    IdentifierInfo *identifier_info = nullptr;
-    if (template_param_infos.pack_name && template_param_infos.pack_name[0])
-      identifier_info = &ast->Idents.get(template_param_infos.pack_name);
-    const bool parameter_pack_true = true;
-    if (IsValueParam(template_param_infos.packed_args->args[0])) {
-      template_param_decls.push_back(NonTypeTemplateParmDecl::Create(
-          *ast, decl_context,
-          SourceLocation(), SourceLocation(), depth, num_template_params,
-          identifier_info,
-          template_param_infos.packed_args->args[0].getIntegralType(),
-          parameter_pack_true, nullptr));
-    } else {
-      template_param_decls.push_back(TemplateTypeParmDecl::Create(
-          *ast, decl_context,
-          SourceLocation(), SourceLocation(), depth, num_template_params,
-          identifier_info,
-          is_typename, parameter_pack_true));
-    }
-  }
+
   clang::Expr *const requires_clause = nullptr; // TODO: Concepts
   TemplateParameterList *template_param_list = TemplateParameterList::Create(
       *ast, SourceLocation(), SourceLocation(), template_param_decls,
@@ -1561,19 +1553,10 @@ ClangASTContext::CreateClassTemplateSpecializationDecl(
     DeclContext *decl_ctx, ClassTemplateDecl *class_template_decl, int kind,
     const TemplateParameterInfos &template_param_infos) {
   ASTContext *ast = getASTContext();
-  llvm::SmallVector<clang::TemplateArgument, 2> args(
-      template_param_infos.args.size() +
-      (template_param_infos.packed_args ? 1 : 0));
-  std::copy(template_param_infos.args.begin(), template_param_infos.args.end(),
-            args.begin());
-  if (template_param_infos.packed_args) {
-    args[args.size() - 1] = TemplateArgument::CreatePackCopy(
-        *ast, template_param_infos.packed_args->args);
-  }
   ClassTemplateSpecializationDecl *class_template_specialization_decl =
       ClassTemplateSpecializationDecl::Create(
           *ast, (TagDecl::TagKind)kind, decl_ctx, SourceLocation(),
-          SourceLocation(), class_template_decl, args,
+          SourceLocation(), class_template_decl, template_param_infos.args,
           nullptr);
 
   class_template_specialization_decl->setSpecializationKind(
@@ -3938,11 +3921,6 @@ ClangASTContext::GetTypeInfo(lldb::opaque_compiler_type_t type,
 
   const clang::Type::TypeClass type_class = qual_type->getTypeClass();
   switch (type_class) {
-  case clang::Type::Attributed:
-    return GetTypeInfo(
-        qual_type->getAs<clang::AttributedType>()
-            ->getModifiedType().getAsOpaquePtr(),
-        pointee_or_element_clang_type);
   case clang::Type::Builtin: {
     const clang::BuiltinType *builtin_type = llvm::dyn_cast<clang::BuiltinType>(
         qual_type->getCanonicalTypeInternal());
@@ -4336,8 +4314,6 @@ ClangASTContext::GetTypeClass(lldb::opaque_compiler_type_t type) {
     break;
   case clang::Type::TemplateSpecialization:
     break;
-  case clang::Type::DeducedTemplateSpecialization:
-    break;
   case clang::Type::Atomic:
     break;
   case clang::Type::Pipe:
@@ -4498,12 +4474,11 @@ ClangASTContext::GetNumMemberFunctions(lldb::opaque_compiler_type_t type) {
 
     case clang::Type::ObjCObjectPointer: {
       const clang::ObjCObjectPointerType *objc_class_type =
-          qual_type->getAs<clang::ObjCObjectPointerType>();
+          qual_type->getAsObjCInterfacePointerType();
       const clang::ObjCInterfaceType *objc_interface_type =
           objc_class_type->getInterfaceType();
       if (objc_interface_type &&
-          GetCompleteType(static_cast<lldb::opaque_compiler_type_t>(
-              const_cast<clang::ObjCInterfaceType *>(objc_interface_type)))) {
+          GetCompleteType((lldb::opaque_compiler_type_t)objc_interface_type)) {
         clang::ObjCInterfaceDecl *class_interface_decl =
             objc_interface_type->getDecl();
         if (class_interface_decl) {
@@ -4607,12 +4582,11 @@ ClangASTContext::GetMemberFunctionAtIndex(lldb::opaque_compiler_type_t type,
 
     case clang::Type::ObjCObjectPointer: {
       const clang::ObjCObjectPointerType *objc_class_type =
-          qual_type->getAs<clang::ObjCObjectPointerType>();
+          qual_type->getAsObjCInterfacePointerType();
       const clang::ObjCInterfaceType *objc_interface_type =
           objc_class_type->getInterfaceType();
       if (objc_interface_type &&
-          GetCompleteType(static_cast<lldb::opaque_compiler_type_t>(
-              const_cast<clang::ObjCInterfaceType *>(objc_interface_type)))) {
+          GetCompleteType((lldb::opaque_compiler_type_t)objc_interface_type)) {
         clang::ObjCInterfaceDecl *class_interface_decl =
             objc_interface_type->getDecl();
         if (class_interface_decl) {
@@ -5065,6 +5039,7 @@ lldb::Encoding ClangASTContext::GetEncoding(lldb::opaque_compiler_type_t type,
     case clang::BuiltinType::Kind::OCLImage3dWO:
     case clang::BuiltinType::Kind::OCLImage3dRW:
     case clang::BuiltinType::Kind::OCLQueue:
+    case clang::BuiltinType::Kind::OCLNDRange:
     case clang::BuiltinType::Kind::OCLReserveID:
     case clang::BuiltinType::Kind::OCLSampler:
     case clang::BuiltinType::Kind::OMPArraySection:
@@ -5148,7 +5123,6 @@ lldb::Encoding ClangASTContext::GetEncoding(lldb::opaque_compiler_type_t type,
   case clang::Type::TypeOf:
   case clang::Type::Decltype:
   case clang::Type::TemplateSpecialization:
-  case clang::Type::DeducedTemplateSpecialization:
   case clang::Type::Atomic:
   case clang::Type::Adjusted:
   case clang::Type::Pipe:
@@ -5298,7 +5272,6 @@ lldb::Format ClangASTContext::GetFormat(lldb::opaque_compiler_type_t type) {
   case clang::Type::TypeOf:
   case clang::Type::Decltype:
   case clang::Type::TemplateSpecialization:
-  case clang::Type::DeducedTemplateSpecialization:
   case clang::Type::Atomic:
   case clang::Type::Adjusted:
   case clang::Type::Pipe:
@@ -5676,12 +5649,11 @@ uint32_t ClangASTContext::GetNumFields(lldb::opaque_compiler_type_t type) {
 
   case clang::Type::ObjCObjectPointer: {
     const clang::ObjCObjectPointerType *objc_class_type =
-        qual_type->getAs<clang::ObjCObjectPointerType>();
+        qual_type->getAsObjCInterfacePointerType();
     const clang::ObjCInterfaceType *objc_interface_type =
         objc_class_type->getInterfaceType();
     if (objc_interface_type &&
-        GetCompleteType(static_cast<lldb::opaque_compiler_type_t>(
-            const_cast<clang::ObjCInterfaceType *>(objc_interface_type)))) {
+        GetCompleteType((lldb::opaque_compiler_type_t)objc_interface_type)) {
       clang::ObjCInterfaceDecl *class_interface_decl =
           objc_interface_type->getDecl();
       if (class_interface_decl) {
@@ -5824,12 +5796,11 @@ CompilerType ClangASTContext::GetFieldAtIndex(lldb::opaque_compiler_type_t type,
 
   case clang::Type::ObjCObjectPointer: {
     const clang::ObjCObjectPointerType *objc_class_type =
-        qual_type->getAs<clang::ObjCObjectPointerType>();
+        qual_type->getAsObjCInterfacePointerType();
     const clang::ObjCInterfaceType *objc_interface_type =
         objc_class_type->getInterfaceType();
     if (objc_interface_type &&
-        GetCompleteType(static_cast<lldb::opaque_compiler_type_t>(
-            const_cast<clang::ObjCInterfaceType *>(objc_interface_type)))) {
+        GetCompleteType((lldb::opaque_compiler_type_t)objc_interface_type)) {
       clang::ObjCInterfaceDecl *class_interface_decl =
           objc_interface_type->getDecl();
       if (class_interface_decl) {
@@ -6438,7 +6409,7 @@ CompilerType ClangASTContext::GetChildCompilerTypeAtIndex(
             if (base_class->isVirtual()) {
               bool handled = false;
               if (valobj) {
-                Status err;
+                Error err;
                 AddressType addr_type = eAddressTypeInvalid;
                 lldb::addr_t vtable_ptr_addr =
                     valobj->GetCPPVTableAddress(addr_type);
@@ -8832,7 +8803,7 @@ ClangASTContext::ConvertStringToFloatValue(lldb::opaque_compiler_type_t type,
       if (dst_size >= byte_size) {
         Scalar scalar = ap_float.bitcastToAPInt().zextOrTrunc(
             llvm::NextPowerOf2(byte_size) * 8);
-        lldb_private::Status get_data_error;
+        lldb_private::Error get_data_error;
         if (scalar.GetAsMemoryData(dst, byte_size,
                                    lldb_private::endian::InlHostByteOrder(),
                                    get_data_error))
@@ -8850,7 +8821,7 @@ ClangASTContext::ConvertStringToFloatValue(lldb::opaque_compiler_type_t type,
 
 void ClangASTContext::DumpValue(
     lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx, Stream *s,
-    lldb::Format format, const DataExtractor &data,
+    lldb::Format format, const lldb_private::DataExtractor &data,
     lldb::offset_t data_byte_offset, size_t data_byte_size,
     uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset, bool show_types,
     bool show_summary, bool verbose, uint32_t depth) {
@@ -9058,9 +9029,8 @@ void ClangASTContext::DumpValue(
 
     if (is_array_of_characters) {
       s->PutChar('"');
-      DumpDataExtractor(data, s, data_byte_offset, lldb::eFormatChar,
-                        element_byte_size, element_count, UINT32_MAX,
-                        LLDB_INVALID_ADDRESS, 0, 0);
+      data.Dump(s, data_byte_offset, lldb::eFormatChar, element_byte_size,
+                element_count, UINT32_MAX, LLDB_INVALID_ADDRESS, 0, 0);
       s->PutChar('"');
       return;
     } else {
@@ -9216,9 +9186,8 @@ void ClangASTContext::DumpValue(
 
   default:
     // We are down to a scalar type that we just need to display.
-    DumpDataExtractor(data, s, data_byte_offset, format, data_byte_size, 1,
-                      UINT32_MAX, LLDB_INVALID_ADDRESS, bitfield_bit_size,
-                      bitfield_bit_offset);
+    data.Dump(s, data_byte_offset, format, data_byte_size, 1, UINT32_MAX,
+              LLDB_INVALID_ADDRESS, bitfield_bit_size, bitfield_bit_offset);
 
     if (show_summary)
       DumpSummary(type, exe_ctx, s, data, data_byte_offset, data_byte_size);
@@ -9228,8 +9197,8 @@ void ClangASTContext::DumpValue(
 
 bool ClangASTContext::DumpTypeValue(
     lldb::opaque_compiler_type_t type, Stream *s, lldb::Format format,
-    const DataExtractor &data, lldb::offset_t byte_offset, size_t byte_size,
-    uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
+    const lldb_private::DataExtractor &data, lldb::offset_t byte_offset,
+    size_t byte_size, uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
     ExecutionContextScope *exe_scope) {
   if (!type)
     return false;
@@ -9367,10 +9336,9 @@ bool ClangASTContext::DumpTypeValue(
           byte_size = 4;
           break;
         }
-        return DumpDataExtractor(data, s, byte_offset, format, byte_size,
-                                 item_count, UINT32_MAX, LLDB_INVALID_ADDRESS,
-                                 bitfield_bit_size, bitfield_bit_offset,
-                                 exe_scope);
+        return data.Dump(s, byte_offset, format, byte_size, item_count,
+                         UINT32_MAX, LLDB_INVALID_ADDRESS, bitfield_bit_size,
+                         bitfield_bit_offset, exe_scope);
       }
       break;
     }
@@ -9396,12 +9364,12 @@ void ClangASTContext::DumpSummary(lldb::opaque_compiler_type_t type,
         else
           buf.resize(256);
 
-        DataExtractor cstr_data(&buf.front(), buf.size(),
-                                process->GetByteOrder(), 4);
+        lldb_private::DataExtractor cstr_data(&buf.front(), buf.size(),
+                                              process->GetByteOrder(), 4);
         buf.back() = '\0';
         size_t bytes_read;
         size_t total_cstr_len = 0;
-        Status error;
+        Error error;
         while ((bytes_read = process->ReadMemory(pointer_address, &buf.front(),
                                                  buf.size(), error)) > 0) {
           const size_t len = strlen((const char *)&buf.front());
@@ -9409,8 +9377,8 @@ void ClangASTContext::DumpSummary(lldb::opaque_compiler_type_t type,
             break;
           if (total_cstr_len == 0)
             s->PutCString(" \"");
-          DumpDataExtractor(cstr_data, s, 0, lldb::eFormatChar, 1, len,
-                            UINT32_MAX, LLDB_INVALID_ADDRESS, 0, 0);
+          cstr_data.Dump(s, 0, lldb::eFormatChar, 1, len, UINT32_MAX,
+                         LLDB_INVALID_ADDRESS, 0, 0);
           total_cstr_len += len;
           if (len < buf.size())
             break;

@@ -27,15 +27,7 @@ public:
       : MCELFStreamer(Context, TAB, OS, Emitter),
         MCII(createHexagonMCInstrInfo()) {}
 
-  HexagonMCELFStreamer(MCContext &Context,
-                       MCAsmBackend &TAB,
-                       raw_pwrite_stream &OS, MCCodeEmitter *Emitter,
-                       MCAssembler *Assembler) :
-  MCELFStreamer(Context, TAB, OS, Emitter),
-  MCII (createHexagonMCInstrInfo()) {}
-
-  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
-                       bool) override;
+  void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI) override;
   void EmitSymbol(const MCInst &Inst);
   void HexagonMCEmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                                       unsigned ByteAlignment,
@@ -44,9 +36,8 @@ public:
                                  unsigned ByteAlignment, unsigned AccessSize);
 };
 
-MCStreamer *createHexagonELFStreamer(Triple const &TT, MCContext &Context,
-                                     MCAsmBackend &MAB, raw_pwrite_stream &OS,
-                                     MCCodeEmitter *CE);
+MCStreamer *createHexagonELFStreamer(MCContext &Context, MCAsmBackend &MAB,
+                                     raw_pwrite_stream &OS, MCCodeEmitter *CE);
 
 } // end namespace llvm
 

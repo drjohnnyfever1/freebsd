@@ -7,6 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define DEBUG_TYPE "hexinsert"
+
 #include "BitTracker.h"
 #include "HexagonBitTracker.h"
 #include "HexagonInstrInfo.h"
@@ -15,9 +17,9 @@
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -32,8 +34,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Timer.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include <algorithm>
 #include <cassert>
@@ -41,8 +43,6 @@
 #include <iterator>
 #include <utility>
 #include <vector>
-
-#define DEBUG_TYPE "hexinsert"
 
 using namespace llvm;
 
@@ -947,8 +947,11 @@ void HexagonGenInsert::collectInBlock(MachineBasicBlock *B,
     BlockDefs.insert(InsDefs);
   }
 
-  for (auto *DTN : children<MachineDomTreeNode*>(MDT->getNode(B))) {
-    MachineBasicBlock *SB = DTN->getBlock();
+  MachineDomTreeNode *N = MDT->getNode(B);
+  typedef GraphTraits<MachineDomTreeNode*> GTN;
+  typedef GTN::ChildIteratorType ChildIter;
+  for (ChildIter I = GTN::child_begin(N), E = GTN::child_end(N); I != E; ++I) {
+    MachineBasicBlock *SB = (*I)->getBlock();
     collectInBlock(SB, AVs);
   }
 
@@ -1419,9 +1422,9 @@ bool HexagonGenInsert::generateInserts() {
 
 bool HexagonGenInsert::removeDeadCode(MachineDomTreeNode *N) {
   bool Changed = false;
-
-  for (auto *DTN : children<MachineDomTreeNode*>(N))
-    Changed |= removeDeadCode(DTN);
+  typedef GraphTraits<MachineDomTreeNode*> GTN;
+  for (auto I = GTN::child_begin(N), E = GTN::child_end(N); I != E; ++I)
+    Changed |= removeDeadCode(*I);
 
   MachineBasicBlock *B = N->getBlock();
   std::vector<MachineInstr*> Instrs;

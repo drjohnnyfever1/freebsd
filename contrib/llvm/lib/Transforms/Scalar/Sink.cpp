@@ -114,7 +114,7 @@ static bool IsAcceptableTarget(Instruction *Inst, BasicBlock *SuccToSinkTo,
   if (SuccToSinkTo->getUniquePredecessor() != Inst->getParent()) {
     // We cannot sink a load across a critical edge - there may be stores in
     // other code paths.
-    if (isa<LoadInst>(Inst))
+    if (!isSafeToSpeculativelyExecute(Inst))
       return false;
 
     // We don't want to sink across a critical edge if we don't dominate the
@@ -164,14 +164,13 @@ static bool SinkInstruction(Instruction *Inst,
 
   // Instructions can only be sunk if all their uses are in blocks
   // dominated by one of the successors.
-  // Look at all the dominated blocks and see if we can sink it in one.
+  // Look at all the postdominators and see if we can sink it in one.
   DomTreeNode *DTN = DT.getNode(Inst->getParent());
   for (DomTreeNode::iterator I = DTN->begin(), E = DTN->end();
       I != E && SuccToSinkTo == nullptr; ++I) {
     BasicBlock *Candidate = (*I)->getBlock();
-    // A node always immediate-dominates its children on the dominator
-    // tree.
-    if (IsAcceptableTarget(Inst, Candidate, DT, LI))
+    if ((*I)->getIDom()->getBlock() == Inst->getParent() &&
+        IsAcceptableTarget(Inst, Candidate, DT, LI))
       SuccToSinkTo = Candidate;
   }
 
@@ -263,8 +262,9 @@ PreservedAnalyses SinkingPass::run(Function &F, FunctionAnalysisManager &AM) {
   if (!iterativelySinkInstructions(F, DT, LI, AA))
     return PreservedAnalyses::all();
 
-  PreservedAnalyses PA;
-  PA.preserveSet<CFGAnalyses>();
+  auto PA = PreservedAnalyses();
+  PA.preserve<DominatorTreeAnalysis>();
+  PA.preserve<LoopAnalysis>();
   return PA;
 }
 

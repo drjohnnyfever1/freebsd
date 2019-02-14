@@ -1,4 +1,4 @@
-//===- llvm/CodeGen/DFAPacketizer.h - DFA Packetizer for VLIW ---*- C++ -*-===//
+//=- llvm/CodeGen/DFAPacketizer.h - DFA Packetizer for VLIW ---*- C++ -*-=====//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -29,22 +29,17 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/ScheduleDAGMutation.h"
-#include <cstdint>
 #include <map>
-#include <memory>
-#include <utility>
-#include <vector>
 
 namespace llvm {
 
-class DefaultVLIWScheduler;
-class InstrItineraryData;
-class MachineFunction;
+class MCInstrDesc;
 class MachineInstr;
 class MachineLoopInfo;
-class MCInstrDesc;
+class MachineDominatorTree;
+class InstrItineraryData;
+class DefaultVLIWScheduler;
 class SUnit;
-class TargetInstrInfo;
 
 // --------------------------------------------------------------------
 // Definitions shared between DFAPacketizer.cpp and DFAPacketizerEmitter.cpp
@@ -69,18 +64,17 @@ class TargetInstrInfo;
 #define DFA_MAX_RESTERMS        4   // The max # of AND'ed resource terms.
 #define DFA_MAX_RESOURCES       16  // The max # of resource bits in one term.
 
-using DFAInput = uint64_t;
-using DFAStateInput = int64_t;
-
+typedef uint64_t                DFAInput;
+typedef int64_t                 DFAStateInput;
 #define DFA_TBLTYPE             "int64_t" // For generating DFAStateInputTable.
 // --------------------------------------------------------------------
 
 class DFAPacketizer {
 private:
-  using UnsignPair = std::pair<unsigned, DFAInput>;
+  typedef std::pair<unsigned, DFAInput> UnsignPair;
 
   const InstrItineraryData *InstrItins;
-  int CurrentState = 0;
+  int CurrentState;
   const DFAStateInput (*DFAStateInputTable)[2];
   const unsigned *DFAStateEntryTable;
 
@@ -107,22 +101,23 @@ public:
 
   // Check if the resources occupied by a MCInstrDesc are available in
   // the current state.
-  bool canReserveResources(const MCInstrDesc *MID);
+  bool canReserveResources(const llvm::MCInstrDesc *MID);
 
   // Reserve the resources occupied by a MCInstrDesc and change the current
   // state to reflect that change.
-  void reserveResources(const MCInstrDesc *MID);
+  void reserveResources(const llvm::MCInstrDesc *MID);
 
   // Check if the resources occupied by a machine instruction are available
   // in the current state.
-  bool canReserveResources(MachineInstr &MI);
+  bool canReserveResources(llvm::MachineInstr &MI);
 
   // Reserve the resources occupied by a machine instruction and change the
   // current state to reflect that change.
-  void reserveResources(MachineInstr &MI);
+  void reserveResources(llvm::MachineInstr &MI);
 
   const InstrItineraryData *getInstrItins() const { return InstrItins; }
 };
+
 
 // VLIWPacketizerList implements a simple VLIW packetizer using DFA. The
 // packetizer works on machine basic blocks. For each instruction I in BB,
@@ -210,6 +205,6 @@ public:
   void addMutation(std::unique_ptr<ScheduleDAGMutation> Mutation);
 };
 
-} // end namespace llvm
+} // namespace llvm
 
-#endif // LLVM_CODEGEN_DFAPACKETIZER_H
+#endif

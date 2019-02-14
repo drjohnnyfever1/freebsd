@@ -1,4 +1,4 @@
-//==- llvm/CodeGen/TargetLoweringObjectFileImpl.h - Object Info --*- C++ -*-==//
+//==-- llvm/CodeGen/TargetLoweringObjectFileImpl.h - Object Info -*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,22 +15,24 @@
 #ifndef LLVM_CODEGEN_TARGETLOWERINGOBJECTFILEIMPL_H
 #define LLVM_CODEGEN_TARGETLOWERINGOBJECTFILEIMPL_H
 
-#include "llvm/IR/Module.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/SectionKind.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 
 namespace llvm {
+  class MachineModuleInfo;
+  class Mangler;
+  class MCAsmInfo;
+  class MCSection;
+  class MCSectionMachO;
+  class MCSymbol;
+  class MCContext;
+  class GlobalValue;
+  class TargetMachine;
 
-class GlobalValue;
-class MachineModuleInfo;
-class Mangler;
-class MCContext;
-class MCSection;
-class MCSymbol;
-class TargetMachine;
 
 class TargetLoweringObjectFileELF : public TargetLoweringObjectFile {
-  bool UseInitArray = false;
+  bool UseInitArray;
   mutable unsigned NextUniqueID = 1;  // ID 0 is reserved for execute-only sections
 
 protected:
@@ -38,12 +40,9 @@ protected:
       MCSymbolRefExpr::VK_None;
 
 public:
-  TargetLoweringObjectFileELF() = default;
-  ~TargetLoweringObjectFileELF() override = default;
+  TargetLoweringObjectFileELF() : UseInitArray(false) {}
 
-  /// Emit Obj-C garbage collection and linker options.
-  void emitModuleMetadata(MCStreamer &Streamer, Module &M,
-                          const TargetMachine &TM) const override;
+  ~TargetLoweringObjectFileELF() override {}
 
   void emitPersonalityValue(MCStreamer &Streamer, const DataLayout &TM,
                             const MCSymbol *Sym) const override;
@@ -90,16 +89,19 @@ public:
                                        const TargetMachine &TM) const override;
 };
 
+
+
 class TargetLoweringObjectFileMachO : public TargetLoweringObjectFile {
 public:
+  ~TargetLoweringObjectFileMachO() override {}
   TargetLoweringObjectFileMachO();
-  ~TargetLoweringObjectFileMachO() override = default;
 
   void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
 
   /// Emit the module flags that specify the garbage collection information.
-  void emitModuleMetadata(MCStreamer &Streamer, Module &M,
-                          const TargetMachine &TM) const override;
+  void emitModuleFlags(MCStreamer &Streamer,
+                       ArrayRef<Module::ModuleFlagEntry> ModuleFlags,
+                       const TargetMachine &TM) const override;
 
   MCSection *SelectSectionForGlobal(const GlobalObject *GO, SectionKind Kind,
                                     const TargetMachine &TM) const override;
@@ -133,11 +135,13 @@ public:
                          const TargetMachine &TM) const override;
 };
 
+
+
 class TargetLoweringObjectFileCOFF : public TargetLoweringObjectFile {
   mutable unsigned NextUniqueID = 0;
 
 public:
-  ~TargetLoweringObjectFileCOFF() override = default;
+  ~TargetLoweringObjectFileCOFF() override {}
 
   void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
   MCSection *getExplicitSectionGlobal(const GlobalObject *GO, SectionKind Kind,
@@ -152,9 +156,11 @@ public:
   MCSection *getSectionForJumpTable(const Function &F,
                                     const TargetMachine &TM) const override;
 
-  /// Emit Obj-C garbage collection and linker options.
-  void emitModuleMetadata(MCStreamer &Streamer, Module &M,
-                          const TargetMachine &TM) const override;
+  /// Emit Obj-C garbage collection and linker options. Only linker option
+  /// emission is implemented for COFF.
+  void emitModuleFlags(MCStreamer &Streamer,
+                       ArrayRef<Module::ModuleFlagEntry> ModuleFlags,
+                       const TargetMachine &TM) const override;
 
   MCSection *getStaticCtorSection(unsigned Priority,
                                   const MCSymbol *KeySym) const override;
@@ -165,29 +171,6 @@ public:
                                 const GlobalValue *GV) const override;
 };
 
-class TargetLoweringObjectFileWasm : public TargetLoweringObjectFile {
-  mutable unsigned NextUniqueID = 0;
-
-public:
-  TargetLoweringObjectFileWasm() = default;
-  ~TargetLoweringObjectFileWasm() override = default;
-
-  MCSection *getExplicitSectionGlobal(const GlobalObject *GO, SectionKind Kind,
-                                      const TargetMachine &TM) const override;
-
-  MCSection *SelectSectionForGlobal(const GlobalObject *GO, SectionKind Kind,
-                                    const TargetMachine &TM) const override;
-
-  bool shouldPutJumpTableInFunctionSection(bool UsesLabelDifference,
-                                           const Function &F) const override;
-
-  void InitializeWasm();
-
-  const MCExpr *lowerRelativeReference(const GlobalValue *LHS,
-                                       const GlobalValue *RHS,
-                                       const TargetMachine &TM) const override;
-};
-
 } // end namespace llvm
 
-#endif // LLVM_CODEGEN_TARGETLOWERINGOBJECTFILEIMPL_H
+#endif

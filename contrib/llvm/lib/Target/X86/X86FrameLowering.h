@@ -20,7 +20,6 @@ namespace llvm {
 
 class MachineInstrBuilder;
 class MCCFIInstruction;
-class X86InstrInfo;
 class X86Subtarget;
 class X86RegisterInfo;
 
@@ -31,7 +30,7 @@ public:
   // Cached subtarget predicates.
 
   const X86Subtarget &STI;
-  const X86InstrInfo &TII;
+  const TargetInstrInfo &TII;
   const X86RegisterInfo *TRI;
 
   unsigned SlotSize;
@@ -100,8 +99,6 @@ public:
   int getFrameIndexReference(const MachineFunction &MF, int FI,
                              unsigned &FrameReg) const override;
 
-  int getFrameIndexReferenceSP(const MachineFunction &MF,
-                               int FI, unsigned &SPReg, int Adjustment) const;
   int getFrameIndexReferencePreferSP(const MachineFunction &MF, int FI,
                                      unsigned &FrameReg,
                                      bool IgnoreSPUpdates) const override;

@@ -52,220 +52,25 @@
 
 using namespace llvm;
 
-static std::unique_ptr<llvm::MemoryBuffer>
-    LLVM_ATTRIBUTE_UNUSED getProcCpuinfoContent() {
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Text =
-      llvm::MemoryBuffer::getFileAsStream("/proc/cpuinfo");
-  if (std::error_code EC = Text.getError()) {
-    llvm::errs() << "Can't read "
-                 << "/proc/cpuinfo: " << EC.message() << "\n";
-    return nullptr;
+#if defined(__linux__)
+static ssize_t LLVM_ATTRIBUTE_UNUSED readCpuInfo(void *Buf, size_t Size) {
+  // Note: We cannot mmap /proc/cpuinfo here and then process the resulting
+  // memory buffer because the 'file' has 0 size (it can be read from only
+  // as a stream).
+
+  int FD;
+  std::error_code EC = sys::fs::openFileForRead("/proc/cpuinfo", FD);
+  if (EC) {
+    DEBUG(dbgs() << "Unable to open /proc/cpuinfo: " << EC.message() << "\n");
+    return -1;
   }
-  return std::move(*Text);
+  int Ret = read(FD, Buf, Size);
+  int CloseStatus = close(FD);
+  if (CloseStatus)
+    return -1;
+  return Ret;
 }
-
-StringRef sys::detail::getHostCPUNameForPowerPC(
-    const StringRef &ProcCpuinfoContent) {
-  // Access to the Processor Version Register (PVR) on PowerPC is privileged,
-  // and so we must use an operating-system interface to determine the current
-  // processor type. On Linux, this is exposed through the /proc/cpuinfo file.
-  const char *generic = "generic";
-
-  // The cpu line is second (after the 'processor: 0' line), so if this
-  // buffer is too small then something has changed (or is wrong).
-  StringRef::const_iterator CPUInfoStart = ProcCpuinfoContent.begin();
-  StringRef::const_iterator CPUInfoEnd = ProcCpuinfoContent.end();
-
-  StringRef::const_iterator CIP = CPUInfoStart;
-
-  StringRef::const_iterator CPUStart = 0;
-  size_t CPULen = 0;
-
-  // We need to find the first line which starts with cpu, spaces, and a colon.
-  // After the colon, there may be some additional spaces and then the cpu type.
-  while (CIP < CPUInfoEnd && CPUStart == 0) {
-    if (CIP < CPUInfoEnd && *CIP == '\n')
-      ++CIP;
-
-    if (CIP < CPUInfoEnd && *CIP == 'c') {
-      ++CIP;
-      if (CIP < CPUInfoEnd && *CIP == 'p') {
-        ++CIP;
-        if (CIP < CPUInfoEnd && *CIP == 'u') {
-          ++CIP;
-          while (CIP < CPUInfoEnd && (*CIP == ' ' || *CIP == '\t'))
-            ++CIP;
-
-          if (CIP < CPUInfoEnd && *CIP == ':') {
-            ++CIP;
-            while (CIP < CPUInfoEnd && (*CIP == ' ' || *CIP == '\t'))
-              ++CIP;
-
-            if (CIP < CPUInfoEnd) {
-              CPUStart = CIP;
-              while (CIP < CPUInfoEnd && (*CIP != ' ' && *CIP != '\t' &&
-                                          *CIP != ',' && *CIP != '\n'))
-                ++CIP;
-              CPULen = CIP - CPUStart;
-            }
-          }
-        }
-      }
-    }
-
-    if (CPUStart == 0)
-      while (CIP < CPUInfoEnd && *CIP != '\n')
-        ++CIP;
-  }
-
-  if (CPUStart == 0)
-    return generic;
-
-  return StringSwitch<const char *>(StringRef(CPUStart, CPULen))
-      .Case("604e", "604e")
-      .Case("604", "604")
-      .Case("7400", "7400")
-      .Case("7410", "7400")
-      .Case("7447", "7400")
-      .Case("7455", "7450")
-      .Case("G4", "g4")
-      .Case("POWER4", "970")
-      .Case("PPC970FX", "970")
-      .Case("PPC970MP", "970")
-      .Case("G5", "g5")
-      .Case("POWER5", "g5")
-      .Case("A2", "a2")
-      .Case("POWER6", "pwr6")
-      .Case("POWER7", "pwr7")
-      .Case("POWER8", "pwr8")
-      .Case("POWER8E", "pwr8")
-      .Case("POWER8NVL", "pwr8")
-      .Case("POWER9", "pwr9")
-      .Default(generic);
-}
-
-StringRef sys::detail::getHostCPUNameForARM(
-    const StringRef &ProcCpuinfoContent) {
-  // The cpuid register on arm is not accessible from user space. On Linux,
-  // it is exposed through the /proc/cpuinfo file.
-
-  // Read 32 lines from /proc/cpuinfo, which should contain the CPU part line
-  // in all cases.
-  SmallVector<StringRef, 32> Lines;
-  ProcCpuinfoContent.split(Lines, "\n");
-
-  // Look for the CPU implementer line.
-  StringRef Implementer;
-  StringRef Hardware;
-  for (unsigned I = 0, E = Lines.size(); I != E; ++I) {
-    if (Lines[I].startswith("CPU implementer"))
-      Implementer = Lines[I].substr(15).ltrim("\t :");
-    if (Lines[I].startswith("Hardware"))
-      Hardware = Lines[I].substr(8).ltrim("\t :");
-  }
-
-  if (Implementer == "0x41") { // ARM Ltd.
-    // MSM8992/8994 may give cpu part for the core that the kernel is running on,
-    // which is undeterministic and wrong. Always return cortex-a53 for these SoC.
-    if (Hardware.endswith("MSM8994") || Hardware.endswith("MSM8996"))
-      return "cortex-a53";
-
-
-    // Look for the CPU part line.
-    for (unsigned I = 0, E = Lines.size(); I != E; ++I)
-      if (Lines[I].startswith("CPU part"))
-        // The CPU part is a 3 digit hexadecimal number with a 0x prefix. The
-        // values correspond to the "Part number" in the CP15/c0 register. The
-        // contents are specified in the various processor manuals.
-        return StringSwitch<const char *>(Lines[I].substr(8).ltrim("\t :"))
-            .Case("0x926", "arm926ej-s")
-            .Case("0xb02", "mpcore")
-            .Case("0xb36", "arm1136j-s")
-            .Case("0xb56", "arm1156t2-s")
-            .Case("0xb76", "arm1176jz-s")
-            .Case("0xc08", "cortex-a8")
-            .Case("0xc09", "cortex-a9")
-            .Case("0xc0f", "cortex-a15")
-            .Case("0xc20", "cortex-m0")
-            .Case("0xc23", "cortex-m3")
-            .Case("0xc24", "cortex-m4")
-            .Case("0xd04", "cortex-a35")
-            .Case("0xd03", "cortex-a53")
-            .Case("0xd07", "cortex-a57")
-            .Case("0xd08", "cortex-a72")
-            .Case("0xd09", "cortex-a73")
-            .Default("generic");
-  }
-
-  if (Implementer == "0x51") // Qualcomm Technologies, Inc.
-    // Look for the CPU part line.
-    for (unsigned I = 0, E = Lines.size(); I != E; ++I)
-      if (Lines[I].startswith("CPU part"))
-        // The CPU part is a 3 digit hexadecimal number with a 0x prefix. The
-        // values correspond to the "Part number" in the CP15/c0 register. The
-        // contents are specified in the various processor manuals.
-        return StringSwitch<const char *>(Lines[I].substr(8).ltrim("\t :"))
-            .Case("0x06f", "krait") // APQ8064
-            .Case("0x201", "kryo")
-            .Case("0x205", "kryo")
-            .Default("generic");
-
-  return "generic";
-}
-
-StringRef sys::detail::getHostCPUNameForS390x(
-    const StringRef &ProcCpuinfoContent) {
-  // STIDP is a privileged operation, so use /proc/cpuinfo instead.
-
-  // The "processor 0:" line comes after a fair amount of other information,
-  // including a cache breakdown, but this should be plenty.
-  SmallVector<StringRef, 32> Lines;
-  ProcCpuinfoContent.split(Lines, "\n");
-
-  // Look for the CPU features.
-  SmallVector<StringRef, 32> CPUFeatures;
-  for (unsigned I = 0, E = Lines.size(); I != E; ++I)
-    if (Lines[I].startswith("features")) {
-      size_t Pos = Lines[I].find(":");
-      if (Pos != StringRef::npos) {
-        Lines[I].drop_front(Pos + 1).split(CPUFeatures, ' ');
-        break;
-      }
-    }
-
-  // We need to check for the presence of vector support independently of
-  // the machine type, since we may only use the vector register set when
-  // supported by the kernel (and hypervisor).
-  bool HaveVectorSupport = false;
-  for (unsigned I = 0, E = CPUFeatures.size(); I != E; ++I) {
-    if (CPUFeatures[I] == "vx")
-      HaveVectorSupport = true;
-  }
-
-  // Now check the processor machine type.
-  for (unsigned I = 0, E = Lines.size(); I != E; ++I) {
-    if (Lines[I].startswith("processor ")) {
-      size_t Pos = Lines[I].find("machine = ");
-      if (Pos != StringRef::npos) {
-        Pos += sizeof("machine = ") - 1;
-        unsigned int Id;
-        if (!Lines[I].drop_front(Pos).getAsInteger(10, Id)) {
-          if (Id >= 3906 && HaveVectorSupport)
-            return "z14";
-          if (Id >= 2964 && HaveVectorSupport)
-            return "z13";
-          if (Id >= 2827)
-            return "zEC12";
-          if (Id >= 2817)
-            return "z196";
-        }
-      }
-      break;
-    }
-  }
-
-  return "generic";
-}
+#endif
 
 #if defined(__i386__) || defined(_M_IX86) || \
     defined(__x86_64__) || defined(_M_X64)
@@ -283,17 +88,11 @@ enum ProcessorVendors {
 };
 
 enum ProcessorTypes {
-  INTEL_BONNELL = 1,
+  INTEL_ATOM = 1,
   INTEL_CORE2,
   INTEL_COREI7,
   AMDFAM10H,
   AMDFAM15H,
-  INTEL_SILVERMONT,
-  INTEL_KNL,
-  AMD_BTVER1,
-  AMD_BTVER2,
-  AMDFAM17H,
-  // Entries below this are not in libgcc/compiler-rt.
   INTEL_i386,
   INTEL_i486,
   INTEL_PENTIUM,
@@ -303,13 +102,16 @@ enum ProcessorTypes {
   INTEL_PENTIUM_IV,
   INTEL_PENTIUM_M,
   INTEL_CORE_DUO,
+  INTEL_XEONPHI,
   INTEL_X86_64,
   INTEL_NOCONA,
   INTEL_PRESCOTT,
   AMD_i486,
   AMDPENTIUM,
   AMDATHLON,
-  INTEL_GOLDMONT,
+  AMDFAM14H,
+  AMDFAM16H,
+  AMDFAM17H,
   CPU_TYPE_MAX
 };
 
@@ -322,26 +124,33 @@ enum ProcessorSubtypes {
   AMDFAM10H_ISTANBUL,
   AMDFAM15H_BDVER1,
   AMDFAM15H_BDVER2,
-  AMDFAM15H_BDVER3,
-  AMDFAM15H_BDVER4,
-  AMDFAM17H_ZNVER1,
+  INTEL_PENTIUM_MMX,
+  INTEL_CORE2_65,
+  INTEL_CORE2_45,
   INTEL_COREI7_IVYBRIDGE,
   INTEL_COREI7_HASWELL,
   INTEL_COREI7_BROADWELL,
   INTEL_COREI7_SKYLAKE,
   INTEL_COREI7_SKYLAKE_AVX512,
-  // Entries below this are not in libgcc/compiler-rt.
-  INTEL_PENTIUM_MMX,
-  INTEL_CORE2_65,
-  INTEL_CORE2_45,
+  INTEL_ATOM_BONNELL,
+  INTEL_ATOM_SILVERMONT,
+  INTEL_KNIGHTS_LANDING,
   AMDPENTIUM_K6,
   AMDPENTIUM_K62,
   AMDPENTIUM_K63,
   AMDPENTIUM_GEODE,
-  AMDATHLON_CLASSIC,
+  AMDATHLON_TBIRD,
+  AMDATHLON_MP,
   AMDATHLON_XP,
-  AMDATHLON_K8,
   AMDATHLON_K8SSE3,
+  AMDATHLON_OPTERON,
+  AMDATHLON_FX,
+  AMDATHLON_64,
+  AMD_BTVER1,
+  AMD_BTVER2,
+  AMDFAM15H_BDVER3,
+  AMDFAM15H_BDVER4,
+  AMDFAM17H_ZNVER1,
   CPU_SUBTYPE_MAX
 };
 
@@ -357,28 +166,9 @@ enum ProcessorFeatures {
   FEATURE_SSE4_2,
   FEATURE_AVX,
   FEATURE_AVX2,
-  FEATURE_SSE4_A,
-  FEATURE_FMA4,
-  FEATURE_XOP,
-  FEATURE_FMA,
-  FEATURE_AVX512F,
-  FEATURE_BMI,
-  FEATURE_BMI2,
-  FEATURE_AES,
-  FEATURE_PCLMUL,
-  FEATURE_AVX512VL,
-  FEATURE_AVX512BW,
-  FEATURE_AVX512DQ,
-  FEATURE_AVX512CD,
-  FEATURE_AVX512ER,
-  FEATURE_AVX512PF,
-  FEATURE_AVX512VBMI,
-  FEATURE_AVX512IFMA,
-  FEATURE_AVX5124VNNIW,
-  FEATURE_AVX5124FMAPS,
-  FEATURE_AVX512VPOPCNTDQ,
-  // Only one bit free left in the first 32 features.
-  FEATURE_MOVBE = 32,
+  FEATURE_AVX512,
+  FEATURE_AVX512SAVE,
+  FEATURE_MOVBE,
   FEATURE_ADX,
   FEATURE_EM64T
 };
@@ -422,6 +212,7 @@ static bool isCpuIdSupported() {
 /// the specified arguments.  If we can't run cpuid on the host, return true.
 static bool getX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
                                unsigned *rECX, unsigned *rEDX) {
+#if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
 #if defined(__GNUC__) || defined(__clang__)
 #if defined(__x86_64__)
   // gcc doesn't know cpuid would clobber ebx/rbx. Preserve it manually.
@@ -431,16 +222,14 @@ static bool getX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
           "xchgq\t%%rbx, %%rsi\n\t"
           : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
           : "a"(value));
-  return false;
 #elif defined(__i386__)
   __asm__("movl\t%%ebx, %%esi\n\t"
           "cpuid\n\t"
           "xchgl\t%%ebx, %%esi\n\t"
           : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
           : "a"(value));
-  return false;
 #else
-  return true;
+  assert(0 && "This method is defined only for x86.");
 #endif
 #elif defined(_MSC_VER)
   // The MSVC intrinsic is portable across x86 and x64.
@@ -450,6 +239,7 @@ static bool getX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
   *rEBX = registers[1];
   *rECX = registers[2];
   *rEDX = registers[3];
+#endif
   return false;
 #else
   return true;
@@ -462,26 +252,16 @@ static bool getX86CpuIDAndInfo(unsigned value, unsigned *rEAX, unsigned *rEBX,
 static bool getX86CpuIDAndInfoEx(unsigned value, unsigned subleaf,
                                  unsigned *rEAX, unsigned *rEBX, unsigned *rECX,
                                  unsigned *rEDX) {
+#if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
+#if defined(__x86_64__) || defined(_M_X64)
 #if defined(__GNUC__) || defined(__clang__)
-#if defined(__x86_64__)
-  // gcc doesn't know cpuid would clobber ebx/rbx. Preserve it manually.
+  // gcc doesn't know cpuid would clobber ebx/rbx. Preseve it manually.
   // FIXME: should we save this for Clang?
   __asm__("movq\t%%rbx, %%rsi\n\t"
           "cpuid\n\t"
           "xchgq\t%%rbx, %%rsi\n\t"
           : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
           : "a"(value), "c"(subleaf));
-  return false;
-#elif defined(__i386__)
-  __asm__("movl\t%%ebx, %%esi\n\t"
-          "cpuid\n\t"
-          "xchgl\t%%ebx, %%esi\n\t"
-          : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
-          : "a"(value), "c"(subleaf));
-  return false;
-#else
-  return true;
-#endif
 #elif defined(_MSC_VER)
   int registers[4];
   __cpuidex(registers, value, subleaf);
@@ -489,13 +269,38 @@ static bool getX86CpuIDAndInfoEx(unsigned value, unsigned subleaf,
   *rEBX = registers[1];
   *rECX = registers[2];
   *rEDX = registers[3];
+#endif
+#elif defined(__i386__) || defined(_M_IX86)
+#if defined(__GNUC__) || defined(__clang__)
+  __asm__("movl\t%%ebx, %%esi\n\t"
+          "cpuid\n\t"
+          "xchgl\t%%ebx, %%esi\n\t"
+          : "=a"(*rEAX), "=S"(*rEBX), "=c"(*rECX), "=d"(*rEDX)
+          : "a"(value), "c"(subleaf));
+#elif defined(_MSC_VER)
+  __asm {
+      mov   eax,value
+      mov   ecx,subleaf
+      cpuid
+      mov   esi,rEAX
+      mov   dword ptr [esi],eax
+      mov   esi,rEBX
+      mov   dword ptr [esi],ebx
+      mov   esi,rECX
+      mov   dword ptr [esi],ecx
+      mov   esi,rEDX
+      mov   dword ptr [esi],edx
+  }
+#endif
+#else
+  assert(0 && "This method is defined only for x86.");
+#endif
   return false;
 #else
   return true;
 #endif
 }
 
-// Read control register 0 (XCR0). Used to detect features such as AVX.
 static bool getX86XCR0(unsigned *rEAX, unsigned *rEDX) {
 #if defined(__GNUC__) || defined(__clang__)
   // Check xgetbv; this uses a .byte sequence instead of the instruction
@@ -527,10 +332,9 @@ static void detectX86FamilyModel(unsigned EAX, unsigned *Family,
 }
 
 static void
-getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
-                                unsigned Brand_id, unsigned Features,
-                                unsigned Features2, unsigned *Type,
-                                unsigned *Subtype) {
+getIntelProcessorTypeAndSubtype(unsigned int Family, unsigned int Model,
+                                unsigned int Brand_id, unsigned int Features,
+                                unsigned *Type, unsigned *Subtype) {
   if (Brand_id != 0)
     return;
   switch (Family) {
@@ -683,7 +487,12 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     // Skylake Xeon:
     case 0x55:
       *Type = INTEL_COREI7;
-      *Subtype = INTEL_COREI7_SKYLAKE_AVX512; // "skylake-avx512"
+      // Check that we really have AVX512
+      if (Features & (1 << FEATURE_AVX512)) {
+        *Subtype = INTEL_COREI7_SKYLAKE_AVX512; // "skylake-avx512"
+      } else {
+        *Subtype = INTEL_COREI7_SKYLAKE; // "skylake"
+      }
       break;
 
     case 0x1c: // Most 45 nm Intel Atom processors
@@ -691,7 +500,8 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     case 0x27: // 32 nm Atom Medfield
     case 0x35: // 32 nm Atom Midview
     case 0x36: // 32 nm Atom Midview
-      *Type = INTEL_BONNELL;
+      *Type = INTEL_ATOM;
+      *Subtype = INTEL_ATOM_BONNELL;
       break; // "bonnell"
 
     // Atom Silvermont codes from the Intel software optimization guide.
@@ -701,23 +511,22 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     case 0x5a:
     case 0x5d:
     case 0x4c: // really airmont
-      *Type = INTEL_SILVERMONT;
+      *Type = INTEL_ATOM;
+      *Subtype = INTEL_ATOM_SILVERMONT;
       break; // "silvermont"
-    // Goldmont:
-    case 0x5c:
-    case 0x5f:
-      *Type = INTEL_GOLDMONT;
-      break; // "goldmont"
+
     case 0x57:
-      *Type = INTEL_KNL; // knl
+      *Type = INTEL_XEONPHI; // knl
+      *Subtype = INTEL_KNIGHTS_LANDING;
       break;
 
     default: // Unknown family 6 CPU, try to guess.
-      if (Features & (1 << FEATURE_AVX512F)) {
-        *Type = INTEL_KNL; // knl
+      if (Features & (1 << FEATURE_AVX512)) {
+        *Type = INTEL_XEONPHI; // knl
+        *Subtype = INTEL_KNIGHTS_LANDING;
         break;
       }
-      if (Features2 & (1 << (FEATURE_ADX - 32))) {
+      if (Features & (1 << FEATURE_ADX)) {
         *Type = INTEL_COREI7;
         *Subtype = INTEL_COREI7_BROADWELL;
         break;
@@ -733,8 +542,9 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
         break;
       }
       if (Features & (1 << FEATURE_SSE4_2)) {
-        if (Features2 & (1 << (FEATURE_MOVBE - 32))) {
-          *Type = INTEL_SILVERMONT;
+        if (Features & (1 << FEATURE_MOVBE)) {
+          *Type = INTEL_ATOM;
+          *Subtype = INTEL_ATOM_SILVERMONT;
         } else {
           *Type = INTEL_COREI7;
           *Subtype = INTEL_COREI7_NEHALEM;
@@ -747,15 +557,16 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
         break;
       }
       if (Features & (1 << FEATURE_SSSE3)) {
-        if (Features2 & (1 << (FEATURE_MOVBE - 32))) {
-          *Type = INTEL_BONNELL; // "bonnell"
+        if (Features & (1 << FEATURE_MOVBE)) {
+          *Type = INTEL_ATOM;
+          *Subtype = INTEL_ATOM_BONNELL; // "bonnell"
         } else {
           *Type = INTEL_CORE2; // "core2"
           *Subtype = INTEL_CORE2_65;
         }
         break;
       }
-      if (Features2 & (1 << (FEATURE_EM64T - 32))) {
+      if (Features & (1 << FEATURE_EM64T)) {
         *Type = INTEL_X86_64;
         break; // x86-64
       }
@@ -786,8 +597,8 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
             // Intel Xeon processor, Intel Xeon processor MP, Intel Celeron
             // processor, and Mobile Intel Celeron processor. All processors
             // are model 02h and manufactured using the 0.13 micron process.
-      *Type = ((Features2 & (1 << (FEATURE_EM64T - 32))) ? INTEL_X86_64
-                                                         : INTEL_PENTIUM_IV);
+      *Type =
+          ((Features & (1 << FEATURE_EM64T)) ? INTEL_X86_64 : INTEL_PENTIUM_IV);
       break;
 
     case 3: // Pentium 4 processor, Intel Xeon processor, Intel Celeron D
@@ -801,13 +612,13 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
             // Extreme Edition, Intel Xeon processor, Intel Xeon processor
             // MP, Intel Celeron D processor. All processors are model 06h
             // and manufactured using the 65 nm process.
-      *Type = ((Features2 & (1 << (FEATURE_EM64T - 32))) ? INTEL_NOCONA
-                                                         : INTEL_PRESCOTT);
+      *Type =
+          ((Features & (1 << FEATURE_EM64T)) ? INTEL_NOCONA : INTEL_PRESCOTT);
       break;
 
     default:
-      *Type = ((Features2 & (1 << (FEATURE_EM64T - 32))) ? INTEL_X86_64
-                                                         : INTEL_PENTIUM_IV);
+      *Type =
+          ((Features & (1 << FEATURE_EM64T)) ? INTEL_X86_64 : INTEL_PENTIUM_IV);
       break;
     }
     break;
@@ -817,8 +628,10 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
   }
 }
 
-static void getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
-                                          unsigned Features, unsigned *Type,
+static void getAMDProcessorTypeAndSubtype(unsigned int Family,
+                                          unsigned int Model,
+                                          unsigned int Features,
+                                          unsigned *Type,
                                           unsigned *Subtype) {
   // FIXME: this poorly matches the generated SubtargetFeatureKV table.  There
   // appears to be no way to generate the wide variety of AMD-specific targets
@@ -848,20 +661,38 @@ static void getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     break;
   case 6:
     *Type = AMDATHLON;
-    if (Features & (1 << FEATURE_SSE)) {
+    switch (Model) {
+    case 4:
+      *Subtype = AMDATHLON_TBIRD;
+      break; // "athlon-tbird"
+    case 6:
+    case 7:
+    case 8:
+      *Subtype = AMDATHLON_MP;
+      break; // "athlon-mp"
+    case 10:
       *Subtype = AMDATHLON_XP;
       break; // "athlon-xp"
     }
-    *Subtype = AMDATHLON_CLASSIC;
-    break; // "athlon"
+    break;
   case 15:
     *Type = AMDATHLON;
     if (Features & (1 << FEATURE_SSE3)) {
       *Subtype = AMDATHLON_K8SSE3;
       break; // "k8-sse3"
     }
-    *Subtype = AMDATHLON_K8;
-    break; // "k8"
+    switch (Model) {
+    case 1:
+      *Subtype = AMDATHLON_OPTERON;
+      break; // "opteron"
+    case 5:
+      *Subtype = AMDATHLON_FX;
+      break; // "athlon-fx"; also opteron
+    default:
+      *Subtype = AMDATHLON_64;
+      break; // "athlon64"
+    }
+    break;
   case 16:
     *Type = AMDFAM10H; // "amdfam10"
     switch (Model) {
@@ -877,13 +708,19 @@ static void getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     }
     break;
   case 20:
-    *Type = AMD_BTVER1;
+    *Type = AMDFAM14H;
+    *Subtype = AMD_BTVER1;
     break; // "btver1";
   case 21:
     *Type = AMDFAM15H;
-    if (Model >= 0x60 && Model <= 0x7f) {
+    if (!(Features &
+          (1 << FEATURE_AVX))) { // If no AVX support, provide a sane fallback.
+      *Subtype = AMD_BTVER1;
+      break; // "btver1"
+    }
+    if (Model >= 0x50 && Model <= 0x6f) {
       *Subtype = AMDFAM15H_BDVER4;
-      break; // "bdver4"; 60h-7Fh: Excavator
+      break; // "bdver4"; 50h-6Fh: Excavator
     }
     if (Model >= 0x30 && Model <= 0x3f) {
       *Subtype = AMDFAM15H_BDVER3;
@@ -899,52 +736,39 @@ static void getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     }
     break;
   case 22:
-    *Type = AMD_BTVER2;
+    *Type = AMDFAM16H;
+    if (!(Features &
+          (1 << FEATURE_AVX))) { // If no AVX support provide a sane fallback.
+      *Subtype = AMD_BTVER1;
+      break; // "btver1";
+    }
+    *Subtype = AMD_BTVER2;
     break; // "btver2"
   case 23:
     *Type = AMDFAM17H;
-    *Subtype = AMDFAM17H_ZNVER1;
+    if (Features & (1 << FEATURE_ADX)) {
+      *Subtype = AMDFAM17H_ZNVER1;
+      break; // "znver1"
+    }
+    *Subtype =  AMD_BTVER1;
     break;
   default:
     break; // "generic"
   }
 }
 
-static void getAvailableFeatures(unsigned ECX, unsigned EDX, unsigned MaxLeaf,
-                                 unsigned *FeaturesOut,
-                                 unsigned *Features2Out) {
+static unsigned getAvailableFeatures(unsigned int ECX, unsigned int EDX,
+                                     unsigned MaxLeaf) {
   unsigned Features = 0;
-  unsigned Features2 = 0;
-  unsigned EAX, EBX;
-
-  if ((EDX >> 15) & 1)
-    Features |= 1 << FEATURE_CMOV;
-  if ((EDX >> 23) & 1)
-    Features |= 1 << FEATURE_MMX;
-  if ((EDX >> 25) & 1)
-    Features |= 1 << FEATURE_SSE;
-  if ((EDX >> 26) & 1)
-    Features |= 1 << FEATURE_SSE2;
-
-  if ((ECX >> 0) & 1)
-    Features |= 1 << FEATURE_SSE3;
-  if ((ECX >> 1) & 1)
-    Features |= 1 << FEATURE_PCLMUL;
-  if ((ECX >> 9) & 1)
-    Features |= 1 << FEATURE_SSSE3;
-  if ((ECX >> 12) & 1)
-    Features |= 1 << FEATURE_FMA;
-  if ((ECX >> 19) & 1)
-    Features |= 1 << FEATURE_SSE4_1;
-  if ((ECX >> 20) & 1)
-    Features |= 1 << FEATURE_SSE4_2;
-  if ((ECX >> 23) & 1)
-    Features |= 1 << FEATURE_POPCNT;
-  if ((ECX >> 25) & 1)
-    Features |= 1 << FEATURE_AES;
-
-  if ((ECX >> 22) & 1)
-    Features2 |= 1 << (FEATURE_MOVBE - 32);
+  unsigned int EAX, EBX;
+  Features |= (((EDX >> 23) & 1) << FEATURE_MMX);
+  Features |= (((EDX >> 25) & 1) << FEATURE_SSE);
+  Features |= (((EDX >> 26) & 1) << FEATURE_SSE2);
+  Features |= (((ECX >> 0) & 1) << FEATURE_SSE3);
+  Features |= (((ECX >> 9) & 1) << FEATURE_SSSE3);
+  Features |= (((ECX >> 19) & 1) << FEATURE_SSE4_1);
+  Features |= (((ECX >> 20) & 1) << FEATURE_SSE4_2);
+  Features |= (((ECX >> 22) & 1) << FEATURE_MOVBE);
 
   // If CPUID indicates support for XSAVE, XRESTORE and AVX, and XGETBV
   // indicates that the AVX registers will be saved and restored on context
@@ -953,65 +777,20 @@ static void getAvailableFeatures(unsigned ECX, unsigned EDX, unsigned MaxLeaf,
   bool HasAVX = ((ECX & AVXBits) == AVXBits) && !getX86XCR0(&EAX, &EDX) &&
                 ((EAX & 0x6) == 0x6);
   bool HasAVX512Save = HasAVX && ((EAX & 0xe0) == 0xe0);
-
-  if (HasAVX)
-    Features |= 1 << FEATURE_AVX;
-
   bool HasLeaf7 =
       MaxLeaf >= 0x7 && !getX86CpuIDAndInfoEx(0x7, 0x0, &EAX, &EBX, &ECX, &EDX);
+  bool HasADX = HasLeaf7 && ((EBX >> 19) & 1);
+  bool HasAVX2 = HasAVX && HasLeaf7 && (EBX & 0x20);
+  bool HasAVX512 = HasLeaf7 && HasAVX512Save && ((EBX >> 16) & 1);
+  Features |= (HasAVX << FEATURE_AVX);
+  Features |= (HasAVX2 << FEATURE_AVX2);
+  Features |= (HasAVX512 << FEATURE_AVX512);
+  Features |= (HasAVX512Save << FEATURE_AVX512SAVE);
+  Features |= (HasADX << FEATURE_ADX);
 
-  if (HasLeaf7 && ((EBX >> 3) & 1))
-    Features |= 1 << FEATURE_BMI;
-  if (HasLeaf7 && ((EBX >> 5) & 1) && HasAVX)
-    Features |= 1 << FEATURE_AVX2;
-  if (HasLeaf7 && ((EBX >> 9) & 1))
-    Features |= 1 << FEATURE_BMI2;
-  if (HasLeaf7 && ((EBX >> 16) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512F;
-  if (HasLeaf7 && ((EBX >> 17) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512DQ;
-  if (HasLeaf7 && ((EBX >> 19) & 1))
-    Features2 |= 1 << (FEATURE_ADX - 32);
-  if (HasLeaf7 && ((EBX >> 21) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512IFMA;
-  if (HasLeaf7 && ((EBX >> 26) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512PF;
-  if (HasLeaf7 && ((EBX >> 27) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512ER;
-  if (HasLeaf7 && ((EBX >> 28) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512CD;
-  if (HasLeaf7 && ((EBX >> 30) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512BW;
-  if (HasLeaf7 && ((EBX >> 31) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512VL;
-
-  if (HasLeaf7 && ((ECX >> 1) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512VBMI;
-  if (HasLeaf7 && ((ECX >> 14) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX512VPOPCNTDQ;
-
-  if (HasLeaf7 && ((EDX >> 2) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX5124VNNIW;
-  if (HasLeaf7 && ((EDX >> 3) & 1) && HasAVX512Save)
-    Features |= 1 << FEATURE_AVX5124FMAPS;
-
-  unsigned MaxExtLevel;
-  getX86CpuIDAndInfo(0x80000000, &MaxExtLevel, &EBX, &ECX, &EDX);
-
-  bool HasExtLeaf1 = MaxExtLevel >= 0x80000001 &&
-                     !getX86CpuIDAndInfo(0x80000001, &EAX, &EBX, &ECX, &EDX);
-  if (HasExtLeaf1 && ((ECX >> 6) & 1))
-    Features |= 1 << FEATURE_SSE4_A;
-  if (HasExtLeaf1 && ((ECX >> 11) & 1))
-    Features |= 1 << FEATURE_XOP;
-  if (HasExtLeaf1 && ((ECX >> 16) & 1))
-    Features |= 1 << FEATURE_FMA4;
-
-  if (HasExtLeaf1 && ((EDX >> 29) & 1))
-    Features2 |= 1 << (FEATURE_EM64T - 32);
-
-  *FeaturesOut  = Features;
-  *Features2Out = Features2;
+  getX86CpuIDAndInfo(0x80000001, &EAX, &EBX, &ECX, &EDX);
+  Features |= (((EDX >> 29) & 0x1) << FEATURE_EM64T);
+  return Features;
 }
 
 StringRef sys::getHostCPUName() {
@@ -1026,22 +805,23 @@ StringRef sys::getHostCPUName() {
   if(!isCpuIdSupported())
     return "generic";
 #endif
-  if (getX86CpuIDAndInfo(0, &MaxLeaf, &Vendor, &ECX, &EDX) || MaxLeaf < 1)
+  if (getX86CpuIDAndInfo(0, &MaxLeaf, &Vendor, &ECX, &EDX))
     return "generic";
-  getX86CpuIDAndInfo(0x1, &EAX, &EBX, &ECX, &EDX);
+  if (getX86CpuIDAndInfo(0x1, &EAX, &EBX, &ECX, &EDX))
+    return "generic";
 
   unsigned Brand_id = EBX & 0xff;
   unsigned Family = 0, Model = 0;
-  unsigned Features = 0, Features2 = 0;
+  unsigned Features = 0;
   detectX86FamilyModel(EAX, &Family, &Model);
-  getAvailableFeatures(ECX, EDX, MaxLeaf, &Features, &Features2);
+  Features = getAvailableFeatures(ECX, EDX, MaxLeaf);
 
   unsigned Type;
   unsigned Subtype;
 
   if (Vendor == SIG_INTEL) {
-    getIntelProcessorTypeAndSubtype(Family, Model, Brand_id, Features,
-                                    Features2, &Type, &Subtype);
+    getIntelProcessorTypeAndSubtype(Family, Model, Brand_id, Features, &Type,
+                                    &Subtype);
     switch (Type) {
     case INTEL_i386:
       return "i386";
@@ -1070,7 +850,7 @@ StringRef sys::getHostCPUName() {
       case INTEL_CORE2_45:
         return "penryn";
       default:
-        llvm_unreachable("Unexpected subtype!");
+        return "core2";
       }
     case INTEL_COREI7:
       switch (Subtype) {
@@ -1091,16 +871,19 @@ StringRef sys::getHostCPUName() {
       case INTEL_COREI7_SKYLAKE_AVX512:
         return "skylake-avx512";
       default:
-        llvm_unreachable("Unexpected subtype!");
+        return "corei7";
       }
-    case INTEL_BONNELL:
-      return "bonnell";
-    case INTEL_SILVERMONT:
-      return "silvermont";
-    case INTEL_GOLDMONT:
-      return "goldmont";
-    case INTEL_KNL:
-      return "knl";
+    case INTEL_ATOM:
+      switch (Subtype) {
+      case INTEL_ATOM_BONNELL:
+        return "bonnell";
+      case INTEL_ATOM_SILVERMONT:
+        return "silvermont";
+      default:
+        return "atom";
+      }
+    case INTEL_XEONPHI:
+      return "knl"; /*update for more variants added*/
     case INTEL_X86_64:
       return "x86-64";
     case INTEL_NOCONA:
@@ -1108,7 +891,7 @@ StringRef sys::getHostCPUName() {
     case INTEL_PRESCOTT:
       return "prescott";
     default:
-      break;
+      return "generic";
     }
   } else if (Vendor == SIG_AMD) {
     getAMDProcessorTypeAndSubtype(Family, Model, Features, &Type, &Subtype);
@@ -1130,24 +913,31 @@ StringRef sys::getHostCPUName() {
       }
     case AMDATHLON:
       switch (Subtype) {
-      case AMDATHLON_CLASSIC:
-        return "athlon";
+      case AMDATHLON_TBIRD:
+        return "athlon-tbird";
+      case AMDATHLON_MP:
+        return "athlon-mp";
       case AMDATHLON_XP:
         return "athlon-xp";
-      case AMDATHLON_K8:
-        return "k8";
       case AMDATHLON_K8SSE3:
         return "k8-sse3";
+      case AMDATHLON_OPTERON:
+        return "opteron";
+      case AMDATHLON_FX:
+        return "athlon-fx";
+      case AMDATHLON_64:
+        return "athlon64";
       default:
-        llvm_unreachable("Unexpected subtype!");
+        return "athlon";
       }
     case AMDFAM10H:
+      if(Subtype == AMDFAM10H_BARCELONA)
+        return "barcelona";
       return "amdfam10";
-    case AMD_BTVER1:
+    case AMDFAM14H:
       return "btver1";
     case AMDFAM15H:
       switch (Subtype) {
-      default: // There are gaps in the subtype detection.
       case AMDFAM15H_BDVER1:
         return "bdver1";
       case AMDFAM15H_BDVER2:
@@ -1156,13 +946,31 @@ StringRef sys::getHostCPUName() {
         return "bdver3";
       case AMDFAM15H_BDVER4:
         return "bdver4";
+      case AMD_BTVER1:
+        return "btver1";
+      default:
+        return "amdfam15";
       }
-    case AMD_BTVER2:
-      return "btver2";
+    case AMDFAM16H:
+      switch (Subtype) {
+      case AMD_BTVER1:
+        return "btver1";
+      case AMD_BTVER2:
+        return "btver2";
+      default:
+        return "amdfam16";
+      }
     case AMDFAM17H:
-      return "znver1";
+      switch (Subtype) {
+      case AMD_BTVER1:
+        return "btver1";
+      case AMDFAM17H_ZNVER1:
+        return "znver1";
+      default:
+        return "amdfam17";
+      }
     default:
-      break;
+      return "generic";
     }
   }
   return "generic";
@@ -1212,21 +1020,201 @@ StringRef sys::getHostCPUName() {
 }
 #elif defined(__linux__) && (defined(__ppc__) || defined(__powerpc__))
 StringRef sys::getHostCPUName() {
-  std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  const StringRef& Content = P ? P->getBuffer() : "";
-  return detail::getHostCPUNameForPowerPC(Content);
+  // Access to the Processor Version Register (PVR) on PowerPC is privileged,
+  // and so we must use an operating-system interface to determine the current
+  // processor type. On Linux, this is exposed through the /proc/cpuinfo file.
+  const char *generic = "generic";
+
+  // The cpu line is second (after the 'processor: 0' line), so if this
+  // buffer is too small then something has changed (or is wrong).
+  char buffer[1024];
+  ssize_t CPUInfoSize = readCpuInfo(buffer, sizeof(buffer));
+  if (CPUInfoSize == -1)
+    return generic;
+
+  const char *CPUInfoStart = buffer;
+  const char *CPUInfoEnd = buffer + CPUInfoSize;
+
+  const char *CIP = CPUInfoStart;
+
+  const char *CPUStart = 0;
+  size_t CPULen = 0;
+
+  // We need to find the first line which starts with cpu, spaces, and a colon.
+  // After the colon, there may be some additional spaces and then the cpu type.
+  while (CIP < CPUInfoEnd && CPUStart == 0) {
+    if (CIP < CPUInfoEnd && *CIP == '\n')
+      ++CIP;
+
+    if (CIP < CPUInfoEnd && *CIP == 'c') {
+      ++CIP;
+      if (CIP < CPUInfoEnd && *CIP == 'p') {
+        ++CIP;
+        if (CIP < CPUInfoEnd && *CIP == 'u') {
+          ++CIP;
+          while (CIP < CPUInfoEnd && (*CIP == ' ' || *CIP == '\t'))
+            ++CIP;
+
+          if (CIP < CPUInfoEnd && *CIP == ':') {
+            ++CIP;
+            while (CIP < CPUInfoEnd && (*CIP == ' ' || *CIP == '\t'))
+              ++CIP;
+
+            if (CIP < CPUInfoEnd) {
+              CPUStart = CIP;
+              while (CIP < CPUInfoEnd && (*CIP != ' ' && *CIP != '\t' &&
+                                          *CIP != ',' && *CIP != '\n'))
+                ++CIP;
+              CPULen = CIP - CPUStart;
+            }
+          }
+        }
+      }
+    }
+
+    if (CPUStart == 0)
+      while (CIP < CPUInfoEnd && *CIP != '\n')
+        ++CIP;
+  }
+
+  if (CPUStart == 0)
+    return generic;
+
+  return StringSwitch<const char *>(StringRef(CPUStart, CPULen))
+      .Case("604e", "604e")
+      .Case("604", "604")
+      .Case("7400", "7400")
+      .Case("7410", "7400")
+      .Case("7447", "7400")
+      .Case("7455", "7450")
+      .Case("G4", "g4")
+      .Case("POWER4", "970")
+      .Case("PPC970FX", "970")
+      .Case("PPC970MP", "970")
+      .Case("G5", "g5")
+      .Case("POWER5", "g5")
+      .Case("A2", "a2")
+      .Case("POWER6", "pwr6")
+      .Case("POWER7", "pwr7")
+      .Case("POWER8", "pwr8")
+      .Case("POWER8E", "pwr8")
+      .Case("POWER8NVL", "pwr8")
+      .Case("POWER9", "pwr9")
+      .Default(generic);
 }
-#elif defined(__linux__) && (defined(__arm__) || defined(__aarch64__))
+#elif defined(__linux__) && defined(__arm__)
 StringRef sys::getHostCPUName() {
-  std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  const StringRef& Content = P ? P->getBuffer() : "";
-  return detail::getHostCPUNameForARM(Content);
+  // The cpuid register on arm is not accessible from user space. On Linux,
+  // it is exposed through the /proc/cpuinfo file.
+
+  // Read 1024 bytes from /proc/cpuinfo, which should contain the CPU part line
+  // in all cases.
+  char buffer[1024];
+  ssize_t CPUInfoSize = readCpuInfo(buffer, sizeof(buffer));
+  if (CPUInfoSize == -1)
+    return "generic";
+
+  StringRef Str(buffer, CPUInfoSize);
+
+  SmallVector<StringRef, 32> Lines;
+  Str.split(Lines, "\n");
+
+  // Look for the CPU implementer line.
+  StringRef Implementer;
+  for (unsigned I = 0, E = Lines.size(); I != E; ++I)
+    if (Lines[I].startswith("CPU implementer"))
+      Implementer = Lines[I].substr(15).ltrim("\t :");
+
+  if (Implementer == "0x41") // ARM Ltd.
+    // Look for the CPU part line.
+    for (unsigned I = 0, E = Lines.size(); I != E; ++I)
+      if (Lines[I].startswith("CPU part"))
+        // The CPU part is a 3 digit hexadecimal number with a 0x prefix. The
+        // values correspond to the "Part number" in the CP15/c0 register. The
+        // contents are specified in the various processor manuals.
+        return StringSwitch<const char *>(Lines[I].substr(8).ltrim("\t :"))
+            .Case("0x926", "arm926ej-s")
+            .Case("0xb02", "mpcore")
+            .Case("0xb36", "arm1136j-s")
+            .Case("0xb56", "arm1156t2-s")
+            .Case("0xb76", "arm1176jz-s")
+            .Case("0xc08", "cortex-a8")
+            .Case("0xc09", "cortex-a9")
+            .Case("0xc0f", "cortex-a15")
+            .Case("0xc20", "cortex-m0")
+            .Case("0xc23", "cortex-m3")
+            .Case("0xc24", "cortex-m4")
+            .Default("generic");
+
+  if (Implementer == "0x51") // Qualcomm Technologies, Inc.
+    // Look for the CPU part line.
+    for (unsigned I = 0, E = Lines.size(); I != E; ++I)
+      if (Lines[I].startswith("CPU part"))
+        // The CPU part is a 3 digit hexadecimal number with a 0x prefix. The
+        // values correspond to the "Part number" in the CP15/c0 register. The
+        // contents are specified in the various processor manuals.
+        return StringSwitch<const char *>(Lines[I].substr(8).ltrim("\t :"))
+            .Case("0x06f", "krait") // APQ8064
+            .Default("generic");
+
+  return "generic";
 }
 #elif defined(__linux__) && defined(__s390x__)
 StringRef sys::getHostCPUName() {
-  std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  const StringRef& Content = P ? P->getBuffer() : "";
-  return detail::getHostCPUNameForS390x(Content);
+  // STIDP is a privileged operation, so use /proc/cpuinfo instead.
+
+  // The "processor 0:" line comes after a fair amount of other information,
+  // including a cache breakdown, but this should be plenty.
+  char buffer[2048];
+  ssize_t CPUInfoSize = readCpuInfo(buffer, sizeof(buffer));
+  if (CPUInfoSize == -1)
+    return "generic";
+
+  StringRef Str(buffer, CPUInfoSize);
+  SmallVector<StringRef, 32> Lines;
+  Str.split(Lines, "\n");
+
+  // Look for the CPU features.
+  SmallVector<StringRef, 32> CPUFeatures;
+  for (unsigned I = 0, E = Lines.size(); I != E; ++I)
+    if (Lines[I].startswith("features")) {
+      size_t Pos = Lines[I].find(":");
+      if (Pos != StringRef::npos) {
+        Lines[I].drop_front(Pos + 1).split(CPUFeatures, ' ');
+        break;
+      }
+    }
+
+  // We need to check for the presence of vector support independently of
+  // the machine type, since we may only use the vector register set when
+  // supported by the kernel (and hypervisor).
+  bool HaveVectorSupport = false;
+  for (unsigned I = 0, E = CPUFeatures.size(); I != E; ++I) {
+    if (CPUFeatures[I] == "vx")
+      HaveVectorSupport = true;
+  }
+
+  // Now check the processor machine type.
+  for (unsigned I = 0, E = Lines.size(); I != E; ++I) {
+    if (Lines[I].startswith("processor ")) {
+      size_t Pos = Lines[I].find("machine = ");
+      if (Pos != StringRef::npos) {
+        Pos += sizeof("machine = ") - 1;
+        unsigned int Id;
+        if (!Lines[I].drop_front(Pos).getAsInteger(10, Id)) {
+          if (Id >= 2964 && HaveVectorSupport)
+            return "z13";
+          if (Id >= 2827)
+            return "zEC12";
+          if (Id >= 2817)
+            return "z196";
+        }
+      }
+      break;
+    }
+  }
+
+  return "generic";
 }
 #else
 StringRef sys::getHostCPUName() { return "generic"; }
@@ -1244,7 +1232,6 @@ static int computeHostNumPhysicalCores() {
   if (std::error_code EC = Text.getError()) {
     llvm::errs() << "Can't read "
                  << "/proc/cpuinfo: " << EC.message() << "\n";
-    return -1;
   }
   SmallVector<StringRef, 8> strs;
   (*Text)->getBuffer().split(strs, "\n", /*MaxSplit=*/-1,
@@ -1362,14 +1349,9 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["sse4a"] = HasExtLeaf1 && ((ECX >> 6) & 1);
   Features["prfchw"] = HasExtLeaf1 && ((ECX >> 8) & 1);
   Features["xop"] = HasExtLeaf1 && ((ECX >> 11) & 1) && HasAVXSave;
-  Features["lwp"] = HasExtLeaf1 && ((ECX >> 15) & 1);
   Features["fma4"] = HasExtLeaf1 && ((ECX >> 16) & 1) && HasAVXSave;
   Features["tbm"] = HasExtLeaf1 && ((ECX >> 21) & 1);
   Features["mwaitx"] = HasExtLeaf1 && ((ECX >> 29) & 1);
-
-  bool HasExtLeaf8 = MaxExtLevel >= 0x80000008 &&
-                     !getX86CpuIDAndInfoEx(0x80000008,0x0, &EAX, &EBX, &ECX, &EDX);
-  Features["clzero"] = HasExtLeaf8 && ((EBX >> 0) & 1);
 
   bool HasLeaf7 =
       MaxLevel >= 7 && !getX86CpuIDAndInfoEx(0x7, 0x0, &EAX, &EBX, &ECX, &EDX);
@@ -1380,10 +1362,14 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["fsgsbase"] = HasLeaf7 && ((EBX >> 0) & 1);
   Features["sgx"] = HasLeaf7 && ((EBX >> 2) & 1);
   Features["bmi"] = HasLeaf7 && ((EBX >> 3) & 1);
+  Features["hle"] = HasLeaf7 && ((EBX >> 4) & 1);
   Features["bmi2"] = HasLeaf7 && ((EBX >> 8) & 1);
+  Features["invpcid"] = HasLeaf7 && ((EBX >> 10) & 1);
   Features["rtm"] = HasLeaf7 && ((EBX >> 11) & 1);
   Features["rdseed"] = HasLeaf7 && ((EBX >> 18) & 1);
   Features["adx"] = HasLeaf7 && ((EBX >> 19) & 1);
+  Features["smap"] = HasLeaf7 && ((EBX >> 20) & 1);
+  Features["pcommit"] = HasLeaf7 && ((EBX >> 22) & 1);
   Features["clflushopt"] = HasLeaf7 && ((EBX >> 23) & 1);
   Features["clwb"] = HasLeaf7 && ((EBX >> 24) & 1);
   Features["sha"] = HasLeaf7 && ((EBX >> 29) & 1);
@@ -1400,7 +1386,6 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
 
   Features["prefetchwt1"] = HasLeaf7 && (ECX & 1);
   Features["avx512vbmi"] = HasLeaf7 && ((ECX >> 1) & 1) && HasAVX512Save;
-  Features["avx512vpopcntdq"] = HasLeaf7 && ((ECX >> 14) & 1) && HasAVX512Save;  
   // Enable protection keys
   Features["pku"] = HasLeaf7 && ((ECX >> 4) & 1);
 
@@ -1416,12 +1401,17 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
 }
 #elif defined(__linux__) && (defined(__arm__) || defined(__aarch64__))
 bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
-  std::unique_ptr<llvm::MemoryBuffer> P = getProcCpuinfoContent();
-  if (!P)
+  // Read 1024 bytes from /proc/cpuinfo, which should contain the Features line
+  // in all cases.
+  char buffer[1024];
+  ssize_t CPUInfoSize = readCpuInfo(buffer, sizeof(buffer));
+  if (CPUInfoSize == -1)
     return false;
 
+  StringRef Str(buffer, CPUInfoSize);
+
   SmallVector<StringRef, 32> Lines;
-  P->getBuffer().split(Lines, "\n");
+  Str.split(Lines, "\n");
 
   SmallVector<StringRef, 32> CPUFeatures;
 
@@ -1485,8 +1475,7 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) { return false; }
 #endif
 
 std::string sys::getProcessTriple() {
-  std::string TargetTripleString = updateTripleOSVersion(LLVM_HOST_TRIPLE);
-  Triple PT(Triple::normalize(TargetTripleString));
+  Triple PT(Triple::normalize(LLVM_HOST_TRIPLE));
 
   if (sizeof(void *) == 8 && PT.isArch32Bit())
     PT = PT.get64BitArchVariant();

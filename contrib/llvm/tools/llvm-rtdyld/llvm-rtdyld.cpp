@@ -175,7 +175,8 @@ public:
 
   void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                         size_t Size) override {}
-  void deregisterEHFrames() override {}
+  void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr,
+                          size_t Size) override {}
 
   void preallocateSlab(uint64_t Size) {
     std::string Err;
@@ -485,7 +486,10 @@ static int checkAllExpressions(RuntimeDyldChecker &Checker) {
   return 0;
 }
 
-void applySpecificSectionMappings(RuntimeDyldChecker &Checker) {
+static std::map<void *, uint64_t>
+applySpecificSectionMappings(RuntimeDyldChecker &Checker) {
+
+  std::map<void*, uint64_t> SpecificMappings;
 
   for (StringRef Mapping : SpecificSectionMappings) {
 
@@ -518,7 +522,10 @@ void applySpecificSectionMappings(RuntimeDyldChecker &Checker) {
                          "'.");
 
     Checker.getRTDyld().mapSectionAddress(OldAddr, NewAddr);
+    SpecificMappings[OldAddr] = NewAddr;
   }
+
+  return SpecificMappings;
 }
 
 // Scatter sections in all directions!
@@ -547,7 +554,8 @@ static void remapSectionsAndSymbols(const llvm::Triple &TargetTriple,
 
   // Apply any section-specific mappings that were requested on the command
   // line.
-  applySpecificSectionMappings(Checker);
+  typedef std::map<void*, uint64_t> AppliedMappingsT;
+  AppliedMappingsT AppliedMappings = applySpecificSectionMappings(Checker);
 
   // Keep an "already allocated" mapping of section target addresses to sizes.
   // Sections whose address mappings aren't specified on the command line will
@@ -555,19 +563,15 @@ static void remapSectionsAndSymbols(const llvm::Triple &TargetTriple,
   // minimum separation.
   std::map<uint64_t, uint64_t> AlreadyAllocated;
 
-  // Move the previously applied mappings (whether explicitly specified on the
-  // command line, or implicitly set by RuntimeDyld) into the already-allocated
-  // map.
+  // Move the previously applied mappings into the already-allocated map.
   for (WorklistT::iterator I = Worklist.begin(), E = Worklist.end();
        I != E;) {
     WorklistT::iterator Tmp = I;
     ++I;
-    auto LoadAddr = Checker.getSectionLoadAddress(Tmp->first);
+    AppliedMappingsT::iterator AI = AppliedMappings.find(Tmp->first);
 
-    if (LoadAddr &&
-        *LoadAddr != static_cast<uint64_t>(
-                       reinterpret_cast<uintptr_t>(Tmp->first))) {
-      AlreadyAllocated[*LoadAddr] = Tmp->second;
+    if (AI != AppliedMappings.end()) {
+      AlreadyAllocated[AI->second] = Tmp->second;
       Worklist.erase(Tmp);
     }
   }

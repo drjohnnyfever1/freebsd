@@ -16,13 +16,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/MCSymbol.h"
@@ -54,7 +54,7 @@ namespace {
 class WinEHPrepare : public FunctionPass {
 public:
   static char ID; // Pass identification, replacement for typeid.
-  WinEHPrepare() : FunctionPass(ID) {}
+  WinEHPrepare(const TargetMachine *TM = nullptr) : FunctionPass(ID) {}
 
   bool runOnFunction(Function &Fn) override;
 
@@ -86,7 +86,6 @@ private:
   // All fields are reset by runOnFunction.
   EHPersonality Personality = EHPersonality::Unknown;
 
-  const DataLayout *DL = nullptr;
   DenseMap<BasicBlock *, ColorVector> BlockColors;
   MapVector<BasicBlock *, std::vector<BasicBlock *>> FuncletBlocks;
 };
@@ -94,10 +93,12 @@ private:
 } // end anonymous namespace
 
 char WinEHPrepare::ID = 0;
-INITIALIZE_PASS(WinEHPrepare, DEBUG_TYPE, "Prepare Windows exceptions",
-                false, false)
+INITIALIZE_TM_PASS(WinEHPrepare, "winehprepare", "Prepare Windows exceptions",
+                   false, false)
 
-FunctionPass *llvm::createWinEHPass() { return new WinEHPrepare(); }
+FunctionPass *llvm::createWinEHPass(const TargetMachine *TM) {
+  return new WinEHPrepare(TM);
+}
 
 bool WinEHPrepare::runOnFunction(Function &Fn) {
   if (!Fn.hasPersonalityFn())
@@ -110,7 +111,6 @@ bool WinEHPrepare::runOnFunction(Function &Fn) {
   if (!isFuncletEHPersonality(Personality))
     return false;
 
-  DL = &Fn.getParent()->getDataLayout();
   return prepareExplicitEH(Fn);
 }
 
@@ -1070,7 +1070,7 @@ AllocaInst *WinEHPrepare::insertPHILoads(PHINode *PN, Function &F) {
   if (!isa<TerminatorInst>(EHPad)) {
     // If the EHPad isn't a terminator, then we can insert a load in this block
     // that will dominate all uses.
-    SpillSlot = new AllocaInst(PN->getType(), DL->getAllocaAddrSpace(), nullptr,
+    SpillSlot = new AllocaInst(PN->getType(), nullptr,
                                Twine(PN->getName(), ".wineh.spillslot"),
                                &F.getEntryBlock().front());
     Value *V = new LoadInst(SpillSlot, Twine(PN->getName(), ".wineh.reload"),
@@ -1157,7 +1157,7 @@ void WinEHPrepare::replaceUseWithLoad(Value *V, Use &U, AllocaInst *&SpillSlot,
                                       Function &F) {
   // Lazilly create the spill slot.
   if (!SpillSlot)
-    SpillSlot = new AllocaInst(V->getType(), DL->getAllocaAddrSpace(), nullptr,
+    SpillSlot = new AllocaInst(V->getType(), nullptr,
                                Twine(V->getName(), ".wineh.spillslot"),
                                &F.getEntryBlock().front());
 

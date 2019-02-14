@@ -189,7 +189,6 @@ public:
 
       case DeadIncrement:
         BugType = "Dead increment";
-        LLVM_FALLTHROUGH;
       case Standard:
         if (!BugType) BugType = "Dead assignment";
         os << "Value stored to '" << *V << "' is never read";

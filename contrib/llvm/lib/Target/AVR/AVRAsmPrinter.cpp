@@ -18,8 +18,8 @@
 #include "InstPrinter/AVRInstPrinter.h"
 
 #include "llvm/CodeGen/AsmPrinter.h"
-#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
@@ -112,8 +112,7 @@ bool AVRAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
       const AVRSubtarget &STI = MF->getSubtarget<AVRSubtarget>();
       const TargetRegisterInfo &TRI = *STI.getRegisterInfo();
 
-      const TargetRegisterClass *RC = TRI.getMinimalPhysRegClass(Reg);
-      unsigned BytesPerReg = TRI.getRegSizeInBits(*RC) / 8;
+      unsigned BytesPerReg = TRI.getMinimalPhysRegClass(Reg)->getSize();
       assert(BytesPerReg <= 2 && "Only 8 and 16 bit regs are supported.");
 
       unsigned RegIdx = ByteNumber / BytesPerReg;
@@ -131,8 +130,7 @@ bool AVRAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
     }
   }
 
-  if (Error)
-    printOperand(MI, OpNum, O);
+  printOperand(MI, OpNum, O);
 
   return false;
 }
@@ -149,10 +147,7 @@ bool AVRAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
   (void)MO;
   assert(MO.isReg() && "Unexpected inline asm memory operand");
 
-  // TODO: We should be able to look up the alternative name for
-  // the register if it's given.
-  // TableGen doesn't expose a way of getting retrieving names
-  // for registers.
+  // TODO: We can look up the alternative name for the register if it's given.
   if (MI->getOperand(OpNum).getReg() == AVR::R31R30) {
     O << "Z";
   } else {

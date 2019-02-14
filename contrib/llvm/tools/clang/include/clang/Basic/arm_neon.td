@@ -1362,7 +1362,7 @@ def SCALAR_SHL: SInst<"vshl", "sss", "SlSUl">;
 def SCALAR_QSHL: SInst<"vqshl", "sss", "ScSsSiSlSUcSUsSUiSUl">;
 // Scalar Saturating Rounding Shift Left
 def SCALAR_QRSHL: SInst<"vqrshl", "sss", "ScSsSiSlSUcSUsSUiSUl">;
-// Scalar Shift Rounding Left
+// Scalar Shift Rouding Left
 def SCALAR_RSHL: SInst<"vrshl", "sss", "SlSUl">;
 
 ////////////////////////////////////////////////////////////////////////////////

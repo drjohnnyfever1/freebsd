@@ -140,7 +140,8 @@ struct DOTGraphTraits<const Function*> : public DefaultDOTGraphTraits {
 
       std::string Str;
       raw_string_ostream OS(Str);
-      auto Case = *SwitchInst::ConstCaseIt::fromSuccessorIndex(SI, SuccNo);
+      SwitchInst::ConstCaseIt Case =
+          SwitchInst::ConstCaseIt::fromSuccessorIndex(SI, SuccNo);
       OS << Case.getCaseValue()->getValue();
       return OS.str();
     }

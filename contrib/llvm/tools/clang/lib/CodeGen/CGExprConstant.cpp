@@ -201,7 +201,7 @@ void ConstStructBuilder::AppendBitField(const FieldDecl *Field,
       unsigned NewFieldWidth = FieldSize - BitsInPreviousByte;
 
       if (CGM.getDataLayout().isBigEndian()) {
-        Tmp.lshrInPlace(NewFieldWidth);
+        Tmp = Tmp.lshr(NewFieldWidth);
         Tmp = Tmp.trunc(BitsInPreviousByte);
 
         // We want the remaining high bits.
@@ -210,7 +210,7 @@ void ConstStructBuilder::AppendBitField(const FieldDecl *Field,
         Tmp = Tmp.trunc(BitsInPreviousByte);
 
         // We want the remaining low bits.
-        FieldValue.lshrInPlace(BitsInPreviousByte);
+        FieldValue = FieldValue.lshr(BitsInPreviousByte);
         FieldValue = FieldValue.trunc(NewFieldWidth);
       }
     }
@@ -273,7 +273,7 @@ void ConstStructBuilder::AppendBitField(const FieldDecl *Field,
       // We want the low bits.
       Tmp = FieldValue.trunc(CharWidth);
 
-      FieldValue.lshrInPlace(CharWidth);
+      FieldValue = FieldValue.lshr(CharWidth);
     }
 
     Elements.push_back(llvm::ConstantInt::get(CGM.getLLVMContext(), Tmp));
@@ -1361,8 +1361,9 @@ llvm::Constant *CodeGenModule::EmitConstantValue(const APValue &Value,
                                         Value.getComplexIntImag());
 
     // FIXME: the target may want to specify that this is packed.
-    llvm::StructType *STy =
-        llvm::StructType::get(Complex[0]->getType(), Complex[1]->getType());
+    llvm::StructType *STy = llvm::StructType::get(Complex[0]->getType(),
+                                                  Complex[1]->getType(),
+                                                  nullptr);
     return llvm::ConstantStruct::get(STy, Complex);
   }
   case APValue::Float: {
@@ -1383,8 +1384,9 @@ llvm::Constant *CodeGenModule::EmitConstantValue(const APValue &Value,
                                        Value.getComplexFloatImag());
 
     // FIXME: the target may want to specify that this is packed.
-    llvm::StructType *STy =
-        llvm::StructType::get(Complex[0]->getType(), Complex[1]->getType());
+    llvm::StructType *STy = llvm::StructType::get(Complex[0]->getType(),
+                                                  Complex[1]->getType(),
+                                                  nullptr);
     return llvm::ConstantStruct::get(STy, Complex);
   }
   case APValue::Vector: {

@@ -177,12 +177,12 @@ public:
 
   bool isPredicated(const MachineInstr &MI) const override;
 
-  bool isPredicable(const MachineInstr &MI) const override;
+  bool isPredicable(MachineInstr &MI) const override;
 
-  bool isProfitableToDupForIfCvt(MachineBasicBlock &MBB, unsigned NumCycles,
+  bool isProfitableToDupForIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
                                  BranchProbability Probability) const override;
 
-  bool isProfitableToIfCvt(MachineBasicBlock &MBB, unsigned NumCycles,
+  bool isProfitableToIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
                            unsigned ExtraPredCycles,
                            BranchProbability Probability) const override ;
 

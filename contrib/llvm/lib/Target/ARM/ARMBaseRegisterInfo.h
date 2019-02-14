@@ -15,33 +15,24 @@
 #define LLVM_LIB_TARGET_ARM_ARMBASEREGISTERINFO_H
 
 #include "MCTargetDesc/ARMBaseInfo.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/IR/CallingConv.h"
-#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include <cstdint>
 
 #define GET_REGINFO_HEADER
 #include "ARMGenRegisterInfo.inc"
 
 namespace llvm {
-
 /// Register allocation hints.
 namespace ARMRI {
-
   enum {
     RegPairOdd  = 1,
     RegPairEven = 2
   };
-
-} // end namespace ARMRI
+}
 
 /// isARMArea1Register - Returns true if the register is a low register (r0-r7)
 /// or a stack/pc register that we should push/pop.
 static inline bool isARMArea1Register(unsigned Reg, bool isIOS) {
   using namespace ARM;
-
   switch (Reg) {
     case R0:  case R1:  case R2:  case R3:
     case R4:  case R5:  case R6:  case R7:
@@ -57,7 +48,6 @@ static inline bool isARMArea1Register(unsigned Reg, bool isIOS) {
 
 static inline bool isARMArea2Register(unsigned Reg, bool isIOS) {
   using namespace ARM;
-
   switch (Reg) {
     case R8: case R9: case R10: case R11: case R12:
       // iOS has this second area.
@@ -69,7 +59,6 @@ static inline bool isARMArea2Register(unsigned Reg, bool isIOS) {
 
 static inline bool isARMArea3Register(unsigned Reg, bool isIOS) {
   using namespace ARM;
-
   switch (Reg) {
     case D15: case D14: case D13: case D12:
     case D11: case D10: case D9:  case D8:
@@ -98,7 +87,7 @@ protected:
   /// BasePtr - ARM physical register used as a base ptr in complex stack
   /// frames. I.e., when we need a 3rd base, not just SP and FP, due to
   /// variable size stack objects.
-  unsigned BasePtr = ARM::R6;
+  unsigned BasePtr;
 
   // Can be only subclassed.
   explicit ARMBaseRegisterInfo();
@@ -209,4 +198,4 @@ public:
 
 } // end namespace llvm
 
-#endif // LLVM_LIB_TARGET_ARM_ARMBASEREGISTERINFO_H
+#endif

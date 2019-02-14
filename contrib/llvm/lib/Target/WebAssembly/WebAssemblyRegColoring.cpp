@@ -140,7 +140,8 @@ bool WebAssemblyRegColoring::runOnMachineFunction(MachineFunction &MF) {
 
     // Check if it's possible to reuse any of the used colors.
     if (!MRI->isLiveIn(Old))
-      for (unsigned C : UsedColors.set_bits()) {
+      for (int C(UsedColors.find_first()); C != -1;
+           C = UsedColors.find_next(C)) {
         if (MRI->getRegClass(SortedIntervals[C]->reg) != RC)
           continue;
         for (LiveInterval *OtherLI : Assignments[C])

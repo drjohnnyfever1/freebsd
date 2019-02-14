@@ -32,8 +32,7 @@ namespace opt_tool {
 enum OutputKind {
   OK_NoOutput,
   OK_OutputAssembly,
-  OK_OutputBitcode,
-  OK_OutputThinLTOBitcode,
+  OK_OutputBitcode
 };
 enum VerifierKind {
   VK_NoVerifier,
@@ -48,11 +47,8 @@ enum VerifierKind {
 /// inclusion of the new pass manager headers and the old headers into the same
 /// file. It's interface is consequentially somewhat ad-hoc, but will go away
 /// when the transition finishes.
-///
-/// ThinLTOLinkOut is only used when OK is OK_OutputThinLTOBitcode, and can be
-/// nullptr.
-bool runPassPipeline(StringRef Arg0, Module &M, TargetMachine *TM,
-                     tool_output_file *Out, tool_output_file *ThinLinkOut,
+bool runPassPipeline(StringRef Arg0, Module &M,
+                     TargetMachine *TM, tool_output_file *Out,
                      StringRef PassPipeline, opt_tool::OutputKind OK,
                      opt_tool::VerifierKind VK,
                      bool ShouldPreserveAssemblyUseListOrder,

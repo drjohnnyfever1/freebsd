@@ -23,9 +23,9 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Value.h"
+#include "llvm/Support/MD5.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MD5.h"
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -161,10 +161,6 @@ protected:
     Parent = parent;
   }
 
-  ~GlobalValue() {
-    removeDeadConstantUsers();   // remove any dead constants using this.
-  }
-
 public:
   enum ThreadLocalMode {
     NotThreadLocal = 0,
@@ -175,6 +171,10 @@ public:
   };
 
   GlobalValue(const GlobalValue &) = delete;
+
+  ~GlobalValue() override {
+    removeDeadConstantUsers();   // remove any dead constants using this.
+  }
 
   unsigned getAlignment() const;
 
@@ -211,10 +211,9 @@ public:
   }
 
   bool hasComdat() const { return getComdat() != nullptr; }
-  const Comdat *getComdat() const;
-  Comdat *getComdat() {
-    return const_cast<Comdat *>(
-                           static_cast<const GlobalValue *>(this)->getComdat());
+  Comdat *getComdat();
+  const Comdat *getComdat() const {
+    return const_cast<GlobalValue *>(this)->getComdat();
   }
 
   VisibilityTypes getVisibility() const { return VisibilityTypes(Visibility); }
@@ -435,20 +434,14 @@ public:
 
   bool isWeakForLinker() const { return isWeakForLinker(getLinkage()); }
 
-protected:
   /// Copy all additional attributes (those not needed to create a GlobalValue)
   /// from the GlobalValue Src to this one.
-  void copyAttributesFrom(const GlobalValue *Src);
+  virtual void copyAttributesFrom(const GlobalValue *Src);
 
-public:
-  /// If the given string begins with the GlobalValue name mangling escape
-  /// character '\1', drop it.
-  ///
-  /// This function applies a specific mangling that is used in PGO profiles,
-  /// among other things. If you're trying to get a symbol name for an
-  /// arbitrary GlobalValue, this is not the function you're looking for; see
-  /// Mangler.h.
-  static StringRef dropLLVMManglingEscape(StringRef Name) {
+  /// If special LLVM prefix that is used to inform the asm printer to not emit
+  /// usual symbol prefix before the symbol name is used then return linkage
+  /// name after skipping this special LLVM prefix.
+  static StringRef getRealLinkageName(StringRef Name) {
     if (!Name.empty() && Name[0] == '\1')
       return Name.substr(1);
     return Name;
@@ -521,11 +514,10 @@ public:
   // increased.
   bool canIncreaseAlignment() const;
 
-  const GlobalObject *getBaseObject() const;
-  GlobalObject *getBaseObject() {
-    return const_cast<GlobalObject *>(
-                       static_cast<const GlobalValue *>(this)->getBaseObject());
+  const GlobalObject *getBaseObject() const {
+    return const_cast<GlobalValue *>(this)->getBaseObject();
   }
+  GlobalObject *getBaseObject();
 
   /// Returns whether this is a reference to an absolute symbol.
   bool isAbsoluteSymbolRef() const;
@@ -536,10 +528,10 @@ public:
 
   /// This method unlinks 'this' from the containing module, but does not delete
   /// it.
-  void removeFromParent();
+  virtual void removeFromParent() = 0;
 
   /// This method unlinks 'this' from the containing module and deletes it.
-  void eraseFromParent();
+  virtual void eraseFromParent() = 0;
 
   /// Get the module that this global value is contained inside of...
   Module *getParent() { return Parent; }

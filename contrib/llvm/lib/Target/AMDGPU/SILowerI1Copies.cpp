@@ -21,8 +21,8 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/TargetMachine.h"
 
@@ -114,18 +114,18 @@ bool SILowerI1Copies::runOnMachineFunction(MachineFunction &MF) {
             assert(Val == 0 || Val == -1);
 
             BuildMI(MBB, &MI, DL, TII->get(AMDGPU::V_MOV_B32_e32))
-                .add(Dst)
-                .addImm(Val);
+              .addOperand(Dst)
+              .addImm(Val);
             MI.eraseFromParent();
             continue;
           }
         }
 
         BuildMI(MBB, &MI, DL, TII->get(AMDGPU::V_CNDMASK_B32_e64))
-            .add(Dst)
-            .addImm(0)
-            .addImm(-1)
-            .add(Src);
+          .addOperand(Dst)
+          .addImm(0)
+          .addImm(-1)
+          .addOperand(Src);
         MI.eraseFromParent();
       } else if (TRI->getCommonSubClass(DstRC, &AMDGPU::SGPR_64RegClass) &&
                  SrcRC == &AMDGPU::VReg_1RegClass) {
@@ -140,14 +140,14 @@ bool SILowerI1Copies::runOnMachineFunction(MachineFunction &MF) {
               MRI.getRegClass(DefInst->getOperand(3).getReg()),
               &AMDGPU::SGPR_64RegClass)) {
           BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_AND_B64))
-              .add(Dst)
-              .addReg(AMDGPU::EXEC)
-              .add(DefInst->getOperand(3));
+            .addOperand(Dst)
+            .addReg(AMDGPU::EXEC)
+            .addOperand(DefInst->getOperand(3));
         } else {
           BuildMI(MBB, &MI, DL, TII->get(AMDGPU::V_CMP_NE_U32_e64))
-              .add(Dst)
-              .add(Src)
-              .addImm(0);
+            .addOperand(Dst)
+            .addOperand(Src)
+            .addImm(0);
         }
         MI.eraseFromParent();
       }

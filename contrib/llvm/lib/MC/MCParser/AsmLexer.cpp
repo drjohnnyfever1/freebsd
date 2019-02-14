@@ -30,11 +30,15 @@
 
 using namespace llvm;
 
-AsmLexer::AsmLexer(const MCAsmInfo &MAI) : MAI(MAI) {
+AsmLexer::AsmLexer(const MCAsmInfo &MAI)
+    : MAI(MAI), CurPtr(nullptr), IsAtStartOfLine(true),
+      IsAtStartOfStatement(true), IsParsingMSInlineAsm(false),
+      IsPeeking(false) {
   AllowAtInIdentifier = !StringRef(MAI.getCommentString()).startswith("@");
 }
 
-AsmLexer::~AsmLexer() = default;
+AsmLexer::~AsmLexer() {
+}
 
 void AsmLexer::setBuffer(StringRef Buf, const char *ptr) {
   CurBuf = Buf;

@@ -14,7 +14,6 @@
 #include "llvm/Object/IRObjectFile.h"
 #include "RecordStreamer.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/BinaryFormat/Magic.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/LLVMContext.h"
@@ -96,13 +95,13 @@ ErrorOr<MemoryBufferRef> IRObjectFile::findBitcodeInObject(const ObjectFile &Obj
 }
 
 ErrorOr<MemoryBufferRef> IRObjectFile::findBitcodeInMemBuffer(MemoryBufferRef Object) {
-  file_magic Type = identify_magic(Object.getBuffer());
+  sys::fs::file_magic Type = sys::fs::identify_magic(Object.getBuffer());
   switch (Type) {
-  case file_magic::bitcode:
+  case sys::fs::file_magic::bitcode:
     return Object;
-  case file_magic::elf_relocatable:
-  case file_magic::macho_object:
-  case file_magic::coff_object: {
+  case sys::fs::file_magic::elf_relocatable:
+  case sys::fs::file_magic::macho_object:
+  case sys::fs::file_magic::coff_object: {
     Expected<std::unique_ptr<ObjectFile>> ObjFile =
         ObjectFile::createObjectFile(Object, Type);
     if (!ObjFile)
@@ -138,26 +137,4 @@ IRObjectFile::create(MemoryBufferRef Object, LLVMContext &Context) {
 
   return std::unique_ptr<IRObjectFile>(
       new IRObjectFile(*BCOrErr, std::move(Mods)));
-}
-
-Expected<IRSymtabFile> object::readIRSymtab(MemoryBufferRef MBRef) {
-  IRSymtabFile F;
-  ErrorOr<MemoryBufferRef> BCOrErr =
-      IRObjectFile::findBitcodeInMemBuffer(MBRef);
-  if (!BCOrErr)
-    return errorCodeToError(BCOrErr.getError());
-
-  Expected<BitcodeFileContents> BFCOrErr = getBitcodeFileContents(*BCOrErr);
-  if (!BFCOrErr)
-    return BFCOrErr.takeError();
-
-  Expected<irsymtab::FileContents> FCOrErr = irsymtab::readBitcode(*BFCOrErr);
-  if (!FCOrErr)
-    return FCOrErr.takeError();
-
-  F.Mods = std::move(BFCOrErr->Mods);
-  F.Symtab = std::move(FCOrErr->Symtab);
-  F.Strtab = std::move(FCOrErr->Strtab);
-  F.TheReader = std::move(FCOrErr->TheReader);
-  return std::move(F);
 }

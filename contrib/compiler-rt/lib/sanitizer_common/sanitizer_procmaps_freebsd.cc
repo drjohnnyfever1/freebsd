@@ -48,27 +48,36 @@ void ReadProcMaps(ProcSelfMapsBuff *proc_maps) {
   proc_maps->len = Size;
 }
 
-bool MemoryMappingLayout::Next(MemoryMappedSegment *segment) {
+bool MemoryMappingLayout::Next(uptr *start, uptr *end, uptr *offset,
+                               char filename[], uptr filename_size,
+                               uptr *protection, ModuleArch *arch, u8 *uuid) {
+  CHECK(!arch && "not implemented");
+  CHECK(!uuid && "not implemented");
   char *last = proc_self_maps_.data + proc_self_maps_.len;
   if (current_ >= last) return false;
+  uptr dummy;
+  if (!start) start = &dummy;
+  if (!end) end = &dummy;
+  if (!offset) offset = &dummy;
+  if (!protection) protection = &dummy;
   struct kinfo_vmentry *VmEntry = (struct kinfo_vmentry*)current_;
 
-  segment->start = (uptr)VmEntry->kve_start;
-  segment->end = (uptr)VmEntry->kve_end;
-  segment->offset = (uptr)VmEntry->kve_offset;
+  *start = (uptr)VmEntry->kve_start;
+  *end = (uptr)VmEntry->kve_end;
+  *offset = (uptr)VmEntry->kve_offset;
 
-  segment->protection = 0;
+  *protection = 0;
   if ((VmEntry->kve_protection & KVME_PROT_READ) != 0)
-    segment->protection |= kProtectionRead;
+    *protection |= kProtectionRead;
   if ((VmEntry->kve_protection & KVME_PROT_WRITE) != 0)
-    segment->protection |= kProtectionWrite;
+    *protection |= kProtectionWrite;
   if ((VmEntry->kve_protection & KVME_PROT_EXEC) != 0)
-    segment->protection |= kProtectionExecute;
+    *protection |= kProtectionExecute;
 
-  if (segment->filename != NULL && segment->filename_size > 0) {
-    internal_snprintf(segment->filename,
-                      Min(segment->filename_size, (uptr)PATH_MAX), "%s",
-                      VmEntry->kve_path);
+  if (filename != NULL && filename_size > 0) {
+    internal_snprintf(filename,
+                      Min(filename_size, (uptr)PATH_MAX),
+                      "%s", VmEntry->kve_path);
   }
 
   current_ += VmEntry->kve_structsize;

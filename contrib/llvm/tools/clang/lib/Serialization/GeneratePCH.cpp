@@ -27,11 +27,10 @@ PCHGenerator::PCHGenerator(
     ArrayRef<std::shared_ptr<ModuleFileExtension>> Extensions,
     bool AllowASTWithErrors, bool IncludeTimestamps)
     : PP(PP), OutputFile(OutputFile), isysroot(isysroot.str()),
-      SemaPtr(nullptr), Buffer(std::move(Buffer)), Stream(this->Buffer->Data),
-      Writer(Stream, this->Buffer->Data, PP.getPCMCache(), Extensions,
-             IncludeTimestamps),
+      SemaPtr(nullptr), Buffer(Buffer), Stream(Buffer->Data),
+      Writer(Stream, Extensions, IncludeTimestamps),
       AllowASTWithErrors(AllowASTWithErrors) {
-  this->Buffer->IsComplete = false;
+  Buffer->IsComplete = false;
 }
 
 PCHGenerator::~PCHGenerator() {

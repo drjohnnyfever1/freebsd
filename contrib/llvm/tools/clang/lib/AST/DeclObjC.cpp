@@ -162,10 +162,10 @@ ObjCPropertyDecl::findPropertyDecl(const DeclContext *DC,
         return nullptr;
   }
 
-  // If context is class, then lookup property in its visible extensions.
+  // If context is class, then lookup property in its extensions.
   // This comes before property is looked up in primary class.
   if (auto *IDecl = dyn_cast<ObjCInterfaceDecl>(DC)) {
-    for (const auto *Ext : IDecl->visible_extensions())
+    for (const auto *Ext : IDecl->known_extensions())
       if (ObjCPropertyDecl *PD = ObjCPropertyDecl::findPropertyDecl(Ext,
                                                        propertyID,
                                                        queryKind))
@@ -539,18 +539,9 @@ void ObjCInterfaceDecl::getDesignatedInitializers(
 
 bool ObjCInterfaceDecl::isDesignatedInitializer(Selector Sel,
                                       const ObjCMethodDecl **InitMethod) const {
-  bool HasCompleteDef = isThisDeclarationADefinition();
-  // During deserialization the data record for the ObjCInterfaceDecl could
-  // be made invariant by reusing the canonical decl. Take this into account
-  // when checking for the complete definition.
-  if (!HasCompleteDef && getCanonicalDecl()->hasDefinition() &&
-      getCanonicalDecl()->getDefinition() == getDefinition())
-    HasCompleteDef = true;
-
   // Check for a complete definition and recover if not so.
-  if (!HasCompleteDef)
+  if (!isThisDeclarationADefinition())
     return false;
-
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
 
@@ -1070,20 +1061,20 @@ void ObjCMethodDecl::createImplicitParams(ASTContext &Context,
   bool selfIsPseudoStrong, selfIsConsumed;
   QualType selfTy =
     getSelfType(Context, OID, selfIsPseudoStrong, selfIsConsumed);
-  auto *Self = ImplicitParamDecl::Create(Context, this, SourceLocation(),
-                                         &Context.Idents.get("self"), selfTy,
-                                         ImplicitParamDecl::ObjCSelf);
-  setSelfDecl(Self);
+  ImplicitParamDecl *self
+    = ImplicitParamDecl::Create(Context, this, SourceLocation(),
+                                &Context.Idents.get("self"), selfTy);
+  setSelfDecl(self);
 
   if (selfIsConsumed)
-    Self->addAttr(NSConsumedAttr::CreateImplicit(Context));
+    self->addAttr(NSConsumedAttr::CreateImplicit(Context));
 
   if (selfIsPseudoStrong)
-    Self->setARCPseudoStrong(true);
+    self->setARCPseudoStrong(true);
 
-  setCmdDecl(ImplicitParamDecl::Create(
-      Context, this, SourceLocation(), &Context.Idents.get("_cmd"),
-      Context.getObjCSelType(), ImplicitParamDecl::ObjCCmd));
+  setCmdDecl(ImplicitParamDecl::Create(Context, this, SourceLocation(),
+                                       &Context.Idents.get("_cmd"),
+                                       Context.getObjCSelType()));
 }
 
 ObjCInterfaceDecl *ObjCMethodDecl::getClassInterface() {
@@ -1889,23 +1880,25 @@ void ObjCProtocolDecl::collectPropertiesToImplement(PropertyMap &PM,
   }
 }
 
+    
 void ObjCProtocolDecl::collectInheritedProtocolProperties(
-    const ObjCPropertyDecl *Property, ProtocolPropertySet &PS,
-    PropertyDeclOrder &PO) const {
+                                                const ObjCPropertyDecl *Property,
+                                                ProtocolPropertyMap &PM) const {
   if (const ObjCProtocolDecl *PDecl = getDefinition()) {
-    if (!PS.insert(PDecl).second)
-      return;
+    bool MatchFound = false;
     for (auto *Prop : PDecl->properties()) {
       if (Prop == Property)
         continue;
       if (Prop->getIdentifier() == Property->getIdentifier()) {
-        PO.push_back(Prop);
-        return;
+        PM[PDecl] = Prop;
+        MatchFound = true;
+        break;
       }
     }
     // Scan through protocol's protocols which did not have a matching property.
-    for (const auto *PI : PDecl->protocols())
-      PI->collectInheritedProtocolProperties(Property, PS, PO);
+    if (!MatchFound)
+      for (const auto *PI : PDecl->protocols())
+        PI->collectInheritedProtocolProperties(Property, PM);
   }
 }
 

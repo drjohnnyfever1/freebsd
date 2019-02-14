@@ -19,15 +19,13 @@
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-public.h"
 
-#include "lldb/Core/DumpDataExtractor.h"
+#include "lldb/Core/StreamString.h"
 #include "lldb/DataFormatters/FormatManager.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/TypeList.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/StreamString.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -56,15 +54,15 @@ bool TypeFormatImpl_Format::FormatObject(ValueObject *valobj,
     if (context_type == Value::eContextTypeRegisterInfo) {
       const RegisterInfo *reg_info = value.GetRegisterInfo();
       if (reg_info) {
-        Status error;
+        Error error;
         valobj->GetData(data, error);
         if (error.Fail())
           return false;
 
         StreamString reg_sstr;
-        DumpDataExtractor(data, &reg_sstr, 0, GetFormat(), reg_info->byte_size,
-                          1, UINT32_MAX, LLDB_INVALID_ADDRESS, 0, 0,
-                          exe_ctx.GetBestExecutionContextScope());
+        data.Dump(&reg_sstr, 0, GetFormat(), reg_info->byte_size, 1, UINT32_MAX,
+                  LLDB_INVALID_ADDRESS, 0, 0,
+                  exe_ctx.GetBestExecutionContextScope());
         dest = reg_sstr.GetString();
       }
     } else {
@@ -82,7 +80,7 @@ bool TypeFormatImpl_Format::FormatObject(ValueObject *valobj,
             TargetSP target_sp(valobj->GetTargetSP());
             if (target_sp) {
               size_t max_len = target_sp->GetMaximumSizeOfStringSummary();
-              Status error;
+              Error error;
               DataBufferSP buffer_sp(new DataBufferHeap(max_len + 1, 0));
               Address address(valobj->GetPointerValue());
               if (target_sp->ReadCStringFromMemory(
@@ -92,7 +90,7 @@ bool TypeFormatImpl_Format::FormatObject(ValueObject *valobj,
             }
           }
         } else {
-          Status error;
+          Error error;
           valobj->GetData(data, error);
           if (error.Fail())
             return false;
@@ -185,7 +183,7 @@ bool TypeFormatImpl_EnumType::FormatObject(ValueObject *valobj,
   if (valobj_enum_type.IsValid() == false)
     return false;
   DataExtractor data;
-  Status error;
+  Error error;
   valobj->GetData(data, error);
   if (error.Fail())
     return false;

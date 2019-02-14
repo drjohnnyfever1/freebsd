@@ -18,36 +18,49 @@
 namespace __sanitizer {
 
 void ReadProcMaps(ProcSelfMapsBuff *proc_maps) {
-  ReadFileToBuffer("/proc/self/maps", &proc_maps->data, &proc_maps->mmaped_size,
-                   &proc_maps->len);
+  CHECK(ReadFileToBuffer("/proc/self/maps", &proc_maps->data,
+                         &proc_maps->mmaped_size, &proc_maps->len));
 }
 
 static bool IsOneOf(char c, char c1, char c2) {
   return c == c1 || c == c2;
 }
 
-bool MemoryMappingLayout::Next(MemoryMappedSegment *segment) {
+bool MemoryMappingLayout::Next(uptr *start, uptr *end, uptr *offset,
+                               char filename[], uptr filename_size,
+                               uptr *protection, ModuleArch *arch, u8 *uuid) {
+  CHECK(!arch && "not implemented");
+  CHECK(!uuid && "not implemented");
   char *last = proc_self_maps_.data + proc_self_maps_.len;
   if (current_ >= last) return false;
+  uptr dummy;
+  if (!start) start = &dummy;
+  if (!end) end = &dummy;
+  if (!offset) offset = &dummy;
+  if (!protection) protection = &dummy;
   char *next_line = (char*)internal_memchr(current_, '\n', last - current_);
   if (next_line == 0)
     next_line = last;
   // Example: 08048000-08056000 r-xp 00000000 03:0c 64593   /foo/bar
-  segment->start = ParseHex(&current_);
+  *start = ParseHex(&current_);
   CHECK_EQ(*current_++, '-');
-  segment->end = ParseHex(&current_);
+  *end = ParseHex(&current_);
   CHECK_EQ(*current_++, ' ');
   CHECK(IsOneOf(*current_, '-', 'r'));
-  segment->protection = 0;
-  if (*current_++ == 'r') segment->protection |= kProtectionRead;
+  *protection = 0;
+  if (*current_++ == 'r')
+    *protection |= kProtectionRead;
   CHECK(IsOneOf(*current_, '-', 'w'));
-  if (*current_++ == 'w') segment->protection |= kProtectionWrite;
+  if (*current_++ == 'w')
+    *protection |= kProtectionWrite;
   CHECK(IsOneOf(*current_, '-', 'x'));
-  if (*current_++ == 'x') segment->protection |= kProtectionExecute;
+  if (*current_++ == 'x')
+    *protection |= kProtectionExecute;
   CHECK(IsOneOf(*current_, 's', 'p'));
-  if (*current_++ == 's') segment->protection |= kProtectionShared;
+  if (*current_++ == 's')
+    *protection |= kProtectionShared;
   CHECK_EQ(*current_++, ' ');
-  segment->offset = ParseHex(&current_);
+  *offset = ParseHex(&current_);
   CHECK_EQ(*current_++, ' ');
   ParseHex(&current_);
   CHECK_EQ(*current_++, ':');
@@ -62,12 +75,14 @@ bool MemoryMappingLayout::Next(MemoryMappedSegment *segment) {
   while (current_ < next_line && *current_ == ' ')
     current_++;
   // Fill in the filename.
-  if (segment->filename) {
-    uptr len = Min((uptr)(next_line - current_), segment->filename_size - 1);
-    internal_strncpy(segment->filename, current_, len);
-    segment->filename[len] = 0;
+  uptr i = 0;
+  while (current_ < next_line) {
+    if (filename && i < filename_size - 1)
+      filename[i++] = *current_;
+    current_++;
   }
-
+  if (filename && i < filename_size)
+    filename[i] = 0;
   current_ = next_line + 1;
   return true;
 }

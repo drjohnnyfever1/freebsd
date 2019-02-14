@@ -334,7 +334,6 @@ public:
                             InvalidSCCSet, nullptr,   nullptr};
 
     PreservedAnalyses PA = PreservedAnalyses::all();
-    CG.buildRefSCCs();
     for (auto RCI = CG.postorder_ref_scc_begin(),
               RCE = CG.postorder_ref_scc_end();
          RCI != RCE;) {
@@ -577,17 +576,12 @@ public:
       // analyses will eventually occur when the module pass completes.
       PA.intersect(std::move(PassPA));
 
-      // If the call graph hasn't been preserved, update it based on this
-      // function pass. This may also update the current SCC to point to
-      // a smaller, more refined SCC.
-      auto PAC = PA.getChecker<LazyCallGraphAnalysis>();
-      if (!PAC.preserved() && !PAC.preservedSet<AllAnalysesOn<Module>>()) {
-        CurrentC = &updateCGAndAnalysisManagerForFunctionPass(
-            CG, *CurrentC, *N, AM, UR, DebugLogging);
-        assert(
-            CG.lookupSCC(*N) == CurrentC &&
-            "Current SCC not updated to the SCC containing the current node!");
-      }
+      // Update the call graph based on this function pass. This may also
+      // update the current SCC to point to a smaller, more refined SCC.
+      CurrentC = &updateCGAndAnalysisManagerForFunctionPass(
+          CG, *CurrentC, *N, AM, UR, DebugLogging);
+      assert(CG.lookupSCC(*N) == CurrentC &&
+             "Current SCC not updated to the SCC containing the current node!");
     }
 
     // By definition we preserve the proxy. And we preserve all analyses on
@@ -651,7 +645,7 @@ public:
     LazyCallGraph::SCC *C = &InitialC;
 
     // Collect value handles for all of the indirect call sites.
-    SmallVector<WeakTrackingVH, 8> CallHandles;
+    SmallVector<WeakVH, 8> CallHandles;
 
     // Struct to track the counts of direct and indirect calls in each function
     // of the SCC.
@@ -663,7 +657,7 @@ public:
     // Put value handles on all of the indirect calls and return the number of
     // direct calls for each function in the SCC.
     auto ScanSCC = [](LazyCallGraph::SCC &C,
-                      SmallVectorImpl<WeakTrackingVH> &CallHandles) {
+                      SmallVectorImpl<WeakVH> &CallHandles) {
       assert(CallHandles.empty() && "Must start with a clear set of handles.");
 
       SmallVector<CallCount, 4> CallCounts;
@@ -676,7 +670,7 @@ public:
               ++Count.Direct;
             } else {
               ++Count.Indirect;
-              CallHandles.push_back(WeakTrackingVH(&I));
+              CallHandles.push_back(WeakVH(&I));
             }
           }
       }
@@ -704,7 +698,7 @@ public:
              "Cannot have changed the size of the SCC!");
 
       // Check whether any of the handles were devirtualized.
-      auto IsDevirtualizedHandle = [&](WeakTrackingVH &CallH) {
+      auto IsDevirtualizedHandle = [&](WeakVH &CallH) {
         if (!CallH)
           return false;
         auto CS = CallSite(CallH);

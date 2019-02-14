@@ -133,11 +133,6 @@ void MCObjectStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
   // Avoid fixups when possible.
   int64_t AbsValue;
   if (Value->evaluateAsAbsolute(AbsValue, getAssembler())) {
-    if (!isUIntN(8 * Size, AbsValue) && !isIntN(8 * Size, AbsValue)) {
-      getContext().reportError(
-          Loc, "value evaluated as " + Twine(AbsValue) + " is out of range.");
-      return;
-    }
     EmitIntValue(AbsValue, Size);
     return;
   }
@@ -158,8 +153,8 @@ void MCObjectStreamer::EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) {
   EmitLabel(Frame.End);
 }
 
-void MCObjectStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
-  MCStreamer::EmitLabel(Symbol, Loc);
+void MCObjectStreamer::EmitLabel(MCSymbol *Symbol) {
+  MCStreamer::EmitLabel(Symbol);
 
   getAssembler().registerSymbol(*Symbol);
 
@@ -174,16 +169,6 @@ void MCObjectStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
   } else {
     PendingLabels.push_back(Symbol);
   }
-}
-
-void MCObjectStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc, MCFragment *F) {
-  MCStreamer::EmitLabel(Symbol, Loc);
-  getAssembler().registerSymbol(*Symbol);
-  auto *DF = dyn_cast_or_null<MCDataFragment>(F);
-  if (DF)
-    Symbol->setFragment(F);
-  else
-    PendingLabels.push_back(Symbol);
 }
 
 void MCObjectStreamer::EmitULEB128Value(const MCExpr *Value) {
@@ -218,7 +203,6 @@ bool MCObjectStreamer::changeSectionImpl(MCSection *Section,
                                          const MCExpr *Subsection) {
   assert(Section && "Cannot switch to a null section!");
   flushPendingLabels(nullptr);
-  getContext().clearDwarfLocSeen();
 
   bool Created = getAssembler().registerSection(*Section);
 
@@ -243,7 +227,7 @@ bool MCObjectStreamer::mayHaveInstructions(MCSection &Sec) const {
 }
 
 void MCObjectStreamer::EmitInstruction(const MCInst &Inst,
-                                       const MCSubtargetInfo &STI, bool) {
+                                       const MCSubtargetInfo &STI) {
   MCStreamer::EmitInstruction(Inst, STI);
 
   MCSection *Sec = getCurrentSectionOnly();
@@ -506,8 +490,8 @@ void MCObjectStreamer::EmitGPRel32Value(const MCExpr *Value) {
   MCDataFragment *DF = getOrCreateDataFragment();
   flushPendingLabels(DF, DF->getContents().size());
 
-  DF->getFixups().push_back(
-      MCFixup::create(DF->getContents().size(), Value, FK_GPRel_4));
+  DF->getFixups().push_back(MCFixup::create(DF->getContents().size(), 
+                                            Value, FK_GPRel_4));
   DF->getContents().resize(DF->getContents().size() + 4, 0);
 }
 
@@ -516,8 +500,8 @@ void MCObjectStreamer::EmitGPRel64Value(const MCExpr *Value) {
   MCDataFragment *DF = getOrCreateDataFragment();
   flushPendingLabels(DF, DF->getContents().size());
 
-  DF->getFixups().push_back(
-      MCFixup::create(DF->getContents().size(), Value, FK_GPRel_4));
+  DF->getFixups().push_back(MCFixup::create(DF->getContents().size(), 
+                                            Value, FK_GPRel_4));
   DF->getContents().resize(DF->getContents().size() + 8, 0);
 }
 
@@ -586,10 +570,6 @@ void MCObjectStreamer::emitFill(const MCExpr &NumValues, int64_t Size,
   }
 
   MCStreamer::emitFill(IntNumValues, Size, Expr);
-}
-
-void MCObjectStreamer::EmitFileDirective(StringRef Filename) {
-  getAssembler().addFileName(Filename);
 }
 
 void MCObjectStreamer::FinishImpl() {

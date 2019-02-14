@@ -86,10 +86,6 @@ static cl::opt<bool> UsePostIncrementRanges(
   cl::desc("Use post increment control-dependent ranges in IndVarSimplify"),
   cl::init(true));
 
-static cl::opt<bool>
-DisableLFTR("disable-lftr", cl::Hidden, cl::init(false),
-            cl::desc("Disable Linear Function Test Replace optimization"));
-
 namespace {
 struct RewritePhi;
 
@@ -101,7 +97,7 @@ class IndVarSimplify {
   TargetLibraryInfo *TLI;
   const TargetTransformInfo *TTI;
 
-  SmallVector<WeakTrackingVH, 16> DeadInsts;
+  SmallVector<WeakVH, 16> DeadInsts;
   bool Changed = false;
 
   bool isValidRewrite(Value *FromVal, Value *ToVal);
@@ -235,9 +231,8 @@ static bool ConvertToSInt(const APFloat &APF, int64_t &IntVal) {
   bool isExact = false;
   // See if we can convert this to an int64_t
   uint64_t UIntVal;
-  if (APF.convertToInteger(makeMutableArrayRef(UIntVal), 64, true,
-                           APFloat::rmTowardZero, &isExact) != APFloat::opOK ||
-      !isExact)
+  if (APF.convertToInteger(&UIntVal, 64, true, APFloat::rmTowardZero,
+                           &isExact) != APFloat::opOK || !isExact)
     return false;
   IntVal = UIntVal;
   return true;
@@ -419,8 +414,8 @@ void IndVarSimplify::handleFloatingPointIV(Loop *L, PHINode *PN) {
                                       Compare->getName());
 
   // In the following deletions, PN may become dead and may be deleted.
-  // Use a WeakTrackingVH to observe whether this happens.
-  WeakTrackingVH WeakPH = PN;
+  // Use a WeakVH to observe whether this happens.
+  WeakVH WeakPH = PN;
 
   // Delete the old floating point exit comparison.  The branch starts using the
   // new comparison.
@@ -455,7 +450,7 @@ void IndVarSimplify::rewriteNonIntegerIVs(Loop *L) {
   //
   BasicBlock *Header = L->getHeader();
 
-  SmallVector<WeakTrackingVH, 8> PHIs;
+  SmallVector<WeakVH, 8> PHIs;
   for (BasicBlock::iterator I = Header->begin();
        PHINode *PN = dyn_cast<PHINode>(I); ++I)
     PHIs.push_back(PN);
@@ -905,13 +900,13 @@ class WidenIV {
   PHINode *WidePhi;
   Instruction *WideInc;
   const SCEV *WideIncExpr;
-  SmallVectorImpl<WeakTrackingVH> &DeadInsts;
+  SmallVectorImpl<WeakVH> &DeadInsts;
 
   SmallPtrSet<Instruction *,16> Widened;
   SmallVector<NarrowIVDefUse, 8> NarrowIVUsers;
 
   enum ExtendKind { ZeroExtended, SignExtended, Unknown };
-  // A map tracking the kind of extension used to widen each narrow IV
+  // A map tracking the kind of extension used to widen each narrow IV 
   // and narrow IV user.
   // Key: pointer to a narrow IV or IV user.
   // Value: the kind of extension used to widen this Instruction.
@@ -945,13 +940,20 @@ class WidenIV {
   }
 
 public:
-  WidenIV(const WideIVInfo &WI, LoopInfo *LInfo, ScalarEvolution *SEv,
-          DominatorTree *DTree, SmallVectorImpl<WeakTrackingVH> &DI,
-          bool HasGuards)
-      : OrigPhi(WI.NarrowIV), WideType(WI.WidestNativeType), LI(LInfo),
-        L(LI->getLoopFor(OrigPhi->getParent())), SE(SEv), DT(DTree),
-        HasGuards(HasGuards), WidePhi(nullptr), WideInc(nullptr),
-        WideIncExpr(nullptr), DeadInsts(DI) {
+  WidenIV(const WideIVInfo &WI, LoopInfo *LInfo,
+          ScalarEvolution *SEv, DominatorTree *DTree,
+          SmallVectorImpl<WeakVH> &DI, bool HasGuards) :
+    OrigPhi(WI.NarrowIV),
+    WideType(WI.WidestNativeType),
+    LI(LInfo),
+    L(LI->getLoopFor(OrigPhi->getParent())),
+    SE(SEv),
+    DT(DTree),
+    HasGuards(HasGuards),
+    WidePhi(nullptr),
+    WideInc(nullptr),
+    WideIncExpr(nullptr),
+    DeadInsts(DI) {
     assert(L->getHeader() == OrigPhi->getParent() && "Phi must be an IV");
     ExtendKindMap[OrigPhi] = WI.IsSigned ? SignExtended : ZeroExtended;
   }
@@ -1606,7 +1608,7 @@ void WidenIV::calculatePostIncRange(Instruction *NarrowDef,
       return;
 
     CmpInst::Predicate P =
-            TrueDest ? Pred : CmpInst::getInversePredicate(Pred);
+            TrueDest ? Pred : CmpInst::getInversePredicate(Pred);  
 
     auto CmpRHSRange = SE->getSignedRange(SE->getSCEV(CmpRHS));
     auto CmpConstrainedLHSRange =
@@ -1632,7 +1634,7 @@ void WidenIV::calculatePostIncRange(Instruction *NarrowDef,
   UpdateRangeFromGuards(NarrowUser);
 
   BasicBlock *NarrowUserBB = NarrowUser->getParent();
-  // If NarrowUserBB is statically unreachable asking dominator queries may
+  // If NarrowUserBB is statically unreachable asking dominator queries may 
   // yield surprising results. (e.g. the block may not have a dom tree node)
   if (!DT->isReachableFromEntry(NarrowUserBB))
     return;
@@ -1827,7 +1829,6 @@ static PHINode *getLoopPhiForCounter(Value *IncV, Loop *L, DominatorTree *DT) {
     // An IV counter must preserve its type.
     if (IncI->getNumOperands() == 2)
       break;
-    LLVM_FALLTHROUGH;
   default:
     return nullptr;
   }
@@ -2151,8 +2152,6 @@ linearFunctionTestReplace(Loop *L,
   Value *CmpIndVar = IndVar;
   const SCEV *IVCount = BackedgeTakenCount;
 
-  assert(L->getLoopLatch() && "Loop no longer in simplified form?");
-
   // If the exiting block is the same as the backedge block, we prefer to
   // compare against the post-incremented value, otherwise we must compare
   // against the preincremented value.
@@ -2377,7 +2376,6 @@ bool IndVarSimplify::run(Loop *L) {
   //    Loop::getCanonicalInductionVariable only supports loops with preheaders,
   //    and we're in trouble if we can't find the induction variable even when
   //    we've manually inserted one.
-  //  - LFTR relies on having a single backedge.
   if (!L->isLoopSimplifyForm())
     return false;
 
@@ -2417,8 +2415,7 @@ bool IndVarSimplify::run(Loop *L) {
 
   // If we have a trip count expression, rewrite the loop's exit condition
   // using it.  We can currently only handle loops with a single exit.
-  if (!DisableLFTR && canExpandBackedgeTakenCount(L, SE, Rewriter) &&
-      needsLFTR(L, DT)) {
+  if (canExpandBackedgeTakenCount(L, SE, Rewriter) && needsLFTR(L, DT)) {
     PHINode *IndVar = FindLoopCounter(L, BackedgeTakenCount, SE, DT);
     if (IndVar) {
       // Check preconditions for proper SCEVExpander operation. SCEV does not
@@ -2495,9 +2492,8 @@ PreservedAnalyses IndVarSimplifyPass::run(Loop &L, LoopAnalysisManager &AM,
   if (!IVS.run(&L))
     return PreservedAnalyses::all();
 
-  auto PA = getLoopPassPreservedAnalyses();
-  PA.preserveSet<CFGAnalyses>();
-  return PA;
+  // FIXME: This should also 'preserve the CFG'.
+  return getLoopPassPreservedAnalyses();
 }
 
 namespace {

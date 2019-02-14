@@ -244,7 +244,7 @@ static KeywordStatus getTokenKwStatus(const LangOptions &LangOpts,
 
 /// \brief Returns true if the identifier represents a keyword in the
 /// specified language.
-bool IdentifierInfo::isKeyword(const LangOptions &LangOpts) const {
+bool IdentifierInfo::isKeyword(const LangOptions &LangOpts) {
   switch (getTokenKwStatus(LangOpts, getTokenID())) {
   case KS_Enabled:
   case KS_Extension:
@@ -252,19 +252,6 @@ bool IdentifierInfo::isKeyword(const LangOptions &LangOpts) const {
   default:
     return false;
   }
-}
-
-/// \brief Returns true if the identifier represents a C++ keyword in the
-/// specified language.
-bool IdentifierInfo::isCPlusPlusKeyword(const LangOptions &LangOpts) const {
-  if (!LangOpts.CPlusPlus || !isKeyword(LangOpts))
-    return false;
-  // This is a C++ keyword if this identifier is not a keyword when checked
-  // using LangOptions without C++ support.
-  LangOptions LangOptsNoCPP = LangOpts;
-  LangOptsNoCPP.CPlusPlus = false;
-  LangOptsNoCPP.CPlusPlus11 = false;
-  return !isKeyword(LangOptsNoCPP);
 }
 
 tok::PPKeywordKind IdentifierInfo::getPPKeywordID() const {
@@ -500,10 +487,8 @@ ObjCMethodFamily Selector::getMethodFamilyImpl(Selector sel) {
     if (name == "self") return OMF_self;
     if (name == "initialize") return OMF_initialize;
   }
-
-  if (name == "performSelector" || name == "performSelectorInBackground" ||
-      name == "performSelectorOnMainThread")
-    return OMF_performSelector;
+ 
+  if (name == "performSelector") return OMF_performSelector;
 
   // The other method families may begin with a prefix of underscores.
   while (!name.empty() && name.front() == '_')
@@ -551,7 +536,6 @@ ObjCInstanceTypeFamily Selector::getInstTypeMethodFamily(Selector sel) {
     case 's':
       if (startsWithWord(name, "shared")) return OIT_ReturnsSelf;
       if (startsWithWord(name, "standard")) return OIT_Singleton;
-      break;
     case 'i':
       if (startsWithWord(name, "init")) return OIT_Init;
     default:

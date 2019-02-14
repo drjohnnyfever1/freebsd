@@ -1083,7 +1083,7 @@ CapturedStmt *CapturedStmt::CreateDeserialized(const ASTContext &Context,
 }
 
 Stmt::child_range CapturedStmt::children() {
-  // Children are captured field initializers.
+  // Children are captured field initilizers.
   return child_range(getStoredStmts(), getStoredStmts() + NumCaptures);
 }
 
@@ -1112,7 +1112,7 @@ void CapturedStmt::setCapturedRegionKind(CapturedRegionKind Kind) {
 
 bool CapturedStmt::capturesVariable(const VarDecl *Var) const {
   for (const auto &I : captures()) {
-    if (!I.capturesVariable() && !I.capturesVariableByCopy())
+    if (!I.capturesVariable())
       continue;
 
     // This does not handle variable redeclarations. This should be

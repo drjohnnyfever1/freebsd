@@ -42,12 +42,6 @@ private:
 protected:
   SymExpr(Kind k) : K(k) {}
 
-  static bool isValidTypeForSymbol(QualType T) {
-    // FIXME: Depending on whether we choose to deprecate structural symbols,
-    // this may become much stricter.
-    return !T.isNull() && !T->isVoidType();
-  }
-
 public:
   virtual ~SymExpr() {}
 
@@ -109,9 +103,7 @@ class SymbolData : public SymExpr {
   const SymbolID Sym;
 
 protected:
-  SymbolData(Kind k, SymbolID sym) : SymExpr(k), Sym(sym) {
-    assert(classof(this));
-  }
+  SymbolData(Kind k, SymbolID sym) : SymExpr(k), Sym(sym) {}
 
 public:
   ~SymbolData() override {}

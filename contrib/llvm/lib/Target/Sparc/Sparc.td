@@ -20,10 +20,6 @@ include "llvm/Target/Target.td"
 // SPARC Subtarget features.
 //
 
-def FeatureSoftMulDiv
-  : SubtargetFeature<"soft-mul-div", "UseSoftMulDiv", "true",
-                     "Use software emulation for integer multiply and divide">;
-
 def FeatureV9
   : SubtargetFeature<"v9", "IsV9", "true",
                      "Enable SPARC-V9 instructions">;
@@ -79,7 +75,7 @@ class Proc<string Name, list<SubtargetFeature> Features>
  : Processor<Name, NoItineraries, Features>;
 
 def : Proc<"generic",         []>;
-def : Proc<"v7",              [FeatureSoftMulDiv]>;
+def : Proc<"v7",              []>;
 def : Proc<"v8",              []>;
 def : Proc<"supersparc",      []>;
 def : Proc<"sparclite",       []>;

@@ -76,7 +76,6 @@ extern "C" void __lsan_init() {
   InitializeFlags();
   InitCommonLsan();
   InitializeAllocator();
-  ReplaceSystemMalloc();
   InitTlsSize();
   InitializeInterceptors();
   InitializeThreadRegistry();

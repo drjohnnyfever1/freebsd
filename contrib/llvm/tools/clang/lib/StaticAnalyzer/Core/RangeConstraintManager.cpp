@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "RangedConstraintManager.h"
+#include "SimpleConstraintManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/APSIntType.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramState.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/ProgramStateTrait.h"
@@ -282,31 +282,12 @@ REGISTER_TRAIT_WITH_PROGRAMSTATE(ConstraintRange,
                                                              RangeSet))
 
 namespace {
-class RangeConstraintManager : public RangedConstraintManager {
+class RangeConstraintManager : public SimpleConstraintManager {
+  RangeSet getRange(ProgramStateRef State, SymbolRef Sym);
+
 public:
   RangeConstraintManager(SubEngine *SE, SValBuilder &SVB)
-      : RangedConstraintManager(SE, SVB) {}
-
-  //===------------------------------------------------------------------===//
-  // Implementation for interface from ConstraintManager.
-  //===------------------------------------------------------------------===//
-
-  bool canReasonAbout(SVal X) const override;
-
-  ConditionTruthVal checkNull(ProgramStateRef State, SymbolRef Sym) override;
-
-  const llvm::APSInt *getSymVal(ProgramStateRef State,
-                                SymbolRef Sym) const override;
-
-  ProgramStateRef removeDeadBindings(ProgramStateRef State,
-                                     SymbolReaper &SymReaper) override;
-
-  void print(ProgramStateRef State, raw_ostream &Out, const char *nl,
-             const char *sep) override;
-
-  //===------------------------------------------------------------------===//
-  // Implementation for interface from RangedConstraintManager.
-  //===------------------------------------------------------------------===//
+      : SimpleConstraintManager(SE, SVB) {}
 
   ProgramStateRef assumeSymNE(ProgramStateRef State, SymbolRef Sym,
                               const llvm::APSInt &V,
@@ -332,19 +313,26 @@ public:
                               const llvm::APSInt &V,
                               const llvm::APSInt &Adjustment) override;
 
-  ProgramStateRef assumeSymWithinInclusiveRange(
+  ProgramStateRef assumeSymbolWithinInclusiveRange(
       ProgramStateRef State, SymbolRef Sym, const llvm::APSInt &From,
       const llvm::APSInt &To, const llvm::APSInt &Adjustment) override;
 
-  ProgramStateRef assumeSymOutsideInclusiveRange(
+  ProgramStateRef assumeSymbolOutOfInclusiveRange(
       ProgramStateRef State, SymbolRef Sym, const llvm::APSInt &From,
       const llvm::APSInt &To, const llvm::APSInt &Adjustment) override;
+
+  const llvm::APSInt *getSymVal(ProgramStateRef St,
+                                SymbolRef Sym) const override;
+  ConditionTruthVal checkNull(ProgramStateRef State, SymbolRef Sym) override;
+
+  ProgramStateRef removeDeadBindings(ProgramStateRef St,
+                                     SymbolReaper &SymReaper) override;
+
+  void print(ProgramStateRef St, raw_ostream &Out, const char *nl,
+             const char *sep) override;
 
 private:
   RangeSet::Factory F;
-
-  RangeSet getRange(ProgramStateRef State, SymbolRef Sym);
-
   RangeSet getSymLTRange(ProgramStateRef St, SymbolRef Sym,
                          const llvm::APSInt &Int,
                          const llvm::APSInt &Adjustment);
@@ -368,46 +356,10 @@ ento::CreateRangeConstraintManager(ProgramStateManager &StMgr, SubEngine *Eng) {
   return llvm::make_unique<RangeConstraintManager>(Eng, StMgr.getSValBuilder());
 }
 
-bool RangeConstraintManager::canReasonAbout(SVal X) const {
-  Optional<nonloc::SymbolVal> SymVal = X.getAs<nonloc::SymbolVal>();
-  if (SymVal && SymVal->isExpression()) {
-    const SymExpr *SE = SymVal->getSymbol();
-
-    if (const SymIntExpr *SIE = dyn_cast<SymIntExpr>(SE)) {
-      switch (SIE->getOpcode()) {
-      // We don't reason yet about bitwise-constraints on symbolic values.
-      case BO_And:
-      case BO_Or:
-      case BO_Xor:
-        return false;
-      // We don't reason yet about these arithmetic constraints on
-      // symbolic values.
-      case BO_Mul:
-      case BO_Div:
-      case BO_Rem:
-      case BO_Shl:
-      case BO_Shr:
-        return false;
-      // All other cases.
-      default:
-        return true;
-      }
-    }
-
-    if (const SymSymExpr *SSE = dyn_cast<SymSymExpr>(SE)) {
-      if (BinaryOperator::isComparisonOp(SSE->getOpcode())) {
-        // We handle Loc <> Loc comparisons, but not (yet) NonLoc <> NonLoc.
-        if (Loc::isLocType(SSE->getLHS()->getType())) {
-          assert(Loc::isLocType(SSE->getRHS()->getType()));
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  return true;
+const llvm::APSInt *RangeConstraintManager::getSymVal(ProgramStateRef St,
+                                                      SymbolRef Sym) const {
+  const ConstraintRangeTy::data_type *T = St->get<ConstraintRange>(Sym);
+  return T ? T->getConcreteValue() : nullptr;
 }
 
 ConditionTruthVal RangeConstraintManager::checkNull(ProgramStateRef State,
@@ -432,12 +384,6 @@ ConditionTruthVal RangeConstraintManager::checkNull(ProgramStateRef State,
 
   // Zero is a possible value, but it is not the /only/ possible value.
   return ConditionTruthVal();
-}
-
-const llvm::APSInt *RangeConstraintManager::getSymVal(ProgramStateRef St,
-                                                      SymbolRef Sym) const {
-  const ConstraintRangeTy::data_type *T = St->get<ConstraintRange>(Sym);
-  return T ? T->getConcreteValue() : nullptr;
 }
 
 /// Scan all symbols referenced by the constraints. If the symbol is not alive
@@ -483,7 +429,7 @@ RangeSet RangeConstraintManager::getRange(ProgramStateRef State,
 }
 
 //===------------------------------------------------------------------------===
-// assumeSymX methods: protected interface for RangeConstraintManager.
+// assumeSymX methods: public interface for RangeConstraintManager.
 //===------------------------------------------------------------------------===/
 
 // The syntax for ranges below is mathematical, using [x, y] for closed ranges
@@ -700,7 +646,7 @@ RangeConstraintManager::assumeSymLE(ProgramStateRef St, SymbolRef Sym,
   return New.isEmpty() ? nullptr : St->set<ConstraintRange>(Sym, New);
 }
 
-ProgramStateRef RangeConstraintManager::assumeSymWithinInclusiveRange(
+ProgramStateRef RangeConstraintManager::assumeSymbolWithinInclusiveRange(
     ProgramStateRef State, SymbolRef Sym, const llvm::APSInt &From,
     const llvm::APSInt &To, const llvm::APSInt &Adjustment) {
   RangeSet New = getSymGERange(State, Sym, From, Adjustment);
@@ -710,7 +656,7 @@ ProgramStateRef RangeConstraintManager::assumeSymWithinInclusiveRange(
   return New.isEmpty() ? nullptr : State->set<ConstraintRange>(Sym, New);
 }
 
-ProgramStateRef RangeConstraintManager::assumeSymOutsideInclusiveRange(
+ProgramStateRef RangeConstraintManager::assumeSymbolOutOfInclusiveRange(
     ProgramStateRef State, SymbolRef Sym, const llvm::APSInt &From,
     const llvm::APSInt &To, const llvm::APSInt &Adjustment) {
   RangeSet RangeLT = getSymLTRange(State, Sym, From, Adjustment);

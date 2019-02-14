@@ -19,7 +19,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/ELF.h"
@@ -27,9 +26,8 @@
 #include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/SymbolicFile.h"
-#include "llvm/Support/ARMAttributeParser.h"
-#include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/ELF.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -43,11 +41,13 @@ namespace llvm {
 namespace object {
 
 class elf_symbol_iterator;
+class ELFSymbolRef;
+class ELFRelocationRef;
 
 class ELFObjectFileBase : public ObjectFile {
-  friend class ELFRelocationRef;
-  friend class ELFSectionRef;
   friend class ELFSymbolRef;
+  friend class ELFSectionRef;
+  friend class ELFRelocationRef;
 
 protected:
   ELFObjectFileBase(unsigned int Type, MemoryBufferRef Source);
@@ -64,21 +64,14 @@ protected:
   virtual ErrorOr<int64_t> getRelocationAddend(DataRefImpl Rel) const = 0;
 
 public:
-  using elf_symbol_iterator_range = iterator_range<elf_symbol_iterator>;
-
+  typedef iterator_range<elf_symbol_iterator> elf_symbol_iterator_range;
   virtual elf_symbol_iterator_range getDynamicSymbolIterators() const = 0;
 
   elf_symbol_iterator_range symbols() const;
 
-  static bool classof(const Binary *v) { return v->isELF(); }
+  static inline bool classof(const Binary *v) { return v->isELF(); }
 
   SubtargetFeatures getFeatures() const override;
-
-  SubtargetFeatures getMIPSFeatures() const;
-
-  SubtargetFeatures getARMFeatures() const;
-
-  void setARMSubArch(Triple &TheTriple) const override;
 };
 
 class ELFSectionRef : public SectionRef {
@@ -201,14 +194,14 @@ template <class ELFT> class ELFObjectFile : public ELFObjectFileBase {
 public:
   LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
 
-  using uintX_t = typename ELFFile<ELFT>::uintX_t;
+  typedef typename ELFFile<ELFT>::uintX_t uintX_t;
 
-  using Elf_Sym = typename ELFFile<ELFT>::Elf_Sym;
-  using Elf_Shdr = typename ELFFile<ELFT>::Elf_Shdr;
-  using Elf_Ehdr = typename ELFFile<ELFT>::Elf_Ehdr;
-  using Elf_Rel = typename ELFFile<ELFT>::Elf_Rel;
-  using Elf_Rela = typename ELFFile<ELFT>::Elf_Rela;
-  using Elf_Dyn = typename ELFFile<ELFT>::Elf_Dyn;
+  typedef typename ELFFile<ELFT>::Elf_Sym Elf_Sym;
+  typedef typename ELFFile<ELFT>::Elf_Shdr Elf_Shdr;
+  typedef typename ELFFile<ELFT>::Elf_Ehdr Elf_Ehdr;
+  typedef typename ELFFile<ELFT>::Elf_Rel Elf_Rel;
+  typedef typename ELFFile<ELFT>::Elf_Rela Elf_Rela;
+  typedef typename ELFFile<ELFT>::Elf_Dyn Elf_Dyn;
 
 protected:
   ELFFile<ELFT> EF;
@@ -235,7 +228,6 @@ protected:
   std::error_code getSectionName(DataRefImpl Sec,
                                  StringRef &Res) const override;
   uint64_t getSectionAddress(DataRefImpl Sec) const override;
-  uint64_t getSectionIndex(DataRefImpl Sec) const override;
   uint64_t getSectionSize(DataRefImpl Sec) const override;
   std::error_code getSectionContents(DataRefImpl Sec,
                                      StringRef &Res) const override;
@@ -364,32 +356,10 @@ public:
     return std::error_code();
   }
 
-  std::error_code getBuildAttributes(ARMAttributeParser &Attributes) const override {
-    auto SectionsOrErr = EF.sections();
-    if (!SectionsOrErr)
-      return errorToErrorCode(SectionsOrErr.takeError());
-
-    for (const Elf_Shdr &Sec : *SectionsOrErr) {
-      if (Sec.sh_type == ELF::SHT_ARM_ATTRIBUTES) {
-        auto ErrorOrContents = EF.getSectionContents(&Sec);
-        if (!ErrorOrContents)
-          return errorToErrorCode(ErrorOrContents.takeError());
-
-        auto Contents = ErrorOrContents.get();
-        if (Contents[0] != ARMBuildAttrs::Format_Version || Contents.size() == 1)
-          return std::error_code();
-
-        Attributes.Parse(Contents, ELFT::TargetEndianness == support::little);
-        break;
-      }
-    }
-    return std::error_code();
-  }
-
   const ELFFile<ELFT> *getELFFile() const { return &EF; }
 
   bool isDyldType() const { return isDyldELFObject; }
-  static bool classof(const Binary *v) {
+  static inline bool classof(const Binary *v) {
     return v->getType() == getELFType(ELFT::TargetEndianness == support::little,
                                       ELFT::Is64Bits);
   }
@@ -399,10 +369,10 @@ public:
   bool isRelocatableObject() const override;
 };
 
-using ELF32LEObjectFile = ELFObjectFile<ELFType<support::little, false>>;
-using ELF64LEObjectFile = ELFObjectFile<ELFType<support::little, true>>;
-using ELF32BEObjectFile = ELFObjectFile<ELFType<support::big, false>>;
-using ELF64BEObjectFile = ELFObjectFile<ELFType<support::big, true>>;
+typedef ELFObjectFile<ELFType<support::little, false>> ELF32LEObjectFile;
+typedef ELFObjectFile<ELFType<support::little, true>> ELF64LEObjectFile;
+typedef ELFObjectFile<ELFType<support::big, false>> ELF32BEObjectFile;
+typedef ELFObjectFile<ELFType<support::big, true>> ELF64BEObjectFile;
 
 template <class ELFT>
 void ELFObjectFile<ELFT>::moveSymbolNext(DataRefImpl &Sym) const {
@@ -644,17 +614,6 @@ std::error_code ELFObjectFile<ELFT>::getSectionName(DataRefImpl Sec,
 template <class ELFT>
 uint64_t ELFObjectFile<ELFT>::getSectionAddress(DataRefImpl Sec) const {
   return getSection(Sec)->sh_addr;
-}
-
-template <class ELFT>
-uint64_t ELFObjectFile<ELFT>::getSectionIndex(DataRefImpl Sec) const {
-  auto SectionsOrErr = EF.sections();
-  handleAllErrors(std::move(SectionsOrErr.takeError()),
-                  [](const ErrorInfoBase &) {
-                    llvm_unreachable("unable to get section index");
-                  });
-  const Elf_Shdr *First = SectionsOrErr->begin();
-  return getSection(Sec) - First;
 }
 
 template <class ELFT>
@@ -907,8 +866,6 @@ elf_symbol_iterator ELFObjectFile<ELFT>::dynamic_symbol_begin() const {
 template <class ELFT>
 elf_symbol_iterator ELFObjectFile<ELFT>::dynamic_symbol_end() const {
   const Elf_Shdr *SymTab = DotDynSymSec;
-  if (!SymTab)
-    return dynamic_symbol_begin();
   DataRefImpl Sym = toDRI(SymTab, SymTab->sh_size / sizeof(Elf_Sym));
   return basic_symbol_iterator(SymbolRef(Sym, this));
 }

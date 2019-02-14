@@ -30,7 +30,7 @@ using namespace llvm;
 void AMDGPUInstrInfo::anchor() {}
 
 AMDGPUInstrInfo::AMDGPUInstrInfo(const AMDGPUSubtarget &ST)
-  : AMDGPUGenInstrInfo(-1, -1), ST(ST), AMDGPUASI(ST.getAMDGPUAS()) {}
+  : AMDGPUGenInstrInfo(-1, -1), ST(ST) {}
 
 // FIXME: This behaves strangely. If, for example, you have 32 load + stores,
 // the first 16 loads will be interleaved with the stores, and the next 16 will
@@ -66,9 +66,7 @@ int AMDGPUInstrInfo::getMaskedMIMGOp(uint16_t Opcode, unsigned Channels) const {
 // This must be kept in sync with the SIEncodingFamily class in SIInstrInfo.td
 enum SIEncodingFamily {
   SI = 0,
-  VI = 1,
-  SDWA = 2,
-  SDWA9 = 3
+  VI = 1
 };
 
 // Wrapper for Tablegen'd function.  enum Subtarget is not defined in any
@@ -88,7 +86,6 @@ static SIEncodingFamily subtargetEncodingFamily(const AMDGPUSubtarget &ST) {
   case AMDGPUSubtarget::SEA_ISLANDS:
     return SIEncodingFamily::SI;
   case AMDGPUSubtarget::VOLCANIC_ISLANDS:
-  case AMDGPUSubtarget::GFX9:
     return SIEncodingFamily::VI;
 
   // FIXME: This should never be called for r600 GPUs.
@@ -103,12 +100,7 @@ static SIEncodingFamily subtargetEncodingFamily(const AMDGPUSubtarget &ST) {
 }
 
 int AMDGPUInstrInfo::pseudoToMCOpcode(int Opcode) const {
-  SIEncodingFamily Gen = subtargetEncodingFamily(ST);
-  if (get(Opcode).TSFlags & SIInstrFlags::SDWA)
-    Gen = ST.getGeneration() == AMDGPUSubtarget::GFX9 ? SIEncodingFamily::SDWA9
-                                                      : SIEncodingFamily::SDWA;
-
-  int MCOp = AMDGPU::getMCOpcode(Opcode, Gen);
+  int MCOp = AMDGPU::getMCOpcode(Opcode, subtargetEncodingFamily(ST));
 
   // -1 means that Opcode is already a native instruction.
   if (MCOp == -1)

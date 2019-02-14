@@ -17,8 +17,7 @@
 
 // Other libraries and framework includes
 // Project includes
-#include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/RegularExpression.h"
+#include "lldb/Core/RegularExpression.h"
 
 namespace lldb_private {
 
@@ -36,17 +35,13 @@ public:
   struct Entry {
     Entry() {}
 
-    Entry(ConstString cstr) : cstring(cstr), value() {}
+    Entry(llvm::StringRef cstr) : cstring(cstr), value() {}
 
-    Entry(ConstString cstr, const T &v) : cstring(cstr), value(v) {}
+    Entry(llvm::StringRef cstr, const T &v) : cstring(cstr), value(v) {}
 
-    // This is only for uniqueness, not lexicographical ordering, so we can
-    // just compare pointers.
-    bool operator<(const Entry &rhs) const {
-      return cstring.GetCString() < rhs.cstring.GetCString();
-    }
+    bool operator<(const Entry &rhs) const { return cstring < rhs.cstring; }
 
-    ConstString cstring;
+    llvm::StringRef cstring;
     T value;
   };
 
@@ -55,7 +50,7 @@ public:
   // this map, then later call UniqueCStringMap<T>::Sort() before doing
   // any searches by name.
   //------------------------------------------------------------------
-  void Append(ConstString unique_cstr, const T &value) {
+  void Append(llvm::StringRef unique_cstr, const T &value) {
     m_map.push_back(typename UniqueCStringMap<T>::Entry(unique_cstr, value));
   }
 
@@ -67,7 +62,7 @@ public:
   // Call this function to always keep the map sorted when putting
   // entries into the map.
   //------------------------------------------------------------------
-  void Insert(ConstString unique_cstr, const T &value) {
+  void Insert(llvm::StringRef unique_cstr, const T &value) {
     typename UniqueCStringMap<T>::Entry e(unique_cstr, value);
     m_map.insert(std::upper_bound(m_map.begin(), m_map.end(), e), e);
   }
@@ -90,7 +85,7 @@ public:
     return false;
   }
 
-  ConstString GetCStringAtIndexUnchecked(uint32_t idx) const {
+  llvm::StringRef GetCStringAtIndexUnchecked(uint32_t idx) const {
     return m_map[idx].cstring;
   }
 
@@ -104,8 +99,8 @@ public:
     return m_map[idx].value;
   }
 
-  ConstString GetCStringAtIndex(uint32_t idx) const {
-    return ((idx < m_map.size()) ? m_map[idx].cstring : ConstString());
+  llvm::StringRef GetCStringAtIndex(uint32_t idx) const {
+    return ((idx < m_map.size()) ? m_map[idx].cstring : llvm::StringRef());
   }
 
   //------------------------------------------------------------------
@@ -116,7 +111,7 @@ public:
   // T values and only if there is a sensible failure value that can
   // be returned and that won't match any existing values.
   //------------------------------------------------------------------
-  T Find(ConstString unique_cstr, T fail_value) const {
+  T Find(llvm::StringRef unique_cstr, T fail_value) const {
     Entry search_entry(unique_cstr);
     const_iterator end = m_map.end();
     const_iterator pos = std::lower_bound(m_map.begin(), end, search_entry);
@@ -134,12 +129,15 @@ public:
   // The caller is responsible for ensuring that the collection does
   // not change during while using the returned pointer.
   //------------------------------------------------------------------
-  const Entry *FindFirstValueForName(ConstString unique_cstr) const {
+  const Entry *FindFirstValueForName(llvm::StringRef unique_cstr) const {
     Entry search_entry(unique_cstr);
     const_iterator end = m_map.end();
     const_iterator pos = std::lower_bound(m_map.begin(), end, search_entry);
-    if (pos != end && pos->cstring == unique_cstr)
-      return &(*pos);
+    if (pos != end) {
+      llvm::StringRef pos_cstr = pos->cstring;
+      if (pos_cstr == unique_cstr)
+        return &(*pos);
+    }
     return nullptr;
   }
 
@@ -164,7 +162,7 @@ public:
     return nullptr;
   }
 
-  size_t GetValues(ConstString unique_cstr, std::vector<T> &values) const {
+  size_t GetValues(llvm::StringRef unique_cstr, std::vector<T> &values) const {
     const size_t start_size = values.size();
 
     Entry search_entry(unique_cstr);
@@ -186,7 +184,7 @@ public:
 
     const_iterator pos, end = m_map.end();
     for (pos = m_map.begin(); pos != end; ++pos) {
-      if (regex.Execute(pos->cstring.GetCString()))
+      if (regex.Execute(pos->cstring))
         values.push_back(pos->value);
     }
 
@@ -240,7 +238,7 @@ public:
     }
   }
 
-  size_t Erase(ConstString unique_cstr) {
+  size_t Erase(llvm::StringRef unique_cstr) {
     size_t num_removed = 0;
     Entry search_entry(unique_cstr);
     iterator end = m_map.end();

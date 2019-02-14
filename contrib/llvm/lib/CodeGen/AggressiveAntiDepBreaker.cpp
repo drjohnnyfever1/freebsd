@@ -128,7 +128,8 @@ AggressiveAntiDepBreaker::AggressiveAntiDepBreaker(
    }
 
   DEBUG(dbgs() << "AntiDep Critical-Path Registers:");
-  DEBUG(for (unsigned r : CriticalPathSet.set_bits())
+  DEBUG(for (int r = CriticalPathSet.find_first(); r != -1;
+             r = CriticalPathSet.find_next(r))
           dbgs() << " " << TRI->getName(r));
   DEBUG(dbgs() << '\n');
 }
@@ -162,11 +163,9 @@ void AggressiveAntiDepBreaker::StartBlock(MachineBasicBlock *BB) {
   // callee-saved register that is not saved in the prolog.
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   BitVector Pristine = MFI.getPristineRegs(MF);
-  for (const MCPhysReg *I = MF.getRegInfo().getCalleeSavedRegs(); *I;
-       ++I) {
+  for (const MCPhysReg *I = TRI->getCalleeSavedRegs(&MF); *I; ++I) {
     unsigned Reg = *I;
-    if (!IsReturnBlock && !Pristine.test(Reg))
-      continue;
+    if (!IsReturnBlock && !Pristine.test(Reg)) continue;
     for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI) {
       unsigned AliasReg = *AI;
       State->UnionGroups(AliasReg, 0);
@@ -570,7 +569,7 @@ bool AggressiveAntiDepBreaker::FindSuitableFreeRegisters(
 
       DEBUG({
         dbgs() << " ::";
-        for (unsigned r : BV.set_bits())
+        for (int r = BV.find_first(); r != -1; r = BV.find_next(r))
           dbgs() << " " << TRI->getName(r);
         dbgs() << "\n";
       });
@@ -963,8 +962,10 @@ unsigned AggressiveAntiDepBreaker::BreakAntiDependencies(
               // sure to update that as well.
               const SUnit *SU = MISUnitMap[Q.second.Operand->getParent()];
               if (!SU) continue;
-              UpdateDbgValues(DbgValues, Q.second.Operand->getParent(),
-                              AntiDepReg, NewReg);
+              for (DbgValueVector::iterator DVI = DbgValues.begin(),
+                     DVE = DbgValues.end(); DVI != DVE; ++DVI)
+                if (DVI->second == Q.second.Operand->getParent())
+                  UpdateDbgValue(*DVI->first, AntiDepReg, NewReg);
             }
 
             // We just went back in time and modified history; the

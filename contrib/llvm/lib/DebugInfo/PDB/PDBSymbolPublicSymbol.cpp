@@ -9,8 +9,8 @@
 
 #include "llvm/DebugInfo/PDB/PDBSymbolPublicSymbol.h"
 
-#include "llvm/DebugInfo/PDB/PDBSymDumper.h"
 #include "llvm/DebugInfo/PDB/PDBSymbol.h"
+#include "llvm/DebugInfo/PDB/PDBSymDumper.h"
 
 #include <utility>
 
@@ -19,9 +19,7 @@ using namespace llvm::pdb;
 
 PDBSymbolPublicSymbol::PDBSymbolPublicSymbol(
     const IPDBSession &PDBSession, std::unique_ptr<IPDBRawSymbol> Symbol)
-    : PDBSymbol(PDBSession, std::move(Symbol)) {
-  assert(RawSymbol->getSymTag() == PDB_SymType::PublicSymbol);
-}
+    : PDBSymbol(PDBSession, std::move(Symbol)) {}
 
 void PDBSymbolPublicSymbol::dump(PDBSymDumper &Dumper) const {
   Dumper.dump(*this);

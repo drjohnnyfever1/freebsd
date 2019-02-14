@@ -1,10 +1,5 @@
-add_lldb_library(lldbPluginStructuredDataDarwinLog PLUGIN
+list(APPEND SOURCES
   StructuredDataDarwinLog.cpp
-
-  LINK_LIBS
-    lldbBreakpoint
-    lldbCore
-    lldbHost
-    lldbInterpreter
-    lldbTarget
   )
+
+add_lldb_library(lldbPluginStructuredDataDarwinLog ${SOURCES})

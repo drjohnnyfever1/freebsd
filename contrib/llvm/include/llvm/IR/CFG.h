@@ -37,9 +37,9 @@ namespace llvm {
 template <class Ptr, class USE_iterator> // Predecessor Iterator
 class PredIterator : public std::iterator<std::forward_iterator_tag,
                                           Ptr, ptrdiff_t, Ptr*, Ptr*> {
-  using super =
-      std::iterator<std::forward_iterator_tag, Ptr, ptrdiff_t, Ptr*, Ptr*>;
-  using Self = PredIterator<Ptr, USE_iterator>;
+  typedef std::iterator<std::forward_iterator_tag, Ptr, ptrdiff_t, Ptr*,
+                                                                    Ptr*> super;
+  typedef PredIterator<Ptr, USE_iterator> Self;
   USE_iterator It;
 
   inline void advancePastNonTerminators() {
@@ -49,8 +49,8 @@ class PredIterator : public std::iterator<std::forward_iterator_tag,
   }
 
 public:
-  using pointer = typename super::pointer;
-  using reference = typename super::reference;
+  typedef typename super::pointer pointer;
+  typedef typename super::reference reference;
 
   PredIterator() = default;
   explicit inline PredIterator(Ptr *bb) : It(bb->user_begin()) {
@@ -90,11 +90,11 @@ public:
   }
 };
 
-using pred_iterator = PredIterator<BasicBlock, Value::user_iterator>;
-using const_pred_iterator =
-    PredIterator<const BasicBlock, Value::const_user_iterator>;
-using pred_range = iterator_range<pred_iterator>;
-using pred_const_range = iterator_range<const_pred_iterator>;
+typedef PredIterator<BasicBlock, Value::user_iterator> pred_iterator;
+typedef PredIterator<const BasicBlock,
+                     Value::const_user_iterator> const_pred_iterator;
+typedef iterator_range<pred_iterator> pred_range;
+typedef iterator_range<const_pred_iterator> pred_const_range;
 
 inline pred_iterator pred_begin(BasicBlock *BB) { return pred_iterator(BB); }
 inline const_pred_iterator pred_begin(const BasicBlock *BB) {
@@ -118,12 +118,12 @@ inline pred_const_range predecessors(const BasicBlock *BB) {
 // BasicBlock succ_iterator helpers
 //===----------------------------------------------------------------------===//
 
-using succ_iterator =
-    TerminatorInst::SuccIterator<TerminatorInst *, BasicBlock>;
-using succ_const_iterator =
-    TerminatorInst::SuccIterator<const TerminatorInst *, const BasicBlock>;
-using succ_range = iterator_range<succ_iterator>;
-using succ_const_range = iterator_range<succ_const_iterator>;
+typedef TerminatorInst::SuccIterator<TerminatorInst *, BasicBlock>
+    succ_iterator;
+typedef TerminatorInst::SuccIterator<const TerminatorInst *, const BasicBlock>
+    succ_const_iterator;
+typedef iterator_range<succ_iterator> succ_range;
+typedef iterator_range<succ_const_iterator> succ_const_range;
 
 inline succ_iterator succ_begin(BasicBlock *BB) {
   return succ_iterator(BB->getTerminator());
@@ -160,8 +160,8 @@ struct isPodLike<TerminatorInst::SuccIterator<T, U>> {
 // graph of basic blocks...
 
 template <> struct GraphTraits<BasicBlock*> {
-  using NodeRef = BasicBlock *;
-  using ChildIteratorType = succ_iterator;
+  typedef BasicBlock *NodeRef;
+  typedef succ_iterator ChildIteratorType;
 
   static NodeRef getEntryNode(BasicBlock *BB) { return BB; }
   static ChildIteratorType child_begin(NodeRef N) { return succ_begin(N); }
@@ -169,8 +169,8 @@ template <> struct GraphTraits<BasicBlock*> {
 };
 
 template <> struct GraphTraits<const BasicBlock*> {
-  using NodeRef = const BasicBlock *;
-  using ChildIteratorType = succ_const_iterator;
+  typedef const BasicBlock *NodeRef;
+  typedef succ_const_iterator ChildIteratorType;
 
   static NodeRef getEntryNode(const BasicBlock *BB) { return BB; }
 
@@ -184,18 +184,16 @@ template <> struct GraphTraits<const BasicBlock*> {
 // instead of the successor edges.
 //
 template <> struct GraphTraits<Inverse<BasicBlock*>> {
-  using NodeRef = BasicBlock *;
-  using ChildIteratorType = pred_iterator;
-
+  typedef BasicBlock *NodeRef;
+  typedef pred_iterator ChildIteratorType;
   static NodeRef getEntryNode(Inverse<BasicBlock *> G) { return G.Graph; }
   static ChildIteratorType child_begin(NodeRef N) { return pred_begin(N); }
   static ChildIteratorType child_end(NodeRef N) { return pred_end(N); }
 };
 
 template <> struct GraphTraits<Inverse<const BasicBlock*>> {
-  using NodeRef = const BasicBlock *;
-  using ChildIteratorType = const_pred_iterator;
-
+  typedef const BasicBlock *NodeRef;
+  typedef const_pred_iterator ChildIteratorType;
   static NodeRef getEntryNode(Inverse<const BasicBlock *> G) { return G.Graph; }
   static ChildIteratorType child_begin(NodeRef N) { return pred_begin(N); }
   static ChildIteratorType child_end(NodeRef N) { return pred_end(N); }
@@ -213,7 +211,7 @@ template <> struct GraphTraits<Function*> : public GraphTraits<BasicBlock*> {
   static NodeRef getEntryNode(Function *F) { return &F->getEntryBlock(); }
 
   // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
-  using nodes_iterator = pointer_iterator<Function::iterator>;
+  typedef pointer_iterator<Function::iterator> nodes_iterator;
 
   static nodes_iterator nodes_begin(Function *F) {
     return nodes_iterator(F->begin());
@@ -230,7 +228,7 @@ template <> struct GraphTraits<const Function*> :
   static NodeRef getEntryNode(const Function *F) { return &F->getEntryBlock(); }
 
   // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
-  using nodes_iterator = pointer_iterator<Function::const_iterator>;
+  typedef pointer_iterator<Function::const_iterator> nodes_iterator;
 
   static nodes_iterator nodes_begin(const Function *F) {
     return nodes_iterator(F->begin());

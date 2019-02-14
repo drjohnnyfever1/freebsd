@@ -1,4 +1,4 @@
-//===-- MCRelocationInfo.cpp ----------------------------------------------===//
+//==-- MCRelocationInfo.cpp ------------------------------------------------==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,9 +13,12 @@
 
 using namespace llvm;
 
-MCRelocationInfo::MCRelocationInfo(MCContext &Ctx) : Ctx(Ctx) {}
+MCRelocationInfo::MCRelocationInfo(MCContext &Ctx)
+  : Ctx(Ctx) {
+}
 
-MCRelocationInfo::~MCRelocationInfo() = default;
+MCRelocationInfo::~MCRelocationInfo() {
+}
 
 const MCExpr *
 MCRelocationInfo::createExprForCAPIVariantKind(const MCExpr *SubExpr,

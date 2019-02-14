@@ -1,4 +1,4 @@
-//===- llvm/CodeGen/MachineBasicBlock.h -------------------------*- C++ -*-===//
+//===-- llvm/CodeGen/MachineBasicBlock.h ------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,50 +15,41 @@
 #define LLVM_CODEGEN_MACHINEBASICBLOCK_H
 
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/ilist.h"
-#include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/ADT/simple_ilist.h"
-#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBundleIterator.h"
-#include "llvm/IR/DebugLoc.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/MC/LaneBitmask.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/Support/BranchProbability.h"
-#include <cassert>
-#include <cstdint>
+#include "llvm/Support/DataTypes.h"
 #include <functional>
-#include <iterator>
-#include <string>
-#include <vector>
 
 namespace llvm {
 
+class Pass;
 class BasicBlock;
 class MachineFunction;
 class MCSymbol;
-class ModuleSlotTracker;
-class Pass;
+class MIPrinter;
 class SlotIndexes;
 class StringRef;
 class raw_ostream;
-class TargetRegisterClass;
-class TargetRegisterInfo;
+class MachineBranchProbabilityInfo;
 
 template <> struct ilist_traits<MachineInstr> {
 private:
   friend class MachineBasicBlock; // Set by the owning MachineBasicBlock.
-
   MachineBasicBlock *Parent;
 
-  using instr_iterator =
-      simple_ilist<MachineInstr, ilist_sentinel_tracking<true>>::iterator;
+  typedef simple_ilist<MachineInstr, ilist_sentinel_tracking<true>>::iterator
+      instr_iterator;
 
 public:
   void addNodeToList(MachineInstr *N);
   void removeNodeFromList(MachineInstr *N);
   void transferNodesFromList(ilist_traits &OldList, instr_iterator First,
                              instr_iterator Last);
+
   void deleteNode(MachineInstr *MI);
 };
 
@@ -78,8 +69,7 @@ public:
   };
 
 private:
-  using Instructions = ilist<MachineInstr, ilist_sentinel_tracking<true>>;
-
+  typedef ilist<MachineInstr, ilist_sentinel_tracking<true>> Instructions;
   Instructions Insts;
   const BasicBlock *BB;
   int Number;
@@ -93,12 +83,12 @@ private:
   /// same order as Successors, or it is empty if we don't use it (disable
   /// optimization).
   std::vector<BranchProbability> Probs;
-  using probability_iterator = std::vector<BranchProbability>::iterator;
-  using const_probability_iterator =
-      std::vector<BranchProbability>::const_iterator;
+  typedef std::vector<BranchProbability>::iterator probability_iterator;
+  typedef std::vector<BranchProbability>::const_iterator
+      const_probability_iterator;
 
   /// Keep track of the physical registers that are livein of the basicblock.
-  using LiveInVector = std::vector<RegisterMaskPair>;
+  typedef std::vector<RegisterMaskPair> LiveInVector;
   LiveInVector LiveIns;
 
   /// Alignment of the basic block. Zero if the basic block does not need to be
@@ -123,7 +113,7 @@ private:
   mutable MCSymbol *CachedMCSymbol = nullptr;
 
   // Intrusive list support
-  MachineBasicBlock() = default;
+  MachineBasicBlock() {}
 
   explicit MachineBasicBlock(MachineFunction &MF, const BasicBlock *BB);
 
@@ -138,7 +128,7 @@ public:
   /// to an LLVM basic block.
   const BasicBlock *getBasicBlock() const { return BB; }
 
-  /// Return the name of the corresponding LLVM basic block, or an empty string.
+  /// Return the name of the corresponding LLVM basic block, or "(null)".
   StringRef getName() const;
 
   /// Return a formatted string to identify this block and its parent function.
@@ -155,16 +145,16 @@ public:
   const MachineFunction *getParent() const { return xParent; }
   MachineFunction *getParent() { return xParent; }
 
-  using instr_iterator = Instructions::iterator;
-  using const_instr_iterator = Instructions::const_iterator;
-  using reverse_instr_iterator = Instructions::reverse_iterator;
-  using const_reverse_instr_iterator = Instructions::const_reverse_iterator;
+  typedef Instructions::iterator                                 instr_iterator;
+  typedef Instructions::const_iterator                     const_instr_iterator;
+  typedef Instructions::reverse_iterator reverse_instr_iterator;
+  typedef Instructions::const_reverse_iterator const_reverse_instr_iterator;
 
-  using iterator = MachineInstrBundleIterator<MachineInstr>;
-  using const_iterator = MachineInstrBundleIterator<const MachineInstr>;
-  using reverse_iterator = MachineInstrBundleIterator<MachineInstr, true>;
-  using const_reverse_iterator =
-      MachineInstrBundleIterator<const MachineInstr, true>;
+  typedef MachineInstrBundleIterator<MachineInstr> iterator;
+  typedef MachineInstrBundleIterator<const MachineInstr> const_iterator;
+  typedef MachineInstrBundleIterator<MachineInstr, true> reverse_iterator;
+  typedef MachineInstrBundleIterator<const MachineInstr, true>
+      const_reverse_iterator;
 
   unsigned size() const { return (unsigned)Insts.size(); }
   bool empty() const { return Insts.empty(); }
@@ -188,8 +178,8 @@ public:
   reverse_instr_iterator       instr_rend  ()       { return Insts.rend();   }
   const_reverse_instr_iterator instr_rend  () const { return Insts.rend();   }
 
-  using instr_range = iterator_range<instr_iterator>;
-  using const_instr_range = iterator_range<const_instr_iterator>;
+  typedef iterator_range<instr_iterator> instr_range;
+  typedef iterator_range<const_instr_iterator> const_instr_range;
   instr_range instrs() { return instr_range(instr_begin(), instr_end()); }
   const_instr_range instrs() const {
     return const_instr_range(instr_begin(), instr_end());
@@ -223,18 +213,18 @@ public:
   }
 
   // Machine-CFG iterators
-  using pred_iterator = std::vector<MachineBasicBlock *>::iterator;
-  using const_pred_iterator = std::vector<MachineBasicBlock *>::const_iterator;
-  using succ_iterator = std::vector<MachineBasicBlock *>::iterator;
-  using const_succ_iterator = std::vector<MachineBasicBlock *>::const_iterator;
-  using pred_reverse_iterator =
-      std::vector<MachineBasicBlock *>::reverse_iterator;
-  using const_pred_reverse_iterator =
-      std::vector<MachineBasicBlock *>::const_reverse_iterator;
-  using succ_reverse_iterator =
-      std::vector<MachineBasicBlock *>::reverse_iterator;
-  using const_succ_reverse_iterator =
-      std::vector<MachineBasicBlock *>::const_reverse_iterator;
+  typedef std::vector<MachineBasicBlock *>::iterator       pred_iterator;
+  typedef std::vector<MachineBasicBlock *>::const_iterator const_pred_iterator;
+  typedef std::vector<MachineBasicBlock *>::iterator       succ_iterator;
+  typedef std::vector<MachineBasicBlock *>::const_iterator const_succ_iterator;
+  typedef std::vector<MachineBasicBlock *>::reverse_iterator
+                                                         pred_reverse_iterator;
+  typedef std::vector<MachineBasicBlock *>::const_reverse_iterator
+                                                   const_pred_reverse_iterator;
+  typedef std::vector<MachineBasicBlock *>::reverse_iterator
+                                                         succ_reverse_iterator;
+  typedef std::vector<MachineBasicBlock *>::const_reverse_iterator
+                                                   const_succ_reverse_iterator;
   pred_iterator        pred_begin()       { return Predecessors.begin(); }
   const_pred_iterator  pred_begin() const { return Predecessors.begin(); }
   pred_iterator        pred_end()         { return Predecessors.end();   }
@@ -317,7 +307,7 @@ public:
 
   // Iteration support for live in sets.  These sets are kept in sorted
   // order by their register number.
-  using livein_iterator = LiveInVector::const_iterator;
+  typedef LiveInVector::const_iterator livein_iterator;
 #ifndef NDEBUG
   /// Unlike livein_begin, this method does not check that the liveness
   /// information is accurate. Still for debug purposes it may be useful
@@ -334,9 +324,6 @@ public:
   iterator_range<livein_iterator> liveins() const {
     return make_range(livein_begin(), livein_end());
   }
-
-  /// Remove entry from the livein set and return iterator to the next.
-  livein_iterator removeLiveIn(livein_iterator I);
 
   /// Get the clobber mask for the start of this basic block. Funclets use this
   /// to prevent register allocation across funclet transitions.
@@ -375,9 +362,6 @@ public:
 
   /// Indicates if this is the entry block of a cleanup funclet.
   void setIsCleanupFuncletEntry(bool V = true) { IsCleanupFuncletEntry = V; }
-
-  /// Returns true if it is legal to hoist instructions into this block.
-  bool isLegalToHoistInto() const;
 
   // Code Layout methods.
 
@@ -471,18 +455,10 @@ public:
   /// other block.
   bool isLayoutSuccessor(const MachineBasicBlock *MBB) const;
 
-  /// Return the fallthrough block if the block can implicitly
-  /// transfer control to the block after it by falling off the end of
-  /// it.  This should return null if it can reach the block after
-  /// it, but it uses an explicit branch to do so (e.g., a table
-  /// jump).  Non-null return  is a conservative answer.
-  MachineBasicBlock *getFallThrough();
-
-  /// Return true if the block can implicitly transfer control to the
-  /// block after it by falling off the end of it.  This should return
-  /// false if it can reach the block after it, but it uses an
-  /// explicit branch to do so (e.g., a table jump).  True is a
-  /// conservative answer.
+  /// Return true if the block can implicitly transfer control to the block
+  /// after it by falling off the end of it.  This should return false if it can
+  /// reach the block after it, but it uses an explicit branch to do so (e.g., a
+  /// table jump).  True is a conservative answer.
   bool canFallThrough();
 
   /// Returns a pointer to the first instruction in this block that is not a
@@ -688,10 +664,6 @@ public:
     return findDebugLoc(MBBI.getInstrIterator());
   }
 
-  /// Find and return the merged DebugLoc of the branch instructions of the
-  /// block. Return UnknownLoc if there is none.
-  DebugLoc findBranchDebugLoc();
-
   /// Possible outcome of a register liveness query to computeRegisterLiveness()
   enum LivenessQueryResult {
     LQR_Live,   ///< Register is known to be (at least partially) live.
@@ -710,7 +682,7 @@ public:
   LivenessQueryResult computeRegisterLiveness(const TargetRegisterInfo *TRI,
                                               unsigned Reg,
                                               const_iterator Before,
-                                              unsigned Neighborhood = 10) const;
+                                              unsigned Neighborhood=10) const;
 
   // Debugging methods.
   void dump() const;
@@ -728,6 +700,7 @@ public:
 
   /// Return the MCSymbol for this basic block.
   MCSymbol *getSymbol() const;
+
 
 private:
   /// Return probability iterator corresponding to the I successor iterator.
@@ -778,8 +751,8 @@ struct MBB2NumberFunctor :
 //
 
 template <> struct GraphTraits<MachineBasicBlock *> {
-  using NodeRef = MachineBasicBlock *;
-  using ChildIteratorType = MachineBasicBlock::succ_iterator;
+  typedef MachineBasicBlock *NodeRef;
+  typedef MachineBasicBlock::succ_iterator ChildIteratorType;
 
   static NodeRef getEntryNode(MachineBasicBlock *BB) { return BB; }
   static ChildIteratorType child_begin(NodeRef N) { return N->succ_begin(); }
@@ -787,8 +760,8 @@ template <> struct GraphTraits<MachineBasicBlock *> {
 };
 
 template <> struct GraphTraits<const MachineBasicBlock *> {
-  using NodeRef = const MachineBasicBlock *;
-  using ChildIteratorType = MachineBasicBlock::const_succ_iterator;
+  typedef const MachineBasicBlock *NodeRef;
+  typedef MachineBasicBlock::const_succ_iterator ChildIteratorType;
 
   static NodeRef getEntryNode(const MachineBasicBlock *BB) { return BB; }
   static ChildIteratorType child_begin(NodeRef N) { return N->succ_begin(); }
@@ -801,29 +774,27 @@ template <> struct GraphTraits<const MachineBasicBlock *> {
 // to be when traversing the predecessor edges of a MBB
 // instead of the successor edges.
 //
-template <> struct GraphTraits<Inverse<MachineBasicBlock*>> {
-  using NodeRef = MachineBasicBlock *;
-  using ChildIteratorType = MachineBasicBlock::pred_iterator;
-
+template <> struct GraphTraits<Inverse<MachineBasicBlock*> > {
+  typedef MachineBasicBlock *NodeRef;
+  typedef MachineBasicBlock::pred_iterator ChildIteratorType;
   static NodeRef getEntryNode(Inverse<MachineBasicBlock *> G) {
     return G.Graph;
   }
-
   static ChildIteratorType child_begin(NodeRef N) { return N->pred_begin(); }
   static ChildIteratorType child_end(NodeRef N) { return N->pred_end(); }
 };
 
-template <> struct GraphTraits<Inverse<const MachineBasicBlock*>> {
-  using NodeRef = const MachineBasicBlock *;
-  using ChildIteratorType = MachineBasicBlock::const_pred_iterator;
-
+template <> struct GraphTraits<Inverse<const MachineBasicBlock*> > {
+  typedef const MachineBasicBlock *NodeRef;
+  typedef MachineBasicBlock::const_pred_iterator ChildIteratorType;
   static NodeRef getEntryNode(Inverse<const MachineBasicBlock *> G) {
     return G.Graph;
   }
-
   static ChildIteratorType child_begin(NodeRef N) { return N->pred_begin(); }
   static ChildIteratorType child_end(NodeRef N) { return N->pred_end(); }
 };
+
+
 
 /// MachineInstrSpan provides an interface to get an iteration range
 /// containing the instruction it was initialized with, along with all
@@ -832,7 +803,6 @@ template <> struct GraphTraits<Inverse<const MachineBasicBlock*>> {
 class MachineInstrSpan {
   MachineBasicBlock &MBB;
   MachineBasicBlock::iterator I, B, E;
-
 public:
   MachineInstrSpan(MachineBasicBlock::iterator I)
     : MBB(*I->getParent()),
@@ -871,6 +841,6 @@ inline IterT skipDebugInstructionsBackward(IterT It, IterT Begin) {
   return It;
 }
 
-} // end namespace llvm
+} // End llvm namespace
 
-#endif // LLVM_CODEGEN_MACHINEBASICBLOCK_H
+#endif

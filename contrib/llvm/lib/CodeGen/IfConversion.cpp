@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/Passes.h"
 #include "BranchFolding.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -24,7 +25,6 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -39,7 +39,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "if-converter"
+#define DEBUG_TYPE "ifcvt"
 
 // Hidden options for help debugging.
 static cl::opt<int> IfCvtFnStart("ifcvt-fn-start", cl::init(-1), cl::Hidden);
@@ -316,9 +316,9 @@ namespace {
 
 char &llvm::IfConverterID = IfConverter::ID;
 
-INITIALIZE_PASS_BEGIN(IfConverter, DEBUG_TYPE, "If Converter", false, false)
+INITIALIZE_PASS_BEGIN(IfConverter, "if-converter", "If Converter", false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
-INITIALIZE_PASS_END(IfConverter, DEBUG_TYPE, "If Converter", false, false)
+INITIALIZE_PASS_END(IfConverter, "if-converter", "If Converter", false, false)
 
 bool IfConverter::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(*MF.getFunction()) || (PredicateFtor && !PredicateFtor(MF)))
@@ -588,6 +588,19 @@ bool IfConverter::ValidTriangle(BBInfo &TrueBBI, BBInfo &FalseBBI,
   return TExit && TExit == FalseBBI.BB;
 }
 
+/// Shrink the provided inclusive range by one instruction.
+/// If the range was one instruction (\p It == \p Begin), It is not modified,
+/// but \p Empty is set to true.
+static inline void shrinkInclusiveRange(
+    MachineBasicBlock::iterator &Begin,
+    MachineBasicBlock::iterator &It,
+    bool &Empty) {
+  if (It == Begin)
+    Empty = true;
+  else
+    It--;
+}
+
 /// Count duplicated instructions and move the iterators to show where they
 /// are.
 /// @param TIB True Iterator Begin
@@ -620,8 +633,10 @@ bool IfConverter::CountDuplicatedInstructions(
   while (TIB != TIE && FIB != FIE) {
     // Skip dbg_value instructions. These do not count.
     TIB = skipDebugInstructionsForward(TIB, TIE);
+    if(TIB == TIE)
+      break;
     FIB = skipDebugInstructionsForward(FIB, FIE);
-    if (TIB == TIE || FIB == FIE)
+    if(FIB == FIE)
       break;
     if (!TIB->isIdenticalTo(*FIB))
       break;
@@ -641,42 +656,58 @@ bool IfConverter::CountDuplicatedInstructions(
   if (TIB == TIE || FIB == FIE)
     return true;
   // Now, in preparation for counting duplicate instructions at the ends of the
-  // blocks, switch to reverse_iterators. Note that getReverse() returns an
-  // iterator that points to the same instruction, unlike std::reverse_iterator.
-  // We have to do our own shifting so that we get the same range.
-  MachineBasicBlock::reverse_iterator RTIE = std::next(TIE.getReverse());
-  MachineBasicBlock::reverse_iterator RFIE = std::next(FIE.getReverse());
-  const MachineBasicBlock::reverse_iterator RTIB = std::next(TIB.getReverse());
-  const MachineBasicBlock::reverse_iterator RFIB = std::next(FIB.getReverse());
+  // blocks, move the end iterators up past any branch instructions.
+  --TIE;
+  --FIE;
+
+  // After this point TIB and TIE define an inclusive range, which means that
+  // TIB == TIE is true when there is one more instruction to consider, not at
+  // the end. Because we may not be able to go before TIB, we need a flag to
+  // indicate a completely empty range.
+  bool TEmpty = false, FEmpty = false;
+
+  // Upon exit TIE and FIE will both point at the last non-shared instruction.
+  // They need to be moved forward to point past the last non-shared
+  // instruction if the range they delimit is non-empty.
+  auto IncrementEndIteratorsOnExit = make_scope_exit([&]() {
+    if (!TEmpty)
+      ++TIE;
+    if (!FEmpty)
+      ++FIE;
+  });
 
   if (!TBB.succ_empty() || !FBB.succ_empty()) {
     if (SkipUnconditionalBranches) {
-      while (RTIE != RTIB && RTIE->isUnconditionalBranch())
-        ++RTIE;
-      while (RFIE != RFIB && RFIE->isUnconditionalBranch())
-        ++RFIE;
+      while (!TEmpty && TIE->isUnconditionalBranch())
+        shrinkInclusiveRange(TIB, TIE, TEmpty);
+      while (!FEmpty && FIE->isUnconditionalBranch())
+        shrinkInclusiveRange(FIB, FIE, FEmpty);
     }
   }
 
+  // If Dups1 includes all of a block, then don't count duplicate
+  // instructions at the end of the blocks.
+  if (TEmpty || FEmpty)
+    return true;
+
   // Count duplicate instructions at the ends of the blocks.
-  while (RTIE != RTIB && RFIE != RFIB) {
+  while (!TEmpty && !FEmpty) {
     // Skip dbg_value instructions. These do not count.
-    // Note that these are reverse iterators going forward.
-    RTIE = skipDebugInstructionsForward(RTIE, RTIB);
-    RFIE = skipDebugInstructionsForward(RFIE, RFIB);
-    if (RTIE == RTIB || RFIE == RFIB)
+    TIE = skipDebugInstructionsBackward(TIE, TIB);
+    FIE = skipDebugInstructionsBackward(FIE, FIB);
+    TEmpty = TIE == TIB && TIE->isDebugValue();
+    FEmpty = FIE == FIB && FIE->isDebugValue();
+    if (TEmpty || FEmpty)
       break;
-    if (!RTIE->isIdenticalTo(*RFIE))
+    if (!TIE->isIdenticalTo(*FIE))
       break;
     // We have to verify that any branch instructions are the same, and then we
     // don't count them toward the # of duplicate instructions.
-    if (!RTIE->isBranch())
+    if (!TIE->isBranch())
       ++Dups2;
-    ++RTIE;
-    ++RFIE;
+    shrinkInclusiveRange(TIB, TIE, TEmpty);
+    shrinkInclusiveRange(FIB, FIE, FEmpty);
   }
-  TIE = std::next(RTIE.getReverse());
-  FIE = std::next(RFIE.getReverse());
   return true;
 }
 
@@ -710,21 +741,25 @@ bool IfConverter::RescanInstructions(
 static void verifySameBranchInstructions(
     MachineBasicBlock *MBB1,
     MachineBasicBlock *MBB2) {
-  const MachineBasicBlock::reverse_iterator B1 = MBB1->rend();
-  const MachineBasicBlock::reverse_iterator B2 = MBB2->rend();
-  MachineBasicBlock::reverse_iterator E1 = MBB1->rbegin();
-  MachineBasicBlock::reverse_iterator E2 = MBB2->rbegin();
-  while (E1 != B1 && E2 != B2) {
-    skipDebugInstructionsForward(E1, B1);
-    skipDebugInstructionsForward(E2, B2);
-    if (E1 == B1 && E2 == B2)
+  MachineBasicBlock::iterator B1 = MBB1->begin();
+  MachineBasicBlock::iterator B2 = MBB2->begin();
+  MachineBasicBlock::iterator E1 = std::prev(MBB1->end());
+  MachineBasicBlock::iterator E2 = std::prev(MBB2->end());
+  bool Empty1 = false, Empty2 = false;
+  while (!Empty1 && !Empty2) {
+    E1 = skipDebugInstructionsBackward(E1, B1);
+    E2 = skipDebugInstructionsBackward(E2, B2);
+    Empty1 = E1 == B1 && E1->isDebugValue();
+    Empty2 = E2 == B2 && E2->isDebugValue();
+
+    if (Empty1 && Empty2)
       break;
 
-    if (E1 == B1) {
+    if (Empty1) {
       assert(!E2->isBranch() && "Branch mis-match, one block is empty.");
       break;
     }
-    if (E2 == B2) {
+    if (Empty2) {
       assert(!E1->isBranch() && "Branch mis-match, one block is empty.");
       break;
     }
@@ -734,8 +769,8 @@ static void verifySameBranchInstructions(
              "Branch mis-match, branch instructions don't match.");
     else
       break;
-    ++E1;
-    ++E2;
+    shrinkInclusiveRange(B1, E1, Empty1);
+    shrinkInclusiveRange(B2, E2, Empty2);
   }
 }
 #endif
@@ -1318,8 +1353,7 @@ static bool canFallThroughTo(MachineBasicBlock &MBB, MachineBasicBlock &ToMBB) {
       return false;
     PI = I++;
   }
-  // Finally see if the last I is indeed a successor to PI.
-  return PI->isSuccessor(&*I);
+  return true;
 }
 
 /// Invalidate predecessor BB info so it would be re-analyzed to determine if it
@@ -1474,11 +1508,8 @@ bool IfConverter::IfConvertSimple(BBInfo &BBI, IfcvtKind Kind) {
     DontKill.addLiveIns(NextMBB);
   }
 
-  // Remove the branches from the entry so we can add the contents of the true
-  // block to it.
-  BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
-
   if (CvtMBB.pred_size() > 1) {
+    BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
     // Copy instructions in the true block, predicate them, and add them to
     // the entry block.
     CopyAndPredicateBlock(BBI, *CvtBBI, Cond);
@@ -1487,11 +1518,11 @@ bool IfConverter::IfConvertSimple(BBInfo &BBI, IfcvtKind Kind) {
     // explicitly remove CvtBBI as a successor.
     BBI.BB->removeSuccessor(&CvtMBB, true);
   } else {
-    // Predicate the instructions in the true block.
     RemoveKills(CvtMBB.begin(), CvtMBB.end(), DontKill, *TRI);
     PredicateBlock(*CvtBBI, CvtMBB.end(), Cond);
 
     // Merge converted block into entry block.
+    BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
     MergeBlocks(BBI, *CvtBBI);
   }
 
@@ -1591,11 +1622,8 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
     BBCvt = MBPI->getEdgeProbability(BBI.BB, &CvtMBB);
   }
 
-  // Remove the branches from the entry so we can add the contents of the true
-  // block to it.
-  BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
-
   if (CvtMBB.pred_size() > 1) {
+    BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
     // Copy instructions in the true block, predicate them, and add them to
     // the entry block.
     CopyAndPredicateBlock(BBI, *CvtBBI, Cond, true);
@@ -1609,6 +1637,7 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
     PredicateBlock(*CvtBBI, CvtMBB.end(), Cond);
 
     // Now merge the entry of the triangle with the true block.
+    BBI.NonPredSize -= TII->removeBranch(*BBI.BB);
     MergeBlocks(BBI, *CvtBBI, false);
   }
 
@@ -2154,8 +2183,7 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
   // unknown probabilities into known ones.
   // FIXME: This usage is too tricky and in the future we would like to
   // eliminate all unknown probabilities in MBB.
-  if (ToBBI.IsBrAnalyzable)
-    ToBBI.BB->normalizeSuccProbs();
+  ToBBI.BB->normalizeSuccProbs();
 
   SmallVector<MachineBasicBlock *, 4> FromSuccs(FromMBB.succ_begin(),
                                                 FromMBB.succ_end());
@@ -2235,8 +2263,7 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
 
   // Normalize the probabilities of ToBBI.BB's successors with all adjustment
   // we've done above.
-  if (ToBBI.IsBrAnalyzable && FromBBI.IsBrAnalyzable)
-    ToBBI.BB->normalizeSuccProbs();
+  ToBBI.BB->normalizeSuccProbs();
 
   ToBBI.Predicate.append(FromBBI.Predicate.begin(), FromBBI.Predicate.end());
   FromBBI.Predicate.clear();

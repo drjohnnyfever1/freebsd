@@ -46,15 +46,6 @@ static bool printLoc(llvm::raw_ostream &OS, SourceLocation Loc,
   return false;
 }
 
-static StringRef GetExternalSourceContainer(const NamedDecl *D) {
-  if (!D)
-    return StringRef();
-  if (auto *attr = D->getExternalSourceSymbolAttr()) {
-    return attr->getDefinedIn();
-  }
-  return StringRef();
-}
-
 namespace {
 class USRGenerator : public ConstDeclVisitor<USRGenerator> {
   SmallVectorImpl<char> &Buf;
@@ -88,8 +79,7 @@ public:
   void VisitNamespaceAliasDecl(const NamespaceAliasDecl *D);
   void VisitFunctionTemplateDecl(const FunctionTemplateDecl *D);
   void VisitClassTemplateDecl(const ClassTemplateDecl *D);
-  void VisitObjCContainerDecl(const ObjCContainerDecl *CD,
-                              const ObjCCategoryDecl *CatD = nullptr);
+  void VisitObjCContainerDecl(const ObjCContainerDecl *CD);
   void VisitObjCMethodDecl(const ObjCMethodDecl *MD);
   void VisitObjCPropertyDecl(const ObjCPropertyDecl *D);
   void VisitObjCPropertyImplDecl(const ObjCPropertyImplDecl *D);
@@ -126,8 +116,6 @@ public:
     return D->getParentFunctionOrMethod() != nullptr;
   }
 
-  void GenExtSymbolContainer(const NamedDecl *D);
-
   /// Generate the string component containing the location of the
   ///  declaration.
   bool GenLoc(const Decl *D, bool IncludeOffset);
@@ -139,16 +127,13 @@ public:
   /// itself.
 
   /// Generate a USR for an Objective-C class.
-  void GenObjCClass(StringRef cls, StringRef ExtSymDefinedIn,
-                    StringRef CategoryContextExtSymbolDefinedIn) {
-    generateUSRForObjCClass(cls, Out, ExtSymDefinedIn,
-                            CategoryContextExtSymbolDefinedIn);
+  void GenObjCClass(StringRef cls) {
+    generateUSRForObjCClass(cls, Out);
   }
 
   /// Generate a USR for an Objective-C class category.
-  void GenObjCCategory(StringRef cls, StringRef cat,
-                       StringRef clsExt, StringRef catExt) {
-    generateUSRForObjCCategory(cls, cat, Out, clsExt, catExt);
+  void GenObjCCategory(StringRef cls, StringRef cat) {
+    generateUSRForObjCCategory(cls, cat, Out);
   }
 
   /// Generate a USR fragment for an Objective-C property.
@@ -157,8 +142,8 @@ public:
   }
 
   /// Generate a USR for an Objective-C protocol.
-  void GenObjCProtocol(StringRef prot, StringRef ext) {
-    generateUSRForObjCProtocol(prot, Out, ext);
+  void GenObjCProtocol(StringRef prot) {
+    generateUSRForObjCProtocol(prot, Out);
   }
 
   void VisitType(QualType T);
@@ -219,11 +204,7 @@ void USRGenerator::VisitFunctionDecl(const FunctionDecl *D) {
   if (ShouldGenerateLocation(D) && GenLoc(D, /*IncludeOffset=*/isLocal(D)))
     return;
 
-  const unsigned StartSize = Buf.size();
   VisitDeclContext(D->getDeclContext());
-  if (Buf.size() == StartSize)
-    GenExtSymbolContainer(D);
-
   bool IsTemplate = false;
   if (FunctionTemplateDecl *FunTmpl = D->getDescribedFunctionTemplate()) {
     IsTemplate = true;
@@ -329,7 +310,7 @@ void USRGenerator::VisitVarDecl(const VarDecl *D) {
   // For a template specialization, mangle the template arguments.
   if (const VarTemplateSpecializationDecl *Spec
                               = dyn_cast<VarTemplateSpecializationDecl>(D)) {
-    const TemplateArgumentList &Args = Spec->getTemplateArgs();
+    const TemplateArgumentList &Args = Spec->getTemplateInstantiationArgs();
     Out << '>';
     for (unsigned I = 0, N = Args.size(); I != N; ++I) {
       Out << '#';
@@ -386,16 +367,7 @@ void USRGenerator::VisitObjCMethodDecl(const ObjCMethodDecl *D) {
       IgnoreResults = true;
       return;
     }
-    auto getCategoryContext = [](const ObjCMethodDecl *D) ->
-                                    const ObjCCategoryDecl * {
-      if (auto *CD = dyn_cast<ObjCCategoryDecl>(D->getDeclContext()))
-        return CD;
-      if (auto *ICD = dyn_cast<ObjCCategoryImplDecl>(D->getDeclContext()))
-        return ICD->getCategoryDecl();
-      return nullptr;
-    };
-    auto *CD = getCategoryContext(D);
-    VisitObjCContainerDecl(ID, CD);
+    Visit(ID);
   }
   // Ideally we would use 'GenObjCMethod', but this is such a hot path
   // for Objective-C code that we don't want to use
@@ -404,15 +376,13 @@ void USRGenerator::VisitObjCMethodDecl(const ObjCMethodDecl *D) {
       << DeclarationName(D->getSelector());
 }
 
-void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D,
-                                          const ObjCCategoryDecl *CatD) {
+void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D) {
   switch (D->getKind()) {
     default:
       llvm_unreachable("Invalid ObjC container.");
     case Decl::ObjCInterface:
     case Decl::ObjCImplementation:
-      GenObjCClass(D->getName(), GetExternalSourceContainer(D),
-                   GetExternalSourceContainer(CatD));
+      GenObjCClass(D->getName());
       break;
     case Decl::ObjCCategory: {
       const ObjCCategoryDecl *CD = cast<ObjCCategoryDecl>(D);
@@ -432,9 +402,7 @@ void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D,
         GenLoc(CD, /*IncludeOffset=*/true);
       }
       else
-        GenObjCCategory(ID->getName(), CD->getName(),
-                        GetExternalSourceContainer(ID),
-                        GetExternalSourceContainer(CD));
+        GenObjCCategory(ID->getName(), CD->getName());
 
       break;
     }
@@ -449,16 +417,12 @@ void USRGenerator::VisitObjCContainerDecl(const ObjCContainerDecl *D,
         IgnoreResults = true;
         return;
       }
-      GenObjCCategory(ID->getName(), CD->getName(),
-                      GetExternalSourceContainer(ID),
-                      GetExternalSourceContainer(CD));
+      GenObjCCategory(ID->getName(), CD->getName());
       break;
     }
-    case Decl::ObjCProtocol: {
-      const ObjCProtocolDecl *PD = cast<ObjCProtocolDecl>(D);
-      GenObjCProtocol(PD->getName(), GetExternalSourceContainer(PD));
+    case Decl::ObjCProtocol:
+      GenObjCProtocol(cast<ObjCProtocolDecl>(D)->getName());
       break;
-    }
   }
 }
 
@@ -487,8 +451,6 @@ void USRGenerator::VisitTagDecl(const TagDecl *D) {
   if (!isa<EnumDecl>(D) &&
       ShouldGenerateLocation(D) && GenLoc(D, /*IncludeOffset=*/isLocal(D)))
     return;
-
-  GenExtSymbolContainer(D);
 
   D = D->getCanonicalDecl();
   VisitDeclContext(D->getDeclContext());
@@ -559,7 +521,7 @@ void USRGenerator::VisitTagDecl(const TagDecl *D) {
   // For a class template specialization, mangle the template arguments.
   if (const ClassTemplateSpecializationDecl *Spec
                               = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
-    const TemplateArgumentList &Args = Spec->getTemplateArgs();
+    const TemplateArgumentList &Args = Spec->getTemplateInstantiationArgs();
     Out << '>';
     for (unsigned I = 0, N = Args.size(); I != N; ++I) {
       Out << '#';
@@ -580,12 +542,6 @@ void USRGenerator::VisitTypedefDecl(const TypedefDecl *D) {
 
 void USRGenerator::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
   GenLoc(D, /*IncludeOffset=*/true);
-}
-
-void USRGenerator::GenExtSymbolContainer(const NamedDecl *D) {
-  StringRef Container = GetExternalSourceContainer(D);
-  if (!Container.empty())
-    Out << "@M@" << Container;
 }
 
 bool USRGenerator::GenLoc(const Decl *D, bool IncludeOffset) {
@@ -698,6 +654,7 @@ void USRGenerator::VisitType(QualType T) {
         case BuiltinType::OCLEvent:
         case BuiltinType::OCLClkEvent:
         case BuiltinType::OCLQueue:
+        case BuiltinType::OCLNDRange:
         case BuiltinType::OCLReserveID:
         case BuiltinType::OCLSampler:
           IgnoreResults = true;
@@ -811,13 +768,7 @@ void USRGenerator::VisitType(QualType T) {
       T = InjT->getInjectedSpecializationType();
       continue;
     }
-    if (const auto *VT = T->getAs<VectorType>()) {
-      Out << (T->isExtVectorType() ? ']' : '[');
-      Out << VT->getNumElements();
-      T = VT->getElementType();
-      continue;
-    }
-
+    
     // Unhandled type.
     Out << ' ';
     break;
@@ -916,34 +867,12 @@ void USRGenerator::VisitTemplateArgument(const TemplateArgument &Arg) {
 // USR generation functions.
 //===----------------------------------------------------------------------===//
 
-static void combineClassAndCategoryExtContainers(StringRef ClsSymDefinedIn,
-                                                 StringRef CatSymDefinedIn,
-                                                 raw_ostream &OS) {
-  if (ClsSymDefinedIn.empty() && CatSymDefinedIn.empty())
-    return;
-  if (CatSymDefinedIn.empty()) {
-    OS << "@M@" << ClsSymDefinedIn << '@';
-    return;
-  }
-  OS << "@CM@" << CatSymDefinedIn << '@';
-  if (ClsSymDefinedIn != CatSymDefinedIn) {
-    OS << ClsSymDefinedIn << '@';
-  }
-}
-
-void clang::index::generateUSRForObjCClass(StringRef Cls, raw_ostream &OS,
-                                           StringRef ExtSymDefinedIn,
-                                  StringRef CategoryContextExtSymbolDefinedIn) {
-  combineClassAndCategoryExtContainers(ExtSymDefinedIn,
-                                       CategoryContextExtSymbolDefinedIn, OS);
+void clang::index::generateUSRForObjCClass(StringRef Cls, raw_ostream &OS) {
   OS << "objc(cs)" << Cls;
 }
 
 void clang::index::generateUSRForObjCCategory(StringRef Cls, StringRef Cat,
-                                              raw_ostream &OS,
-                                              StringRef ClsSymDefinedIn,
-                                              StringRef CatSymDefinedIn) {
-  combineClassAndCategoryExtContainers(ClsSymDefinedIn, CatSymDefinedIn, OS);
+                                              raw_ostream &OS) {
   OS << "objc(cy)" << Cls << '@' << Cat;
 }
 
@@ -962,23 +891,8 @@ void clang::index::generateUSRForObjCProperty(StringRef Prop, bool isClassProp,
   OS << (isClassProp ? "(cpy)" : "(py)") << Prop;
 }
 
-void clang::index::generateUSRForObjCProtocol(StringRef Prot, raw_ostream &OS,
-                                              StringRef ExtSymDefinedIn) {
-  if (!ExtSymDefinedIn.empty())
-    OS << "@M@" << ExtSymDefinedIn << '@';
+void clang::index::generateUSRForObjCProtocol(StringRef Prot, raw_ostream &OS) {
   OS << "objc(pl)" << Prot;
-}
-
-void clang::index::generateUSRForGlobalEnum(StringRef EnumName, raw_ostream &OS,
-                                            StringRef ExtSymDefinedIn) {
-  if (!ExtSymDefinedIn.empty())
-    OS << "@M@" << ExtSymDefinedIn;
-  OS << "@E@" << EnumName;
-}
-
-void clang::index::generateUSRForEnumConstant(StringRef EnumConstantName,
-                                              raw_ostream &OS) {
-  OS << '@' << EnumConstantName;
 }
 
 bool clang::index::generateUSRForDecl(const Decl *D,
@@ -997,30 +911,21 @@ bool clang::index::generateUSRForDecl(const Decl *D,
 bool clang::index::generateUSRForMacro(const MacroDefinitionRecord *MD,
                                        const SourceManager &SM,
                                        SmallVectorImpl<char> &Buf) {
-  if (!MD)
-    return true;
-  return generateUSRForMacro(MD->getName()->getName(), MD->getLocation(),
-                             SM, Buf);
-
-}
-
-bool clang::index::generateUSRForMacro(StringRef MacroName, SourceLocation Loc,
-                                       const SourceManager &SM,
-                                       SmallVectorImpl<char> &Buf) {
   // Don't generate USRs for things with invalid locations.
-  if (MacroName.empty() || Loc.isInvalid())
+  if (!MD || MD->getLocation().isInvalid())
     return true;
 
   llvm::raw_svector_ostream Out(Buf);
 
   // Assume that system headers are sane.  Don't put source location
   // information into the USR if the macro comes from a system header.
+  SourceLocation Loc = MD->getLocation();
   bool ShouldGenerateLocation = !SM.isInSystemHeader(Loc);
 
   Out << getUSRSpacePrefix();
   if (ShouldGenerateLocation)
     printLoc(Out, Loc, SM, /*IncludeOffset=*/true);
   Out << "@macro@";
-  Out << MacroName;
+  Out << MD->getName()->getName();
   return false;
 }

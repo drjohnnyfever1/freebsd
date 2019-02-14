@@ -1,4 +1,4 @@
-//===- llvm/CodeGen/GlobalISel/CallLowering.h - Call lowering ---*- C++ -*-===//
+//===-- llvm/CodeGen/GlobalISel/CallLowering.h - Call lowering --*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,41 +15,29 @@
 #ifndef LLVM_CODEGEN_GLOBALISEL_CALLLOWERING_H
 #define LLVM_CODEGEN_GLOBALISEL_CALLLOWERING_H
 
-#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/CallingConvLower.h"
-#include "llvm/CodeGen/MachineValueType.h"
-#include "llvm/IR/CallSite.h"
-#include "llvm/IR/CallingConv.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Target/TargetCallingConv.h"
-#include <cstdint>
-#include <functional>
 
 namespace llvm {
-
-class DataLayout;
-class Function;
+// Forward declarations.
 class MachineIRBuilder;
 class MachineOperand;
-struct MachinePointerInfo;
-class MachineRegisterInfo;
 class TargetLowering;
-class Type;
 class Value;
 
 class CallLowering {
   const TargetLowering *TLI;
-
 public:
   struct ArgInfo {
     unsigned Reg;
     Type *Ty;
     ISD::ArgFlagsTy Flags;
-    bool IsFixed;
 
-    ArgInfo(unsigned Reg, Type *Ty, ISD::ArgFlagsTy Flags = ISD::ArgFlagsTy{},
-            bool IsFixed = true)
-        : Reg(Reg), Ty(Ty), Flags(Flags), IsFixed(IsFixed) {}
+    ArgInfo(unsigned Reg, Type *Ty, ISD::ArgFlagsTy Flags = ISD::ArgFlagsTy{})
+        : Reg(Reg), Ty(Ty), Flags(Flags) {}
   };
 
   /// Argument handling is mostly uniform between the four places that
@@ -59,12 +47,6 @@ public:
   /// arugment should go, exactly what happens can vary slightly. This
   /// class abstracts the differences.
   struct ValueHandler {
-    ValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
-                 CCAssignFn *AssignFn)
-      : MIRBuilder(MIRBuilder), MRI(MRI), AssignFn(AssignFn) {}
-
-    virtual ~ValueHandler() = default;
-
     /// Materialize a VReg containing the address of the specified
     /// stack-based object. This is either based on a FrameIndex or
     /// direct SP manipulation, depending on the context. \p MPO
@@ -86,28 +68,15 @@ public:
                                       uint64_t Size, MachinePointerInfo &MPO,
                                       CCValAssign &VA) = 0;
 
-    /// Handle custom values, which may be passed into one or more of \p VAs.
-    /// \return The number of \p VAs that have been assigned after the first
-    ///         one, and which should therefore be skipped from further
-    ///         processing.
-    virtual unsigned assignCustomValue(const ArgInfo &Arg,
-                                       ArrayRef<CCValAssign> VAs) {
-      // This is not a pure virtual method because not all targets need to worry
-      // about custom values.
-      llvm_unreachable("Custom values not supported");
-    }
-
     unsigned extendRegister(unsigned ValReg, CCValAssign &VA);
 
-    virtual bool assignArg(unsigned ValNo, MVT ValVT, MVT LocVT,
-                           CCValAssign::LocInfo LocInfo, const ArgInfo &Info,
-                           CCState &State) {
-      return AssignFn(ValNo, ValVT, LocVT, LocInfo, Info.Flags, State);
-    }
+    ValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI)
+        : MIRBuilder(MIRBuilder), MRI(MRI) {}
+
+    virtual ~ValueHandler() {}
 
     MachineIRBuilder &MIRBuilder;
     MachineRegisterInfo &MRI;
-    CCAssignFn *AssignFn;
   };
 
 protected:
@@ -122,20 +91,21 @@ protected:
     return static_cast<const XXXTargetLowering *>(TLI);
   }
 
+
   template <typename FuncInfoTy>
   void setArgFlags(ArgInfo &Arg, unsigned OpNum, const DataLayout &DL,
                    const FuncInfoTy &FuncInfo) const;
 
-  /// Invoke Handler::assignArg on each of the given \p Args and then use
+  /// Invoke the \p AssignFn on each of the given \p Args and then use
   /// \p Callback to move them to the assigned locations.
   ///
   /// \return True if everything has succeeded, false otherwise.
-  bool handleAssignments(MachineIRBuilder &MIRBuilder, ArrayRef<ArgInfo> Args,
-                         ValueHandler &Callback) const;
+  bool handleAssignments(MachineIRBuilder &MIRBuilder, CCAssignFn *AssignFn,
+                         ArrayRef<ArgInfo> Args, ValueHandler &Callback) const;
 
 public:
   CallLowering(const TargetLowering *TLI) : TLI(TLI) {}
-  virtual ~CallLowering() = default;
+  virtual ~CallLowering() {}
 
   /// This hook must be implemented to lower outgoing return values, described
   /// by \p Val, into the specified virtual register \p VReg.
@@ -165,8 +135,6 @@ public:
   /// This hook must be implemented to lower the given call instruction,
   /// including argument and return value marshalling.
   ///
-  /// \p CallConv is the calling convention to be used for the call.
-  ///
   /// \p Callee is the destination of the call. It should be either a register,
   /// globaladdress, or externalsymbol.
   ///
@@ -182,16 +150,14 @@ public:
   /// needs to be passed.
   ///
   /// \return true if the lowering succeeded, false otherwise.
-  virtual bool lowerCall(MachineIRBuilder &MIRBuilder, CallingConv::ID CallConv,
+  virtual bool lowerCall(MachineIRBuilder &MIRBuilder,
                          const MachineOperand &Callee, const ArgInfo &OrigRet,
                          ArrayRef<ArgInfo> OrigArgs) const {
     return false;
   }
 
-  /// Lower the given call instruction, including argument and return value
-  /// marshalling.
-  ///
-  /// \p CI is the call/invoke instruction.
+  /// This hook must be implemented to lower the given call instruction,
+  /// including argument and return value marshalling.
   ///
   /// \p ResReg is a register where the call's return value should be stored (or
   /// 0 if there is no return value).
@@ -205,11 +171,10 @@ public:
   /// range of an immediate jump.
   ///
   /// \return true if the lowering succeeded, false otherwise.
-  bool lowerCall(MachineIRBuilder &MIRBuilder, ImmutableCallSite CS,
-                 unsigned ResReg, ArrayRef<unsigned> ArgRegs,
-                 std::function<unsigned()> GetCalleeReg) const;
+  virtual bool lowerCall(MachineIRBuilder &MIRBuilder, const CallInst &CI,
+                         unsigned ResReg, ArrayRef<unsigned> ArgRegs,
+                         std::function<unsigned()> GetCalleeReg) const;
 };
+} // End namespace llvm.
 
-} // end namespace llvm
-
-#endif // LLVM_CODEGEN_GLOBALISEL_CALLLOWERING_H
+#endif

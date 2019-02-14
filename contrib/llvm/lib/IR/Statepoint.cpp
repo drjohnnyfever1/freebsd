@@ -44,20 +44,8 @@ bool llvm::isGCRelocate(ImmutableCallSite CS) {
   return CS.getInstruction() && isa<GCRelocateInst>(CS.getInstruction());
 }
 
-bool llvm::isGCRelocate(const Value *V) {
-  if (auto CS = ImmutableCallSite(V))
-    return isGCRelocate(CS);
-  return false;
-}
-
 bool llvm::isGCResult(ImmutableCallSite CS) {
   return CS.getInstruction() && isa<GCResultInst>(CS.getInstruction());
-}
-
-bool llvm::isGCResult(const Value *V) {
-  if (auto CS = ImmutableCallSite(V))
-    return isGCResult(CS);
-  return false;
 }
 
 bool llvm::isStatepointDirectiveAttr(Attribute Attr) {
@@ -65,19 +53,18 @@ bool llvm::isStatepointDirectiveAttr(Attribute Attr) {
          Attr.hasAttribute("statepoint-num-patch-bytes");
 }
 
-StatepointDirectives
-llvm::parseStatepointDirectivesFromAttrs(AttributeList AS) {
+StatepointDirectives llvm::parseStatepointDirectivesFromAttrs(AttributeSet AS) {
   StatepointDirectives Result;
 
   Attribute AttrID =
-      AS.getAttribute(AttributeList::FunctionIndex, "statepoint-id");
+      AS.getAttribute(AttributeSet::FunctionIndex, "statepoint-id");
   uint64_t StatepointID;
   if (AttrID.isStringAttribute())
     if (!AttrID.getValueAsString().getAsInteger(10, StatepointID))
       Result.StatepointID = StatepointID;
 
   uint32_t NumPatchBytes;
-  Attribute AttrNumPatchBytes = AS.getAttribute(AttributeList::FunctionIndex,
+  Attribute AttrNumPatchBytes = AS.getAttribute(AttributeSet::FunctionIndex,
                                                 "statepoint-num-patch-bytes");
   if (AttrNumPatchBytes.isStringAttribute())
     if (!AttrNumPatchBytes.getValueAsString().getAsInteger(10, NumPatchBytes))

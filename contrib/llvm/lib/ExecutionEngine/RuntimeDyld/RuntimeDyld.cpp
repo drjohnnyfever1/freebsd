@@ -12,13 +12,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
-#include "RuntimeDyldCOFF.h"
 #include "RuntimeDyldCheckerImpl.h"
+#include "RuntimeDyldCOFF.h"
 #include "RuntimeDyldELF.h"
 #include "RuntimeDyldImpl.h"
 #include "RuntimeDyldMachO.h"
-#include "llvm/Object/COFF.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Object/COFF.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MutexGuard.h"
@@ -73,9 +73,7 @@ namespace llvm {
 
 void RuntimeDyldImpl::registerEHFrames() {}
 
-void RuntimeDyldImpl::deregisterEHFrames() {
-  MemMgr.deregisterEHFrames();
-}
+void RuntimeDyldImpl::deregisterEHFrames() {}
 
 #ifndef NDEBUG
 static void dumpSectionMemory(const SectionEntry &S, StringRef State) {
@@ -128,10 +126,7 @@ void RuntimeDyldImpl::resolveRelocations() {
   );
 
   // First, resolve relocations associated with external symbols.
-  if (auto Err = resolveExternalSymbols()) {
-    HasError = true;
-    ErrorStr = toString(std::move(Err));
-  }
+  resolveExternalSymbols();
 
   // Iterate over all outstanding relocations
   for (auto it = Relocations.begin(), e = Relocations.end(); it != e; ++it) {
@@ -246,11 +241,9 @@ RuntimeDyldImpl::loadObjectImpl(const object::ObjectFile &Obj) {
           continue;
         // Then check the symbol resolver to see if there's a definition
         // elsewhere in this logical dylib.
-        if (auto Sym = Resolver.findSymbolInLogicalDylib(Name)) {
+        if (auto Sym = Resolver.findSymbolInLogicalDylib(Name))
           if (Sym.getFlags().isStrongDefinition())
             continue;
-        } else if (auto Err = Sym.takeError())
-          return std::move(Err);
         // else
         JITSymFlags &= ~JITSymbolFlags::Weak;
       }
@@ -450,7 +443,7 @@ Error RuntimeDyldImpl::computeTotalAllocSize(const ObjectFile &Obj,
        SI != SE; ++SI) {
     const SectionRef &Section = *SI;
 
-    bool IsRequired = isRequiredForExecution(Section) || ProcessAllSections;
+    bool IsRequired = isRequiredForExecution(Section);
 
     // Consider only the sections that are required to be loaded for execution
     if (IsRequired) {
@@ -491,14 +484,6 @@ Error RuntimeDyldImpl::computeTotalAllocSize(const ObjectFile &Obj,
     }
   }
 
-  // Compute Global Offset Table size. If it is not zero we
-  // also update alignment, which is equal to a size of a
-  // single GOT entry.
-  if (unsigned GotSize = computeGOTSize(Obj)) {
-    RWSectionSizes.push_back(GotSize);
-    RWDataAlign = std::max<uint32_t>(RWDataAlign, getGOTEntrySize());
-  }
-
   // Compute the size of all common symbols
   uint64_t CommonSize = 0;
   uint32_t CommonAlign = 1;
@@ -531,24 +516,6 @@ Error RuntimeDyldImpl::computeTotalAllocSize(const ObjectFile &Obj,
   RWDataSize = computeAllocationSizeForSections(RWSectionSizes, RWDataAlign);
 
   return Error::success();
-}
-
-// compute GOT size
-unsigned RuntimeDyldImpl::computeGOTSize(const ObjectFile &Obj) {
-  size_t GotEntrySize = getGOTEntrySize();
-  if (!GotEntrySize)
-    return 0;
-
-  size_t GotSize = 0;
-  for (section_iterator SI = Obj.section_begin(), SE = Obj.section_end();
-       SI != SE; ++SI) {
-
-    for (const RelocationRef &Reloc : SI->relocations())
-      if (relocationNeedsGot(Reloc))
-        GotSize += GotEntrySize;
-  }
-
-  return GotSize;
 }
 
 // compute stub buffer size for the given section
@@ -750,8 +717,8 @@ RuntimeDyldImpl::emitSection(const ObjectFile &Obj,
     Alignment = std::max(Alignment, getStubAlignment());
 
   // Some sections, such as debug info, don't need to be loaded for execution.
-  // Process those only if explicitly requested.
-  if (IsRequired || ProcessAllSections) {
+  // Leave those where they are.
+  if (IsRequired) {
     Allocate = DataSize + PaddingSize + StubBufSize;
     if (!Allocate)
       Allocate = 1;
@@ -794,10 +761,6 @@ RuntimeDyldImpl::emitSection(const ObjectFile &Obj,
 
   Sections.push_back(
       SectionEntry(Name, Addr, DataSize, Allocate, (uintptr_t)pData));
-
-  // Debug info sections are linked as if their load address was zero
-  if (!IsRequired)
-    Sections.back().setLoadAddress(0);
 
   if (Checker)
     Checker->registerSection(Obj.getFileName(), SectionID);
@@ -958,7 +921,7 @@ void RuntimeDyldImpl::resolveRelocationList(const RelocationList &Relocs,
   }
 }
 
-Error RuntimeDyldImpl::resolveExternalSymbols() {
+void RuntimeDyldImpl::resolveExternalSymbols() {
   while (!ExternalSymbolRelocations.empty()) {
     StringMap<RelocationList>::iterator i = ExternalSymbolRelocations.begin();
 
@@ -976,24 +939,10 @@ Error RuntimeDyldImpl::resolveExternalSymbols() {
         // This is an external symbol, try to get its address from the symbol
         // resolver.
         // First search for the symbol in this logical dylib.
-        if (auto Sym = Resolver.findSymbolInLogicalDylib(Name.data())) {
-          if (auto AddrOrErr = Sym.getAddress())
-            Addr = *AddrOrErr;
-          else
-            return AddrOrErr.takeError();
-        } else if (auto Err = Sym.takeError())
-          return Err;
-
+        Addr = Resolver.findSymbolInLogicalDylib(Name.data()).getAddress();
         // If that fails, try searching for an external symbol.
-        if (!Addr) {
-          if (auto Sym = Resolver.findSymbol(Name.data())) {
-            if (auto AddrOrErr = Sym.getAddress())
-              Addr = *AddrOrErr;
-            else
-              return AddrOrErr.takeError();
-          } else if (auto Err = Sym.takeError())
-            return Err;
-        }
+        if (!Addr)
+          Addr = Resolver.findSymbol(Name.data()).getAddress();
         // The call to getSymbolAddress may have caused additional modules to
         // be loaded, which may have added new entries to the
         // ExternalSymbolRelocations map.  Consquently, we need to update our
@@ -1028,8 +977,6 @@ Error RuntimeDyldImpl::resolveExternalSymbols() {
 
     ExternalSymbolRelocations.erase(i);
   }
-
-  return Error::success();
 }
 
 //===----------------------------------------------------------------------===//

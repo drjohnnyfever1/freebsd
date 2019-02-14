@@ -412,7 +412,7 @@ static bool isTrivialSingleTokenExpansion(const MacroInfo *MI,
 
   // If this is a function-like macro invocation, it's safe to trivially expand
   // as long as the identifier is not a macro argument.
-  return std::find(MI->param_begin(), MI->param_end(), II) == MI->param_end();
+  return std::find(MI->arg_begin(), MI->arg_end(), II) == MI->arg_end();
 }
 
 /// isNextPPTokenLParen - Determine whether the next preprocessor token to be
@@ -492,7 +492,7 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
     // Preprocessor directives used inside macro arguments are not portable, and
     // this enables the warning.
     InMacroArgs = true;
-    Args = ReadMacroCallArgumentList(Identifier, MI, ExpansionEnd);
+    Args = ReadFunctionLikeMacroArgs(Identifier, MI, ExpansionEnd);
 
     // Finished parsing args.
     InMacroArgs = false;
@@ -745,11 +745,11 @@ static bool GenerateNewArgTokens(Preprocessor &PP,
 /// token is the '(' of the macro, this method is invoked to read all of the
 /// actual arguments specified for the macro invocation.  This returns null on
 /// error.
-MacroArgs *Preprocessor::ReadMacroCallArgumentList(Token &MacroName,
+MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
                                                    MacroInfo *MI,
                                                    SourceLocation &MacroEnd) {
   // The number of fixed arguments to parse.
-  unsigned NumFixedArgsLeft = MI->getNumParams();
+  unsigned NumFixedArgsLeft = MI->getNumArgs();
   bool isVariadic = MI->isVariadic();
 
   // Outer loop, while there are more arguments, keep reading them.
@@ -889,7 +889,7 @@ MacroArgs *Preprocessor::ReadMacroCallArgumentList(Token &MacroName,
 
   // Okay, we either found the r_paren.  Check to see if we parsed too few
   // arguments.
-  unsigned MinArgsExpected = MI->getNumParams();
+  unsigned MinArgsExpected = MI->getNumArgs();
 
   // If this is not a variadic macro, and too many args were specified, emit
   // an error.
@@ -1125,7 +1125,6 @@ static bool HasFeature(const Preprocessor &PP, StringRef Feature) {
       .Case("attribute_overloadable", true)
       .Case("attribute_unavailable_with_message", true)
       .Case("attribute_unused_on_fields", true)
-      .Case("attribute_diagnose_if_objc", true)
       .Case("blocks", LangOpts.Blocks)
       .Case("c_thread_safety_attributes", true)
       .Case("cxx_exceptions", LangOpts.CXXExceptions)
@@ -1315,8 +1314,6 @@ static bool HasExtension(const Preprocessor &PP, StringRef Extension) {
            .Case("cxx_binary_literals", true)
            .Case("cxx_init_captures", LangOpts.CPlusPlus11)
            .Case("cxx_variable_templates", LangOpts.CPlusPlus)
-           // Miscellaneous language extensions
-           .Case("overloadable_unmarked", true)
            .Default(false);
 }
 
@@ -1425,7 +1422,7 @@ static bool EvaluateHasIncludeCommon(Token &Tok,
   const DirectoryLookup *CurDir;
   const FileEntry *File =
       PP.LookupFile(FilenameLoc, Filename, isAngled, LookupFrom, LookupFromFile,
-                    CurDir, nullptr, nullptr, nullptr, nullptr);
+                    CurDir, nullptr, nullptr, nullptr);
 
   // Get the result value.  A result of true means the file exists.
   return File != nullptr;
@@ -1456,7 +1453,7 @@ static bool EvaluateHasIncludeNext(Token &Tok,
   } else if (PP.isInPrimaryFile()) {
     Lookup = nullptr;
     PP.Diag(Tok, diag::pp_include_next_in_primary);
-  } else if (PP.getCurrentLexerSubmodule()) {
+  } else if (PP.getCurrentSubmodule()) {
     // Start looking up in the directory *after* the one in which the current
     // file would be found, if any.
     assert(PP.getCurrentLexer() && "#include_next directive in macro?");
@@ -1749,7 +1746,6 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
           return llvm::StringSwitch<bool>(II->getName())
                       .Case("__make_integer_seq", LangOpts.CPlusPlus)
                       .Case("__type_pack_element", LangOpts.CPlusPlus)
-                      .Case("__builtin_available", true)
                       .Default(false);
         }
       });

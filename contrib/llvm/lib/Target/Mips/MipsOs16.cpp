@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Mips.h"
 #include "llvm/IR/Instructions.h"
+#include "Mips.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -57,7 +57,7 @@ static  bool needsFPFromSig(Function &F) {
     ;
   }
   if (F.arg_size() >=1) {
-    Argument &Arg = *F.arg_begin();
+    Argument &Arg = F.getArgumentList().front();
     switch (Arg.getType()->getTypeID()) {
     case Type::FloatTyID:
     case Type::DoubleTyID:
@@ -155,4 +155,6 @@ bool MipsOs16::runOnModule(Module &M) {
   return modified;
 }
 
-ModulePass *llvm::createMipsOs16Pass() { return new MipsOs16(); }
+ModulePass *llvm::createMipsOs16Pass(MipsTargetMachine &TM) {
+  return new MipsOs16;
+}

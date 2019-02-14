@@ -21,17 +21,13 @@
 #ifndef LLVM_IR_VERIFIER_H
 #define LLVM_IR_VERIFIER_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/PassManager.h"
-#include <utility>
 
 namespace llvm {
 
-class APInt;
 class Function;
 class FunctionPass;
-class Instruction;
-class MDNode;
+class ModulePass;
 class Module;
 class raw_ostream;
 struct VerifierSupport;
@@ -51,7 +47,7 @@ class TBAAVerifier {
   ///    the offset of the access.  If zero, only a zero offset is allowed.
   ///
   /// \c BitWidth has no meaning if \c IsInvalid is true.
-  using TBAABaseNodeSummary = std::pair<bool, unsigned>;
+  typedef std::pair<bool, unsigned> TBAABaseNodeSummary;
   DenseMap<const MDNode *, TBAABaseNodeSummary> TBAABaseNodes;
 
   /// Maps an alleged scalar TBAA node to a boolean that is true if the said
@@ -105,14 +101,12 @@ FunctionPass *createVerifierPass(bool FatalErrors = true);
 /// and debug info errors.
 class VerifierAnalysis : public AnalysisInfoMixin<VerifierAnalysis> {
   friend AnalysisInfoMixin<VerifierAnalysis>;
-
   static AnalysisKey Key;
 
 public:
   struct Result {
     bool IRBroken, DebugInfoBroken;
   };
-
   Result run(Module &M, ModuleAnalysisManager &);
   Result run(Function &F, FunctionAnalysisManager &);
 };
@@ -142,6 +136,7 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 
-} // end namespace llvm
 
-#endif // LLVM_IR_VERIFIER_H
+} // End llvm namespace
+
+#endif

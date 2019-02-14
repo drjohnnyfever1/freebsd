@@ -440,10 +440,7 @@ StdLibraryFunctionsChecker::findFunctionSummary(const FunctionDecl *FD,
   BasicValueFactory &BVF = SVB.getBasicValueFactory();
   initFunctionSummaries(BVF);
 
-  IdentifierInfo *II = FD->getIdentifier();
-  if (!II)
-    return None;
-  StringRef Name = II->getName();
+  std::string Name = FD->getQualifiedNameAsString();
   if (Name.empty() || !C.isCLibraryFunction(FD, Name))
     return None;
 

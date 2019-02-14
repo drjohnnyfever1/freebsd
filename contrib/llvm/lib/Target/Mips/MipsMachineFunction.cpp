@@ -7,15 +7,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/MipsBaseInfo.h"
+#include "MipsInstrInfo.h"
 #include "MipsMachineFunction.h"
-#include "MCTargetDesc/MipsABIInfo.h"
 #include "MipsSubtarget.h"
 #include "MipsTargetMachine.h"
-#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -23,7 +24,7 @@ static cl::opt<bool>
 FixGlobalBaseReg("mips-fix-global-base-reg", cl::Hidden, cl::init(true),
                  cl::desc("Always use $gp as the global base register."));
 
-MipsFunctionInfo::~MipsFunctionInfo() = default;
+MipsFunctionInfo::~MipsFunctionInfo() {}
 
 bool MipsFunctionInfo::globalBaseRegSet() const {
   return GlobalBaseReg;
@@ -53,15 +54,14 @@ unsigned MipsFunctionInfo::getGlobalBaseReg() {
 }
 
 void MipsFunctionInfo::createEhDataRegsFI() {
-  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
   for (int I = 0; I < 4; ++I) {
-    const TargetRegisterClass &RC =
+    const TargetRegisterClass *RC =
         static_cast<const MipsTargetMachine &>(MF.getTarget()).getABI().IsN64()
-            ? Mips::GPR64RegClass
-            : Mips::GPR32RegClass;
+            ? &Mips::GPR64RegClass
+            : &Mips::GPR32RegClass;
 
-    EhDataRegFI[I] = MF.getFrameInfo().CreateStackObject(TRI.getSpillSize(RC),
-        TRI.getSpillAlignment(RC), false);
+    EhDataRegFI[I] = MF.getFrameInfo().CreateStackObject(RC->getSize(),
+        RC->getAlignment(), false);
   }
 }
 
@@ -70,12 +70,11 @@ void MipsFunctionInfo::createISRRegFI() {
   // The current implementation only supports Mips32r2+ not Mips64rX. Status
   // is always 32 bits, ErrorPC is 32 or 64 bits dependent on architecture,
   // however Mips32r2+ is the supported architecture.
-  const TargetRegisterClass &RC = Mips::GPR32RegClass;
-  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+  const TargetRegisterClass *RC = &Mips::GPR32RegClass;
 
   for (int I = 0; I < 2; ++I)
     ISRDataRegFI[I] = MF.getFrameInfo().CreateStackObject(
-        TRI.getSpillSize(RC), TRI.getSpillAlignment(RC), false);
+        RC->getSize(), RC->getAlignment(), false);
 }
 
 bool MipsFunctionInfo::isEhDataRegFI(int FI) const {
@@ -95,12 +94,11 @@ MachinePointerInfo MipsFunctionInfo::callPtrInfo(const GlobalValue *GV) {
 }
 
 int MipsFunctionInfo::getMoveF64ViaSpillFI(const TargetRegisterClass *RC) {
-  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
   if (MoveF64ViaSpillFI == -1) {
     MoveF64ViaSpillFI = MF.getFrameInfo().CreateStackObject(
-        TRI.getSpillSize(*RC), TRI.getSpillAlignment(*RC), false);
+        RC->getSize(), RC->getAlignment(), false);
   }
   return MoveF64ViaSpillFI;
 }
 
-void MipsFunctionInfo::anchor() {}
+void MipsFunctionInfo::anchor() { }

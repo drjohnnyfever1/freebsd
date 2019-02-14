@@ -13,7 +13,6 @@
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Frontend/MultiplexConsumer.h"
 #include "clang/Lex/Preprocessor.h"
-#include "clang/Serialization/ASTReader.h"
 
 using namespace clang;
 using namespace clang::index;
@@ -174,32 +173,4 @@ void index::indexASTUnit(ASTUnit &Unit,
   IndexCtx.setASTContext(Unit.getASTContext());
   DataConsumer->initialize(Unit.getASTContext());
   indexTranslationUnit(Unit, IndexCtx);
-  DataConsumer->finish();
-}
-
-void index::indexTopLevelDecls(ASTContext &Ctx, ArrayRef<const Decl *> Decls,
-                               std::shared_ptr<IndexDataConsumer> DataConsumer,
-                               IndexingOptions Opts) {
-  IndexingContext IndexCtx(Opts, *DataConsumer);
-  IndexCtx.setASTContext(Ctx);
-
-  DataConsumer->initialize(Ctx);
-  for (const Decl *D : Decls)
-    IndexCtx.indexTopLevelDecl(D);
-  DataConsumer->finish();
-}
-
-void index::indexModuleFile(serialization::ModuleFile &Mod,
-                            ASTReader &Reader,
-                            std::shared_ptr<IndexDataConsumer> DataConsumer,
-                            IndexingOptions Opts) {
-  ASTContext &Ctx = Reader.getContext();
-  IndexingContext IndexCtx(Opts, *DataConsumer);
-  IndexCtx.setASTContext(Ctx);
-  DataConsumer->initialize(Ctx);
-
-  for (const Decl *D :Reader.getModuleFileLevelDecls(Mod)) {
-    IndexCtx.indexTopLevelDecl(D);
-  }
-  DataConsumer->finish();
 }

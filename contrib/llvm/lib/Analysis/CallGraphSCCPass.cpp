@@ -204,7 +204,7 @@ bool CGPassManager::RefreshCallGraph(const CallGraphSCC &CurSCC, CallGraph &CG,
     // Get the set of call sites currently in the function.
     for (CallGraphNode::iterator I = CGN->begin(), E = CGN->end(); I != E; ) {
       // If this call site is null, then the function pass deleted the call
-      // entirely and the WeakTrackingVH nulled it out.
+      // entirely and the WeakVH nulled it out.  
       if (!I->first ||
           // If we've already seen this call site, then the FunctionPass RAUW'd
           // one call with another, which resulted in two "uses" in the edge
@@ -347,8 +347,7 @@ bool CGPassManager::RefreshCallGraph(const CallGraphSCC &CurSCC, CallGraph &CG,
       DevirtualizedCall = true;
     
     // After scanning this function, if we still have entries in callsites, then
-    // they are dangling pointers.  WeakTrackingVH should save us for this, so
-    // abort if
+    // they are dangling pointers.  WeakVH should save us for this, so abort if
     // this happens.
     assert(CallSites.empty() && "Dangling pointers found in call sites map");
     
@@ -477,8 +476,10 @@ bool CGPassManager::runOnModule(Module &M) {
     if (DevirtualizedCall)
       DEBUG(dbgs() << "  CGSCCPASSMGR: Stopped iteration after " << Iteration
                    << " times, due to -max-cg-scc-iterations\n");
-
-    MaxSCCIterations.updateMax(Iteration);
+    
+    if (Iteration > MaxSCCIterations)
+      MaxSCCIterations = Iteration;
+    
   }
   Changed |= doFinalization(CG);
   return Changed;
@@ -608,28 +609,16 @@ namespace {
     }
 
     bool runOnSCC(CallGraphSCC &SCC) override {
-      bool BannerPrinted = false;
-      auto PrintBannerOnce = [&] () {
-        if (BannerPrinted)
-          return;
-        Out << Banner;
-        BannerPrinted = true;
-        };
+      Out << Banner;
       for (CallGraphNode *CGN : SCC) {
-        if (Function *F = CGN->getFunction()) {
-          if (!F->isDeclaration() && isFunctionInPrintList(F->getName())) {
-            PrintBannerOnce();
-            F->print(Out);
-          }
-        } else if (llvm::isFunctionInPrintList("*")) {
-          PrintBannerOnce();
+        if (CGN->getFunction()) {
+          if (isFunctionInPrintList(CGN->getFunction()->getName()))
+            CGN->getFunction()->print(Out);
+        } else
           Out << "\nPrinting <null> Function\n";
-        }
       }
       return false;
     }
-    
-    StringRef getPassName() const override { return "Print CallGraph IR"; }
   };
   
 } // end anonymous namespace.

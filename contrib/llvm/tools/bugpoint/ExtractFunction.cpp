@@ -209,7 +209,6 @@ static void eliminateAliases(GlobalValue *GV) {
 void llvm::DeleteGlobalInitializer(GlobalVariable *GV) {
   eliminateAliases(GV);
   GV->setInitializer(nullptr);
-  GV->setComdat(nullptr);
 }
 
 // DeleteFunctionBody - "Remove" the function by deleting all of its basic
@@ -232,7 +231,8 @@ static Constant *GetTorInit(std::vector<std::pair<Function *, int>> &TorList) {
   std::vector<Constant *> ArrayElts;
   Type *Int32Ty = Type::getInt32Ty(TorList[0].first->getContext());
 
-  StructType *STy = StructType::get(Int32Ty, TorList[0].first->getType());
+  StructType *STy =
+      StructType::get(Int32Ty, TorList[0].first->getType(), nullptr);
   for (unsigned i = 0, e = TorList.size(); i != e; ++i) {
     Constant *Elts[] = {ConstantInt::get(Int32Ty, TorList[i].second),
                         TorList[i].first};

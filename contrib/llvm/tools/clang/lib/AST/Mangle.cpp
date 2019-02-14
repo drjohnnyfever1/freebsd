@@ -262,13 +262,9 @@ void MangleContext::mangleObjCMethodNameWithoutSize(const ObjCMethodDecl *MD,
   const ObjCContainerDecl *CD =
   dyn_cast<ObjCContainerDecl>(MD->getDeclContext());
   assert (CD && "Missing container decl in GetNameForMethod");
-  OS << (MD->isInstanceMethod() ? '-' : '+') << '[';
-  if (const ObjCCategoryImplDecl *CID = dyn_cast<ObjCCategoryImplDecl>(CD)) {
-    OS << CID->getClassInterface()->getName();
+  OS << (MD->isInstanceMethod() ? '-' : '+') << '[' << CD->getName();
+  if (const ObjCCategoryImplDecl *CID = dyn_cast<ObjCCategoryImplDecl>(CD))
     OS << '(' << *CID << ')';
-  } else {
-    OS << CD->getName();
-  }
   OS << ' ';
   MD->getSelector().print(OS);
   OS << ']';

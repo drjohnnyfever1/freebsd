@@ -15,9 +15,9 @@
 #include "Unix.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Demangle/Demangle.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
-#include "llvm/Support/Format.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/Program.h"
@@ -25,8 +25,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <string>
-#ifdef HAVE_BACKTRACE
-# include BACKTRACE_HEADER         // For backtrace().
+#if HAVE_EXECINFO_H
+# include <execinfo.h>         // For backtrace().
 #endif
 #if HAVE_SIGNAL_H
 #include <signal.h>
@@ -59,7 +59,7 @@ using namespace llvm;
 
 static RETSIGTYPE SignalHandler(int Sig);  // defined below.
 
-static ManagedStatic<sys::SmartMutex<true> > SignalsMutex;
+static ManagedStatic<SmartMutex<true> > SignalsMutex;
 
 /// InterruptFunction - The function to call if ctrl-c is pressed.
 static void (*InterruptFunction)() = nullptr;
@@ -149,7 +149,11 @@ static void CreateSigAltStack() {}
 #endif
 
 static void RegisterHandlers() {
-  sys::SmartScopedLock<true> Guard(*SignalsMutex);
+  // We need to dereference the signals mutex during handler registration so
+  // that we force its construction. This is to prevent the first use being
+  // during handling an actual signal because you can't safely call new in a
+  // signal handler.
+  *SignalsMutex;
 
   // If the handlers are already registered, we're done.
   if (NumRegisteredSignals != 0) return;
@@ -219,7 +223,7 @@ static RETSIGTYPE SignalHandler(int Sig) {
   sigprocmask(SIG_UNBLOCK, &SigMask, nullptr);
 
   {
-    unique_lock<sys::SmartMutex<true>> Guard(*SignalsMutex);
+    unique_lock<SmartMutex<true>> Guard(*SignalsMutex);
     RemoveFilesToRemove();
 
     if (std::find(std::begin(IntSigs), std::end(IntSigs), Sig)
@@ -408,7 +412,7 @@ void llvm::sys::PrintStackTrace(raw_ostream &OS) {
 
   if (printSymbolizedStackTrace(Argv0, StackTrace, depth, OS))
     return;
-#if HAVE_DLFCN_H && HAVE_DLADDR
+#if HAVE_DLFCN_H && __GNUG__ && !defined(__CYGWIN__)
   int width = 0;
   for (int i = 0; i < depth; ++i) {
     Dl_info dlinfo;
@@ -458,7 +462,7 @@ void llvm::sys::PrintStackTrace(raw_ostream &OS) {
 }
 
 static void PrintStackTraceSignalHandler(void *) {
-  sys::PrintStackTrace(llvm::errs());
+  PrintStackTrace(llvm::errs());
 }
 
 void llvm::sys::DisableSystemDialogsOnCrash() {}

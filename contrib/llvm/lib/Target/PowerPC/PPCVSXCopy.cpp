@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/PPCPredicates.h"
 #include "PPC.h"
+#include "MCTargetDesc/PPCPredicates.h"
 #include "PPCHazardRecognizers.h"
 #include "PPCInstrBuilder.h"
 #include "PPCInstrInfo.h"
@@ -112,7 +112,7 @@ protected:
                   TII->get(TargetOpcode::SUBREG_TO_REG), NewVReg)
               .addImm(1) // add 1, not 0, because there is no implicit clearing
                          // of the high bits.
-              .add(SrcMO)
+              .addOperand(SrcMO)
               .addImm(PPC::sub_64);
 
           // The source of the original copy is now the new virtual register.
@@ -132,7 +132,7 @@ protected:
           unsigned NewVReg = MRI.createVirtualRegister(DstRC);
           BuildMI(MBB, MI, MI.getDebugLoc(), TII->get(TargetOpcode::COPY),
                   NewVReg)
-              .add(SrcMO);
+              .addOperand(SrcMO);
 
           // Transform the original copy into a subregister extraction copy.
           SrcMO.setReg(NewVReg);

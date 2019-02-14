@@ -44,10 +44,6 @@ CodeGenTypes::~CodeGenTypes() {
     delete &*I++;
 }
 
-const CodeGenOptions &CodeGenTypes::getCodeGenOpts() const {
-  return CGM.getCodeGenOpts();
-}
-
 void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
                                      llvm::StructType *Ty,
                                      StringRef suffix) {
@@ -476,6 +472,7 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
     case BuiltinType::OCLEvent:
     case BuiltinType::OCLClkEvent:
     case BuiltinType::OCLQueue:
+    case BuiltinType::OCLNDRange:
     case BuiltinType::OCLReserveID:
       ResultType = CGM.getOpenCLRuntime().convertOpenCLSpecificType(Ty);
       break;
@@ -490,11 +487,10 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
     break;
   }
   case Type::Auto:
-  case Type::DeducedTemplateSpecialization:
-    llvm_unreachable("Unexpected undeduced type!");
+    llvm_unreachable("Unexpected undeduced auto type!");
   case Type::Complex: {
     llvm::Type *EltTy = ConvertType(cast<ComplexType>(Ty)->getElementType());
-    ResultType = llvm::StructType::get(EltTy, EltTy);
+    ResultType = llvm::StructType::get(EltTy, EltTy, nullptr);
     break;
   }
   case Type::LValueReference:

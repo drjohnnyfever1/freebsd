@@ -69,15 +69,10 @@ class AliasSet : public ilist_node<AliasSet> {
       if (AAInfo == DenseMapInfo<AAMDNodes>::getEmptyKey())
         // We don't have a AAInfo yet. Set it to NewAAInfo.
         AAInfo = NewAAInfo;
-      else {
-        AAMDNodes Intersection(AAInfo.intersect(NewAAInfo));
-        if (!Intersection) {
-          // NewAAInfo conflicts with AAInfo.
-          AAInfo = DenseMapInfo<AAMDNodes>::getTombstoneKey();
-          return SizeChanged;
-        }
-        AAInfo = Intersection;
-      }
+      else if (AAInfo != NewAAInfo)
+        // NewAAInfo conflicts with AAInfo.
+        AAInfo = DenseMapInfo<AAMDNodes>::getTombstoneKey();
+
       return SizeChanged;
     }
 
@@ -126,10 +121,7 @@ class AliasSet : public ilist_node<AliasSet> {
   AliasSet *Forward;
 
   /// All instructions without a specific address in this alias set.
-  /// In rare cases this vector can have a null'ed out WeakVH
-  /// instances (can happen if some other loop pass deletes an
-  /// instruction in this list).
-  std::vector<WeakVH> UnknownInsts;
+  std::vector<AssertingVH<Instruction> > UnknownInsts;
 
   /// Number of nodes pointing to this AliasSet plus the number of AliasSets
   /// forwarding to it.
@@ -179,7 +171,7 @@ class AliasSet : public ilist_node<AliasSet> {
 
   Instruction *getUnknownInst(unsigned i) const {
     assert(i < UnknownInsts.size());
-    return cast_or_null<Instruction>(UnknownInsts[i]);
+    return UnknownInsts[i];
   }
 
 public:

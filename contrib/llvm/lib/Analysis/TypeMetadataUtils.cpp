@@ -39,7 +39,7 @@ findCallsAtConstantOffset(SmallVectorImpl<DevirtCallSite> &DevirtCalls,
 
 // Search for virtual calls that load from VPtr and add them to DevirtCalls.
 static void
-findLoadCallsAtConstantOffset(const Module *M,
+findLoadCallsAtConstantOffset(Module *M,
                               SmallVectorImpl<DevirtCallSite> &DevirtCalls,
                               Value *VPtr, int64_t Offset) {
   for (const Use &U : VPtr->uses()) {
@@ -62,10 +62,10 @@ findLoadCallsAtConstantOffset(const Module *M,
 
 void llvm::findDevirtualizableCallsForTypeTest(
     SmallVectorImpl<DevirtCallSite> &DevirtCalls,
-    SmallVectorImpl<CallInst *> &Assumes, const CallInst *CI) {
+    SmallVectorImpl<CallInst *> &Assumes, CallInst *CI) {
   assert(CI->getCalledFunction()->getIntrinsicID() == Intrinsic::type_test);
 
-  const Module *M = CI->getParent()->getParent()->getParent();
+  Module *M = CI->getParent()->getParent()->getParent();
 
   // Find llvm.assume intrinsics for this llvm.type.test call.
   for (const Use &CIU : CI->uses()) {
@@ -86,8 +86,7 @@ void llvm::findDevirtualizableCallsForTypeTest(
 void llvm::findDevirtualizableCallsForTypeCheckedLoad(
     SmallVectorImpl<DevirtCallSite> &DevirtCalls,
     SmallVectorImpl<Instruction *> &LoadedPtrs,
-    SmallVectorImpl<Instruction *> &Preds, bool &HasNonCallUses,
-    const CallInst *CI) {
+    SmallVectorImpl<Instruction *> &Preds, bool &HasNonCallUses, CallInst *CI) {
   assert(CI->getCalledFunction()->getIntrinsicID() ==
          Intrinsic::type_checked_load);
 
@@ -97,7 +96,7 @@ void llvm::findDevirtualizableCallsForTypeCheckedLoad(
     return;
   }
 
-  for (const Use &U : CI->uses()) {
+  for (Use &U : CI->uses()) {
     auto CIU = U.getUser();
     if (auto EVI = dyn_cast<ExtractValueInst>(CIU)) {
       if (EVI->getNumIndices() == 1 && EVI->getIndices()[0] == 0) {

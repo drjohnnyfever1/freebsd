@@ -427,11 +427,13 @@ unsigned A15SDOptimizer::createDupLane(MachineBasicBlock &MBB,
                                        unsigned Lane, bool QPR) {
   unsigned Out = MRI->createVirtualRegister(QPR ? &ARM::QPRRegClass :
                                                   &ARM::DPRRegClass);
-  BuildMI(MBB, InsertBefore, DL,
-          TII->get(QPR ? ARM::VDUPLN32q : ARM::VDUPLN32d), Out)
-      .addReg(Reg)
-      .addImm(Lane)
-      .add(predOps(ARMCC::AL));
+  AddDefaultPred(BuildMI(MBB,
+                         InsertBefore,
+                         DL,
+                         TII->get(QPR ? ARM::VDUPLN32q : ARM::VDUPLN32d),
+                         Out)
+                   .addReg(Reg)
+                   .addImm(Lane));
 
   return Out;
 }
@@ -474,11 +476,13 @@ unsigned A15SDOptimizer::createVExt(MachineBasicBlock &MBB,
                                     const DebugLoc &DL, unsigned Ssub0,
                                     unsigned Ssub1) {
   unsigned Out = MRI->createVirtualRegister(&ARM::DPRRegClass);
-  BuildMI(MBB, InsertBefore, DL, TII->get(ARM::VEXTd32), Out)
-      .addReg(Ssub0)
-      .addReg(Ssub1)
-      .addImm(1)
-      .add(predOps(ARMCC::AL));
+  AddDefaultPred(BuildMI(MBB,
+                         InsertBefore,
+                         DL,
+                         TII->get(ARM::VEXTd32), Out)
+                   .addReg(Ssub0)
+                   .addReg(Ssub1)
+                   .addImm(1));
   return Out;
 }
 

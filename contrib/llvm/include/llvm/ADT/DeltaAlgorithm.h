@@ -1,4 +1,4 @@
-//===- DeltaAlgorithm.h - A Set Minimization Algorithm ---------*- C++ -*--===//
+//===--- DeltaAlgorithm.h - A Set Minimization Algorithm -------*- C++ -*--===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -35,10 +35,10 @@ namespace llvm {
 /// predicate.
 class DeltaAlgorithm {
 public:
-  using change_ty = unsigned;
+  typedef unsigned change_ty;
   // FIXME: Use a decent data structure.
-  using changeset_ty = std::set<change_ty>;
-  using changesetlist_ty = std::vector<changeset_ty>;
+  typedef std::set<change_ty> changeset_ty;
+  typedef std::vector<changeset_ty> changesetlist_ty;
 
 private:
   /// Cache of failed test results. Successful test results are never cached
@@ -90,4 +90,4 @@ public:
 
 } // end namespace llvm
 
-#endif // LLVM_ADT_DELTAALGORITHM_H
+#endif

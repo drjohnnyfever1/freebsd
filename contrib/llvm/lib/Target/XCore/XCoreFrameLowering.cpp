@@ -238,7 +238,7 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF,
     report_fatal_error("emitPrologue unsupported alignment: "
                        + Twine(MFI.getMaxAlignment()));
 
-  const AttributeList &PAL = MF.getFunction()->getAttributes();
+  const AttributeSet &PAL = MF.getFunction()->getAttributes();
   if (PAL.hasAttrSomewhere(Attribute::Nest))
     BuildMI(MBB, MBBI, dl, TII.get(XCore::LDWSP_ru6), XCore::R11).addImm(0);
     // FIX: Needs addMemOperand() but can't use getFixedStack() or getStack().
@@ -575,17 +575,18 @@ processFunctionBeforeFrameFinalized(MachineFunction &MF,
                                     RegScavenger *RS) const {
   assert(RS && "requiresRegisterScavenging failed");
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  const TargetRegisterClass &RC = XCore::GRRegsRegClass;
-  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
+  const TargetRegisterClass *RC = &XCore::GRRegsRegClass;
   XCoreFunctionInfo *XFI = MF.getInfo<XCoreFunctionInfo>();
   // Reserve slots close to SP or frame pointer for Scavenging spills.
   // When using SP for small frames, we don't need any scratch registers.
   // When using SP for large frames, we may need 2 scratch registers.
   // When using FP, for large or small frames, we may need 1 scratch register.
-  unsigned Size = TRI.getSpillSize(RC);
-  unsigned Align = TRI.getSpillAlignment(RC);
   if (XFI->isLargeFrame(MF) || hasFP(MF))
-    RS->addScavengingFrameIndex(MFI.CreateStackObject(Size, Align, false));
+    RS->addScavengingFrameIndex(MFI.CreateStackObject(RC->getSize(),
+                                                      RC->getAlignment(),
+                                                      false));
   if (XFI->isLargeFrame(MF) && !hasFP(MF))
-    RS->addScavengingFrameIndex(MFI.CreateStackObject(Size, Align, false));
+    RS->addScavengingFrameIndex(MFI.CreateStackObject(RC->getSize(),
+                                                      RC->getAlignment(),
+                                                      false));
 }

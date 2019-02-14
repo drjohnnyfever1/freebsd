@@ -60,42 +60,36 @@ INTERCEPTOR(void, cfree, void *ptr) {
 #endif // SANITIZER_INTERCEPT_CFREE
 
 INTERCEPTOR(void*, malloc, uptr size) {
-  if (UNLIKELY(asan_init_is_running))
+  if (UNLIKELY(!asan_inited))
     // Hack: dlsym calls malloc before REAL(malloc) is retrieved from dlsym.
     return AllocateFromLocalPool(size);
-  ENSURE_ASAN_INITED();
   GET_STACK_TRACE_MALLOC;
   return asan_malloc(size, &stack);
 }
 
 INTERCEPTOR(void*, calloc, uptr nmemb, uptr size) {
-  if (UNLIKELY(asan_init_is_running))
+  if (UNLIKELY(!asan_inited))
     // Hack: dlsym calls calloc before REAL(calloc) is retrieved from dlsym.
     return AllocateFromLocalPool(nmemb * size);
-  ENSURE_ASAN_INITED();
   GET_STACK_TRACE_MALLOC;
   return asan_calloc(nmemb, size, &stack);
 }
 
 INTERCEPTOR(void*, realloc, void *ptr, uptr size) {
+  GET_STACK_TRACE_MALLOC;
   if (UNLIKELY(IsInDlsymAllocPool(ptr))) {
-    const uptr offset = (uptr)ptr - (uptr)alloc_memory_for_dlsym;
-    const uptr copy_size = Min(size, kDlsymAllocPoolSize - offset);
+    uptr offset = (uptr)ptr - (uptr)alloc_memory_for_dlsym;
+    uptr copy_size = Min(size, kDlsymAllocPoolSize - offset);
     void *new_ptr;
-    if (UNLIKELY(asan_init_is_running)) {
+    if (UNLIKELY(!asan_inited)) {
       new_ptr = AllocateFromLocalPool(size);
     } else {
-      ENSURE_ASAN_INITED();
-      GET_STACK_TRACE_MALLOC;
-      new_ptr = asan_malloc(size, &stack);
+      copy_size = size;
+      new_ptr = asan_malloc(copy_size, &stack);
     }
     internal_memcpy(new_ptr, ptr, copy_size);
     return new_ptr;
   }
-  if (UNLIKELY(asan_init_is_running))
-    return AllocateFromLocalPool(size);
-  ENSURE_ASAN_INITED();
-  GET_STACK_TRACE_MALLOC;
   return asan_realloc(ptr, size, &stack);
 }
 

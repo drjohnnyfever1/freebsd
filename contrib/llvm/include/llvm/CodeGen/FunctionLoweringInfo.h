@@ -1,4 +1,4 @@
-//===- FunctionLoweringInfo.h - Lower functions from LLVM IR to CodeGen ---===//
+//===-- FunctionLoweringInfo.h - Lower functions from LLVM IR to CodeGen --===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -23,28 +23,28 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Value.h"
-#include "llvm/Support/KnownBits.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include <cassert>
-#include <utility>
 #include <vector>
 
 namespace llvm {
 
-class Argument;
+class AllocaInst;
 class BasicBlock;
 class BranchProbabilityInfo;
 class Function;
+class GlobalVariable;
 class Instruction;
-class MachineFunction;
 class MachineInstr;
+class MachineBasicBlock;
+class MachineFunction;
+class MachineModuleInfo;
 class MachineRegisterInfo;
-class MVT;
 class SelectionDAG;
+class MVT;
 class TargetLowering;
+class Value;
 
 //===--------------------------------------------------------------------===//
 /// FunctionLoweringInfo - This contains information that is global to a
@@ -73,28 +73,24 @@ public:
 
   /// A map from swifterror value in a basic block to the virtual register it is
   /// currently represented by.
-  DenseMap<std::pair<const MachineBasicBlock *, const Value *>, unsigned>
+  llvm::DenseMap<std::pair<const MachineBasicBlock *, const Value *>, unsigned>
       SwiftErrorVRegDefMap;
 
   /// A list of upward exposed vreg uses that need to be satisfied by either a
   /// copy def or a phi node at the beginning of the basic block representing
   /// the predecessor(s) swifterror value.
-  DenseMap<std::pair<const MachineBasicBlock *, const Value *>, unsigned>
+  llvm::DenseMap<std::pair<const MachineBasicBlock *, const Value *>, unsigned>
       SwiftErrorVRegUpwardsUse;
-
-  /// A map from instructions that define/use a swifterror value to the virtual
-  /// register that represents that def/use.
-  llvm::DenseMap<PointerIntPair<const Instruction *, 1, bool>, unsigned>
-      SwiftErrorVRegDefUses;
 
   /// The swifterror argument of the current function.
   const Value *SwiftErrorArg;
 
-  using SwiftErrorValues = SmallVector<const Value*, 1>;
+  typedef SmallVector<const Value*, 1> SwiftErrorValues;
   /// A function can only have a single swifterror argument. And if it does
   /// have a swifterror argument, it must be the first entry in
   /// SwiftErrorVals.
   SwiftErrorValues SwiftErrorVals;
+
 
   /// Get or create the swifterror value virtual register in
   /// SwiftErrorVRegDefMap for this basic block.
@@ -105,13 +101,6 @@ public:
   /// basic block.
   void setCurrentSwiftErrorVReg(const MachineBasicBlock *MBB, const Value *,
                                 unsigned);
-
-  /// Get or create the swifterror value virtual register for a def of a
-  /// swifterror by an instruction.
-  std::pair<unsigned, bool> getOrCreateSwiftErrorVRegDefAt(const Instruction *);
-  std::pair<unsigned, bool>
-  getOrCreateSwiftErrorVRegUseAt(const Instruction *, const MachineBasicBlock *,
-                                 const Value *);
 
   /// ValueMap - Since we emit code for the function a basic block at a time,
   /// we must remember which virtual registers hold the values for
@@ -128,7 +117,7 @@ public:
   /// slot), and we track that here.
 
   struct StatepointSpillMap {
-    using SlotMapTy = DenseMap<const Value *, Optional<int>>;
+    typedef DenseMap<const Value *, Optional<int>> SlotMapTy;
 
     /// Maps uniqued llvm IR values to the slots they were spilled in.  If a
     /// value is mapped to None it means we visited the value but didn't spill
@@ -182,9 +171,9 @@ public:
   struct LiveOutInfo {
     unsigned NumSignBits : 31;
     unsigned IsValid : 1;
-    KnownBits Known = 1;
-
-    LiveOutInfo() : NumSignBits(0), IsValid(true) {}
+    APInt KnownOne, KnownZero;
+    LiveOutInfo() : NumSignBits(0), IsValid(true), KnownOne(1, 0),
+                    KnownZero(1, 0) {}
   };
 
   /// Record the preferred extend type (ISD::SIGN_EXTEND or ISD::ZERO_EXTEND)
@@ -258,16 +247,16 @@ public:
 
   /// AddLiveOutRegInfo - Adds LiveOutInfo for a register.
   void AddLiveOutRegInfo(unsigned Reg, unsigned NumSignBits,
-                         const KnownBits &Known) {
+                         const APInt &KnownZero, const APInt &KnownOne) {
     // Only install this information if it tells us something.
-    if (NumSignBits == 1 && Known.isUnknown())
+    if (NumSignBits == 1 && KnownZero == 0 && KnownOne == 0)
       return;
 
     LiveOutRegInfo.grow(Reg);
     LiveOutInfo &LOI = LiveOutRegInfo[Reg];
     LOI.NumSignBits = NumSignBits;
-    LOI.Known.One = Known.One;
-    LOI.Known.Zero = Known.Zero;
+    LOI.KnownOne = KnownOne;
+    LOI.KnownZero = KnownZero;
   }
 
   /// ComputePHILiveOutRegInfo - Compute LiveOutInfo for a PHI's destination
@@ -309,4 +298,4 @@ private:
 
 } // end namespace llvm
 
-#endif // LLVM_CODEGEN_FUNCTIONLOWERINGINFO_H
+#endif

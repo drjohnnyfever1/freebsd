@@ -20,17 +20,15 @@ namespace llvm {
 class ScopedPrinter;
 
 namespace codeview {
-class TypeCollection;
+class TypeDatabase;
 
 /// Dumper for CodeView symbol streams found in COFF object files and PDB files.
 class CVSymbolDumper {
 public:
-  CVSymbolDumper(ScopedPrinter &W, TypeCollection &Types,
-                 CodeViewContainer Container,
+  CVSymbolDumper(ScopedPrinter &W, TypeDatabase &TypeDB,
                  std::unique_ptr<SymbolDumpDelegate> ObjDelegate,
                  bool PrintRecordBytes)
-      : W(W), Types(Types), Container(Container),
-        ObjDelegate(std::move(ObjDelegate)),
+      : W(W), TypeDB(TypeDB), ObjDelegate(std::move(ObjDelegate)),
         PrintRecordBytes(PrintRecordBytes) {}
 
   /// Dumps one type record.  Returns false if there was a type parsing error,
@@ -45,8 +43,7 @@ public:
 
 private:
   ScopedPrinter &W;
-  TypeCollection &Types;
-  CodeViewContainer Container;
+  TypeDatabase &TypeDB;
   std::unique_ptr<SymbolDumpDelegate> ObjDelegate;
 
   bool PrintRecordBytes;

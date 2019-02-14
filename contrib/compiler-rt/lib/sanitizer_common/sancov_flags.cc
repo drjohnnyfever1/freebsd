@@ -15,9 +15,10 @@
 #include "sanitizer_flag_parser.h"
 #include "sanitizer_platform.h"
 
-SANITIZER_INTERFACE_WEAK_DEF(const char*, __sancov_default_options, void) {
-  return "";
-}
+#if !SANITIZER_LINUX
+// other platforms do not have weak symbols out of the box.
+extern "C" const char* __sancov_default_options() { return ""; }
+#endif
 
 using namespace __sanitizer;
 

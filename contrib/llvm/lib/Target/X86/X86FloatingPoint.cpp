@@ -123,26 +123,18 @@ namespace {
     EdgeBundles *Bundles;
 
     // Return a bitmask of FP registers in block's live-in list.
-    static unsigned calcLiveInMask(MachineBasicBlock *MBB, bool RemoveFPs) {
+    static unsigned calcLiveInMask(MachineBasicBlock *MBB) {
       unsigned Mask = 0;
-      for (MachineBasicBlock::livein_iterator I = MBB->livein_begin();
-           I != MBB->livein_end(); ) {
-        MCPhysReg Reg = I->PhysReg;
-        static_assert(X86::FP6 - X86::FP0 == 6, "sequential regnums");
-        if (Reg >= X86::FP0 && Reg <= X86::FP6) {
-          Mask |= 1 << (Reg - X86::FP0);
-          if (RemoveFPs) {
-            I = MBB->removeLiveIn(I);
-            continue;
-          }
-        }
-        ++I;
+      for (const auto &LI : MBB->liveins()) {
+        if (LI.PhysReg < X86::FP0 || LI.PhysReg > X86::FP6)
+          continue;
+        Mask |= 1 << (LI.PhysReg - X86::FP0);
       }
       return Mask;
     }
 
     // Partition all the CFG edges into LiveBundles.
-    void bundleCFGRecomputeKillFlags(MachineFunction &MF);
+    void bundleCFG(MachineFunction &MF);
 
     MachineBasicBlock *MBB;     // Current basic block
 
@@ -335,7 +327,7 @@ bool FPS::runOnMachineFunction(MachineFunction &MF) {
   TII = MF.getSubtarget().getInstrInfo();
 
   // Prepare cross-MBB liveness.
-  bundleCFGRecomputeKillFlags(MF);
+  bundleCFG(MF);
 
   StackTop = 0;
 
@@ -383,15 +375,13 @@ bool FPS::runOnMachineFunction(MachineFunction &MF) {
 /// registers live-out from a block is identical to the live-in set of all
 /// successors. This is not enforced by the normal live-in lists since
 /// registers may be implicitly defined, or not used by all successors.
-void FPS::bundleCFGRecomputeKillFlags(MachineFunction &MF) {
+void FPS::bundleCFG(MachineFunction &MF) {
   assert(LiveBundles.empty() && "Stale data in LiveBundles");
   LiveBundles.resize(Bundles->getNumBundles());
 
   // Gather the actual live-in masks for all MBBs.
   for (MachineBasicBlock &MBB : MF) {
-    setKillFlags(MBB);
-
-    const unsigned Mask = calcLiveInMask(&MBB, false);
+    const unsigned Mask = calcLiveInMask(&MBB);
     if (!Mask)
       continue;
     // Update MBB ingoing bundle mask.
@@ -406,6 +396,7 @@ bool FPS::processBasicBlock(MachineFunction &MF, MachineBasicBlock &BB) {
   bool Changed = false;
   MBB = &BB;
 
+  setKillFlags(BB);
   setupBlockStack();
 
   for (MachineBasicBlock::iterator I = BB.begin(); I != BB.end(); ++I) {
@@ -462,7 +453,6 @@ bool FPS::processBasicBlock(MachineFunction &MF, MachineBasicBlock &BB) {
       unsigned Reg = DeadRegs[i];
       // Check if Reg is live on the stack. An inline-asm register operand that
       // is in the clobber list and marked dead might not be live on the stack.
-      static_assert(X86::FP7 - X86::FP0 == 7, "sequential FP regnumbers");
       if (Reg >= X86::FP0 && Reg <= X86::FP6 && isLive(Reg-X86::FP0)) {
         DEBUG(dbgs() << "Register FP#" << Reg-X86::FP0 << " is dead!\n");
         freeStackSlotAfter(I, Reg-X86::FP0);
@@ -516,6 +506,7 @@ void FPS::setupBlockStack() {
 
   // Push the fixed live-in registers.
   for (unsigned i = Bundle.FixCount; i > 0; --i) {
+    MBB->addLiveIn(X86::ST0+i-1);
     DEBUG(dbgs() << "Live-in st(" << (i-1) << "): %FP"
                  << unsigned(Bundle.FixStack[i-1]) << '\n');
     pushReg(Bundle.FixStack[i-1]);
@@ -524,8 +515,7 @@ void FPS::setupBlockStack() {
   // Kill off unwanted live-ins. This can happen with a critical edge.
   // FIXME: We could keep these live registers around as zombies. They may need
   // to be revived at the end of a short block. It might save a few instrs.
-  unsigned Mask = calcLiveInMask(MBB, /*RemoveFPs=*/true);
-  adjustLiveRegs(Mask, MBB->begin());
+  adjustLiveRegs(calcLiveInMask(MBB), MBB->begin());
   DEBUG(MBB->dump());
 }
 
@@ -1665,8 +1655,8 @@ void FPS::handleSpecialFP(MachineBasicBlock::iterator &Inst) {
 }
 
 void FPS::setKillFlags(MachineBasicBlock &MBB) const {
-  const TargetRegisterInfo &TRI =
-      *MBB.getParent()->getSubtarget().getRegisterInfo();
+  const TargetRegisterInfo *TRI =
+      MBB.getParent()->getSubtarget().getRegisterInfo();
   LivePhysRegs LPR(TRI);
 
   LPR.addLiveOuts(MBB);

@@ -12,13 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/CodeGen/Passes.h"
-#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -35,6 +34,8 @@ STATISTIC(NumResumesLowered, "Number of resume calls lowered");
 
 namespace {
   class DwarfEHPrepare : public FunctionPass {
+    const TargetMachine *TM;
+
     // RewindFunction - _Unwind_Resume or the target equivalent.
     Constant *RewindFunction;
 
@@ -51,9 +52,15 @@ namespace {
   public:
     static char ID; // Pass identification, replacement for typeid.
 
+    // INITIALIZE_TM_PASS requires a default constructor, but it isn't used in
+    // practice.
     DwarfEHPrepare()
-        : FunctionPass(ID), RewindFunction(nullptr), DT(nullptr), TLI(nullptr) {
-    }
+        : FunctionPass(ID), TM(nullptr), RewindFunction(nullptr), DT(nullptr),
+          TLI(nullptr) {}
+
+    DwarfEHPrepare(const TargetMachine *TM)
+        : FunctionPass(ID), TM(TM), RewindFunction(nullptr), DT(nullptr),
+          TLI(nullptr) {}
 
     bool runOnFunction(Function &Fn) override;
 
@@ -71,18 +78,18 @@ namespace {
 } // end anonymous namespace
 
 char DwarfEHPrepare::ID = 0;
-INITIALIZE_PASS_BEGIN(DwarfEHPrepare, DEBUG_TYPE,
-                      "Prepare DWARF exceptions", false, false)
+INITIALIZE_TM_PASS_BEGIN(DwarfEHPrepare, "dwarfehprepare",
+                         "Prepare DWARF exceptions", false, false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
 INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
-INITIALIZE_PASS_END(DwarfEHPrepare, DEBUG_TYPE,
-                    "Prepare DWARF exceptions", false, false)
+INITIALIZE_TM_PASS_END(DwarfEHPrepare, "dwarfehprepare",
+                       "Prepare DWARF exceptions", false, false)
 
-FunctionPass *llvm::createDwarfEHPass() { return new DwarfEHPrepare(); }
+FunctionPass *llvm::createDwarfEHPass(const TargetMachine *TM) {
+  return new DwarfEHPrepare(TM);
+}
 
 void DwarfEHPrepare::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<TargetPassConfig>();
   AU.addRequired<TargetTransformInfoWrapperPass>();
   AU.addRequired<DominatorTreeWrapperPass>();
 }
@@ -247,10 +254,9 @@ bool DwarfEHPrepare::InsertUnwindResumeCalls(Function &Fn) {
 }
 
 bool DwarfEHPrepare::runOnFunction(Function &Fn) {
-  const TargetMachine &TM =
-      getAnalysis<TargetPassConfig>().getTM<TargetMachine>();
+  assert(TM && "DWARF EH preparation requires a target machine");
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  TLI = TM.getSubtargetImpl(Fn)->getTargetLowering();
+  TLI = TM->getSubtargetImpl(Fn)->getTargetLowering();
   bool Changed = InsertUnwindResumeCalls(Fn);
   DT = nullptr;
   TLI = nullptr;

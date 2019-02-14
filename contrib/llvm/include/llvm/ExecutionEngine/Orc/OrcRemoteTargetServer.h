@@ -1,4 +1,4 @@
-//===- OrcRemoteTargetServer.h - Orc Remote-target Server -------*- C++ -*-===//
+//===---- OrcRemoteTargetServer.h - Orc Remote-target Server ----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,9 +15,10 @@
 #ifndef LLVM_EXECUTIONENGINE_ORC_ORCREMOTETARGETSERVER_H
 #define LLVM_EXECUTIONENGINE_ORC_ORCREMOTETARGETSERVER_H
 
+#include "OrcRemoteTargetRPCAPI.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/Orc/OrcError.h"
-#include "llvm/ExecutionEngine/Orc/OrcRemoteTargetRPCAPI.h"
+#include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Format.h"
@@ -47,18 +48,20 @@ namespace remote {
 template <typename ChannelT, typename TargetT>
 class OrcRemoteTargetServer : public OrcRemoteTargetRPCAPI {
 public:
-  using SymbolLookupFtor =
-      std::function<JITTargetAddress(const std::string &Name)>;
+  typedef std::function<JITTargetAddress(const std::string &Name)>
+      SymbolLookupFtor;
 
-  using EHFrameRegistrationFtor =
-      std::function<void(uint8_t *Addr, uint32_t Size)>;
+  typedef std::function<void(uint8_t *Addr, uint32_t Size)>
+      EHFrameRegistrationFtor;
 
   OrcRemoteTargetServer(ChannelT &Channel, SymbolLookupFtor SymbolLookup,
                         EHFrameRegistrationFtor EHFramesRegister,
                         EHFrameRegistrationFtor EHFramesDeregister)
       : OrcRemoteTargetRPCAPI(Channel), SymbolLookup(std::move(SymbolLookup)),
         EHFramesRegister(std::move(EHFramesRegister)),
-        EHFramesDeregister(std::move(EHFramesDeregister)) {
+        EHFramesDeregister(std::move(EHFramesDeregister)),
+        TerminateFlag(false) {
+
     using ThisT = typename std::remove_reference<decltype(*this)>::type;
     addHandler<CallIntVoid>(*this, &ThisT::handleCallIntVoid);
     addHandler<CallMain>(*this, &ThisT::handleCallMain);
@@ -103,7 +106,6 @@ private:
   struct Allocator {
     Allocator() = default;
     Allocator(Allocator &&Other) : Allocs(std::move(Other.Allocs)) {}
-
     Allocator &operator=(Allocator &&Other) {
       Allocs = std::move(Other.Allocs);
       return *this;
@@ -130,7 +132,7 @@ private:
     Error setProtections(void *block, unsigned Flags) {
       auto I = Allocs.find(block);
       if (I == Allocs.end())
-        return errorCodeToError(orcError(OrcErrorCode::RemoteMProtectAddrUnrecognized));
+        return orcError(OrcErrorCode::RemoteMProtectAddrUnrecognized);
       return errorCodeToError(
           sys::Memory::protectMappedMemory(I->second, Flags));
     }
@@ -151,8 +153,7 @@ private:
   }
 
   Expected<int32_t> handleCallIntVoid(JITTargetAddress Addr) {
-    using IntVoidFnTy = int (*)();
-
+    typedef int (*IntVoidFnTy)();
     IntVoidFnTy Fn =
         reinterpret_cast<IntVoidFnTy>(static_cast<uintptr_t>(Addr));
 
@@ -165,7 +166,7 @@ private:
 
   Expected<int32_t> handleCallMain(JITTargetAddress Addr,
                                    std::vector<std::string> Args) {
-    using MainFnTy = int (*)(int, const char *[]);
+    typedef int (*MainFnTy)(int, const char *[]);
 
     MainFnTy Fn = reinterpret_cast<MainFnTy>(static_cast<uintptr_t>(Addr));
     int ArgC = Args.size() + 1;
@@ -174,12 +175,6 @@ private:
     ArgV[0] = "<jit process>";
     for (auto &Arg : Args)
       ArgV[Idx++] = Arg.c_str();
-    ArgV[ArgC] = 0;
-    DEBUG(
-      for (int Idx = 0; Idx < ArgC; ++Idx) {
-        llvm::dbgs() << "Arg " << Idx << ": " << ArgV[Idx] << "\n";
-      }
-    );
 
     DEBUG(dbgs() << "  Calling " << format("0x%016x", Addr) << "\n");
     int Result = Fn(ArgC, ArgV.get());
@@ -189,8 +184,7 @@ private:
   }
 
   Error handleCallVoidVoid(JITTargetAddress Addr) {
-    using VoidVoidFnTy = void (*)();
-
+    typedef void (*VoidVoidFnTy)();
     VoidVoidFnTy Fn =
         reinterpret_cast<VoidVoidFnTy>(static_cast<uintptr_t>(Addr));
 
@@ -204,8 +198,7 @@ private:
   Error handleCreateRemoteAllocator(ResourceIdMgr::ResourceId Id) {
     auto I = Allocators.find(Id);
     if (I != Allocators.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteAllocatorIdAlreadyInUse));
+      return orcError(OrcErrorCode::RemoteAllocatorIdAlreadyInUse);
     DEBUG(dbgs() << "  Created allocator " << Id << "\n");
     Allocators[Id] = Allocator();
     return Error::success();
@@ -214,8 +207,7 @@ private:
   Error handleCreateIndirectStubsOwner(ResourceIdMgr::ResourceId Id) {
     auto I = IndirectStubsOwners.find(Id);
     if (I != IndirectStubsOwners.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteIndirectStubsOwnerIdAlreadyInUse));
+      return orcError(OrcErrorCode::RemoteIndirectStubsOwnerIdAlreadyInUse);
     DEBUG(dbgs() << "  Create indirect stubs owner " << Id << "\n");
     IndirectStubsOwners[Id] = ISBlockOwnerList();
     return Error::success();
@@ -232,8 +224,7 @@ private:
   Error handleDestroyRemoteAllocator(ResourceIdMgr::ResourceId Id) {
     auto I = Allocators.find(Id);
     if (I == Allocators.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteAllocatorDoesNotExist));
+      return orcError(OrcErrorCode::RemoteAllocatorDoesNotExist);
     Allocators.erase(I);
     DEBUG(dbgs() << "  Destroyed allocator " << Id << "\n");
     return Error::success();
@@ -242,8 +233,7 @@ private:
   Error handleDestroyIndirectStubsOwner(ResourceIdMgr::ResourceId Id) {
     auto I = IndirectStubsOwners.find(Id);
     if (I == IndirectStubsOwners.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteIndirectStubsOwnerDoesNotExist));
+      return orcError(OrcErrorCode::RemoteIndirectStubsOwnerDoesNotExist);
     IndirectStubsOwners.erase(I);
     return Error::success();
   }
@@ -256,8 +246,7 @@ private:
 
     auto StubOwnerItr = IndirectStubsOwners.find(Id);
     if (StubOwnerItr == IndirectStubsOwners.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteIndirectStubsOwnerDoesNotExist));
+      return orcError(OrcErrorCode::RemoteIndirectStubsOwnerDoesNotExist);
 
     typename TargetT::IndirectStubsInfo IS;
     if (auto Err =
@@ -372,8 +361,7 @@ private:
                                               uint64_t Size, uint32_t Align) {
     auto I = Allocators.find(Id);
     if (I == Allocators.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteAllocatorDoesNotExist));
+      return orcError(OrcErrorCode::RemoteAllocatorDoesNotExist);
     auto &Allocator = I->second;
     void *LocalAllocAddr = nullptr;
     if (auto Err = Allocator.allocate(LocalAllocAddr, Size, Align))
@@ -392,8 +380,7 @@ private:
                              JITTargetAddress Addr, uint32_t Flags) {
     auto I = Allocators.find(Id);
     if (I == Allocators.end())
-      return errorCodeToError(
-               orcError(OrcErrorCode::RemoteAllocatorDoesNotExist));
+      return orcError(OrcErrorCode::RemoteAllocatorDoesNotExist);
     auto &Allocator = I->second;
     void *LocalAddr = reinterpret_cast<void *>(static_cast<uintptr_t>(Addr));
     DEBUG(dbgs() << "  Allocator " << Id << " set permissions on " << LocalAddr
@@ -426,11 +413,11 @@ private:
   SymbolLookupFtor SymbolLookup;
   EHFrameRegistrationFtor EHFramesRegister, EHFramesDeregister;
   std::map<ResourceIdMgr::ResourceId, Allocator> Allocators;
-  using ISBlockOwnerList = std::vector<typename TargetT::IndirectStubsInfo>;
+  typedef std::vector<typename TargetT::IndirectStubsInfo> ISBlockOwnerList;
   std::map<ResourceIdMgr::ResourceId, ISBlockOwnerList> IndirectStubsOwners;
   sys::OwningMemoryBlock ResolverBlock;
   std::vector<sys::OwningMemoryBlock> TrampolineBlocks;
-  bool TerminateFlag = false;
+  bool TerminateFlag;
 };
 
 } // end namespace remote
@@ -439,4 +426,4 @@ private:
 
 #undef DEBUG_TYPE
 
-#endif // LLVM_EXECUTIONENGINE_ORC_ORCREMOTETARGETSERVER_H
+#endif

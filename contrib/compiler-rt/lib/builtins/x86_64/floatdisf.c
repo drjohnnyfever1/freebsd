@@ -2,7 +2,7 @@
  * License. See LICENSE.TXT for details.
  */
 
-#if defined(__x86_64__) || defined(_M_X64)
+#ifdef __x86_64__
 
 #include "../int_lib.h"
 

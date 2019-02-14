@@ -848,7 +848,8 @@ EmitResultInstructionAsOperand(const TreePatternNode *N,
     if (II.HasOneImplicitDefWithKnownVT(CGT) != MVT::Other)
       HandledReg = II.ImplicitDefs[0];
 
-    for (Record *Reg : Pattern.getDstRegs()) {
+    for (unsigned i = 0; i != Pattern.getDstRegs().size(); ++i) {
+      Record *Reg = Pattern.getDstRegs()[i];
       if (!Reg->isSubClassOf("Register") || Reg == HandledReg) continue;
       ResultVTs.push_back(getRegisterValueType(Reg, CGT));
     }
@@ -886,7 +887,7 @@ EmitResultInstructionAsOperand(const TreePatternNode *N,
   assert((!ResultVTs.empty() || TreeHasOutGlue || NodeHasChain) &&
          "Node has no result");
 
-  AddMatcher(new EmitNodeMatcher(II.Namespace.str()+"::"+II.TheDef->getName().str(),
+  AddMatcher(new EmitNodeMatcher(II.Namespace+"::"+II.TheDef->getName().str(),
                                  ResultVTs, InstOps,
                                  NodeHasChain, TreeHasInGlue, TreeHasOutGlue,
                                  NodeHasMemRefs, NumFixedArityOperands,
@@ -971,7 +972,8 @@ void MatcherGen::EmitResultCode() {
         HandledReg = II.ImplicitDefs[0];
     }
 
-    for (Record *Reg : Pattern.getDstRegs()) {
+    for (unsigned i = 0; i != Pattern.getDstRegs().size(); ++i) {
+      Record *Reg = Pattern.getDstRegs()[i];
       if (!Reg->isSubClassOf("Register") || Reg == HandledReg) continue;
       ++NumSrcResults;
     }

@@ -64,8 +64,8 @@ class Record;
 
 class SetTheory {
 public:
-  using RecVec = std::vector<Record *>;
-  using RecSet = SmallSetVector<Record *, 16>;
+  typedef std::vector<Record*> RecVec;
+  typedef SmallSetVector<Record*, 16> RecSet;
 
   /// Operator - A callback representing a DAG operator.
   class Operator {
@@ -95,7 +95,7 @@ public:
 private:
   // Map set defs to their fully expanded contents. This serves as a memoization
   // cache and it makes it possible to return const references on queries.
-  using ExpandMap = std::map<Record *, RecVec>;
+  typedef std::map<Record*, RecVec> ExpandMap;
   ExpandMap Expansions;
 
   // Known DAG operators by name.

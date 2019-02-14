@@ -54,8 +54,6 @@ public:
     }
     return false;
   }
-
-  StringRef getPassName() const override { return "Print Loop IR"; }
 };
 
 char PrintLoopPassWrapper::ID = 0;
@@ -73,23 +71,30 @@ LPPassManager::LPPassManager()
   CurrentLoop = nullptr;
 }
 
-// Insert loop into loop nest (LoopInfo) and loop queue (LQ).
-void LPPassManager::addLoop(Loop &L) {
-  if (!L.getParentLoop()) {
+// Inset loop into loop nest (LoopInfo) and loop queue (LQ).
+Loop &LPPassManager::addLoop(Loop *ParentLoop) {
+  // Create a new loop. LI will take ownership.
+  Loop *L = new Loop();
+
+  // Insert into the loop nest and the loop queue.
+  if (!ParentLoop) {
     // This is the top level loop.
-    LQ.push_front(&L);
-    return;
+    LI->addTopLevelLoop(L);
+    LQ.push_front(L);
+    return *L;
   }
 
+  ParentLoop->addChildLoop(L);
   // Insert L into the loop queue after the parent loop.
   for (auto I = LQ.begin(), E = LQ.end(); I != E; ++I) {
-    if (*I == L.getParentLoop()) {
+    if (*I == L->getParentLoop()) {
       // deque does not support insert after.
       ++I;
-      LQ.insert(I, 1, &L);
-      return;
+      LQ.insert(I, 1, L);
+      break;
     }
   }
+  return *L;
 }
 
 /// cloneBasicBlockSimpleAnalysis - Invoke cloneBasicBlockAnalysis hook for

@@ -1,4 +1,4 @@
-//==- SystemZMachineScheduler.h - SystemZ Scheduler Interface ----*- C++ -*-==//
+//==-- SystemZMachineScheduler.h - SystemZ Scheduler Interface -*- C++ -*---==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,10 +14,10 @@
 // usage of processor resources.
 //===----------------------------------------------------------------------===//
 
+#include "SystemZInstrInfo.h"
 #include "SystemZHazardRecognizer.h"
 #include "llvm/CodeGen/MachineScheduler.h"
-#include "llvm/CodeGen/ScheduleDAG.h"
-#include <set>
+#include "llvm/Support/Debug.h"
 
 #ifndef LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZMACHINESCHEDULER_H
 #define LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZMACHINESCHEDULER_H
@@ -28,29 +28,29 @@ namespace llvm {
   
 /// A MachineSchedStrategy implementation for SystemZ post RA scheduling.
 class SystemZPostRASchedStrategy : public MachineSchedStrategy {
-  ScheduleDAGMI *DAG;
+    ScheduleDAGMI *DAG;
   
   /// A candidate during instruction evaluation.
   struct Candidate {
-    SUnit *SU = nullptr;
+    SUnit *SU;
 
     /// The decoding cost.
-    int GroupingCost = 0;
+    int GroupingCost;
 
     /// The processor resources cost.
-    int ResourcesCost = 0;
+    int ResourcesCost;
 
-    Candidate() = default;
+    Candidate() : SU(nullptr), GroupingCost(0), ResourcesCost(0) {}
     Candidate(SUnit *SU_, SystemZHazardRecognizer &HazardRec);
 
     // Compare two candidates.
     bool operator<(const Candidate &other);
 
     // Check if this node is free of cost ("as good as any").
-    bool noCost() const {
+    bool inline noCost() {
       return (GroupingCost <= 0 && !ResourcesCost);
     }
-  };
+   };
 
   // A sorter for the Available set that makes sure that SUs are considered
   // in the best order.
@@ -72,7 +72,7 @@ class SystemZPostRASchedStrategy : public MachineSchedStrategy {
   // A set of SUs with a sorter and dump method.
   struct SUSet : std::set<SUnit*, SUSorter> {
     #ifndef NDEBUG
-    void dump(SystemZHazardRecognizer &HazardRec) const;
+    void dump(SystemZHazardRecognizer &HazardRec);
     #endif
   };
 
@@ -83,7 +83,7 @@ class SystemZPostRASchedStrategy : public MachineSchedStrategy {
   // region.
   SystemZHazardRecognizer HazardRec;
   
-public:
+ public:
   SystemZPostRASchedStrategy(const MachineSchedContext *C);
 
   /// PostRA scheduling does not track pressure.
@@ -107,6 +107,6 @@ public:
   void releaseBottomNode(SUnit *SU) override {};
 };
 
-} // end namespace llvm
+} // namespace llvm
 
-#endif // LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZMACHINESCHEDULER_H
+#endif /* LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZMACHINESCHEDULER_H */

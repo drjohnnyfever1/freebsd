@@ -31,25 +31,35 @@
 #ifndef LLVM_CODEGEN_MACHINEMODULEINFO_H
 #define LLVM_CODEGEN_MACHINEMODULEINFO_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PointerIntPair.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MachineLocation.h"
 #include "llvm/Pass.h"
-#include <memory>
-#include <utility>
-#include <vector>
+#include "llvm/Support/DataTypes.h"
 
 namespace llvm {
 
-class BasicBlock;
+//===----------------------------------------------------------------------===//
+// Forward declarations.
+class BlockAddress;
 class CallInst;
-class Function;
-class MachineFunction;
+class Constant;
+class GlobalVariable;
+class LandingPadInst;
+class MDNode;
 class MMIAddrLabelMap;
+class MachineBasicBlock;
+class MachineFunction;
+class MachineFunctionInitializer;
 class Module;
-class TargetMachine;
+class PointerType;
+class StructType;
 
 //===----------------------------------------------------------------------===//
 /// This class can be derived from and used by targets to hold private
@@ -59,12 +69,11 @@ class TargetMachine;
 ///
 class MachineModuleInfoImpl {
 public:
-  using StubValueTy = PointerIntPair<MCSymbol *, 1, bool>;
-  using SymbolListTy = std::vector<std::pair<MCSymbol *, StubValueTy>>;
-
+  typedef PointerIntPair<MCSymbol*, 1, bool> StubValueTy;
   virtual ~MachineModuleInfoImpl();
-
+  typedef std::vector<std::pair<MCSymbol*, StubValueTy> > SymbolListTy;
 protected:
+
   /// Return the entries from a DenseMap in a deterministic sorted orer.
   /// Clears the map.
   static SymbolListTy getSortedStubs(DenseMap<MCSymbol*, StubValueTy>&);
@@ -107,7 +116,7 @@ class MachineModuleInfo : public ImmutablePass {
 
   // TODO: Ideally, what we'd like is to have a switch that allows emitting 
   // synchronous (precise at call-sites only) CFA into .eh_frame. However,
-  // even under this switch, we'd like .debug_frame to be precise when using
+  // even under this switch, we'd like .debug_frame to be precise when using.
   // -g. At this moment, there's no way to specify that some CFI directives
   // go into .eh_frame only, while others go into .debug_frame only.
 
@@ -125,6 +134,7 @@ class MachineModuleInfo : public ImmutablePass {
   /// comments in lib/Target/X86/X86FrameLowering.cpp for more details.
   bool UsesMorestackAddr;
 
+  MachineFunctionInitializer *MFInitializer;
   /// Maps IR Functions to their corresponding MachineFunctions.
   DenseMap<const Function*, std::unique_ptr<MachineFunction>> MachineFunctions;
   /// Next unique number available for a MachineFunction.
@@ -148,13 +158,14 @@ public:
   void setModule(const Module *M) { TheModule = M; }
   const Module *getModule() const { return TheModule; }
 
-  /// Returns the MachineFunction constructed for the IR function \p F.
-  /// Creates a new MachineFunction if none exists yet.
-  MachineFunction &getOrCreateMachineFunction(const Function &F);
+  void setMachineFunctionInitializer(MachineFunctionInitializer *MFInit) {
+    MFInitializer = MFInit;
+  }
 
-  /// \bried Returns the MachineFunction associated to IR function \p F if there
-  /// is one, otherwise nullptr.
-  MachineFunction *getMachineFunction(const Function &F) const;
+  /// Returns the MachineFunction constructed for the IR function \p F.
+  /// Creates a new MachineFunction and runs the MachineFunctionInitializer
+  /// if none exists yet.
+  MachineFunction &getMachineFunction(const Function &F);
 
   /// Delete the MachineFunction \p MF and reset the link in the IR Function to
   /// Machine Function map.
@@ -241,6 +252,6 @@ public:
 /// which will link in MSVCRT's floating-point support.
 void computeUsesVAFloatArgument(const CallInst &I, MachineModuleInfo &MMI);
 
-} // end namespace llvm
+} // End llvm namespace
 
-#endif // LLVM_CODEGEN_MACHINEMODULEINFO_H
+#endif

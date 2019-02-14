@@ -345,12 +345,12 @@ bool TargetInstrInfo::getStackSlotRange(const TargetRegisterClass *RC,
                                         unsigned SubIdx, unsigned &Size,
                                         unsigned &Offset,
                                         const MachineFunction &MF) const {
-  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   if (!SubIdx) {
-    Size = TRI->getSpillSize(*RC);
+    Size = RC->getSize();
     Offset = 0;
     return true;
   }
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   unsigned BitSize = TRI->getSubRegIdxSize(SubIdx);
   // Convert bit size to byte size to be consistent with
   // MCRegisterClass::getSize().
@@ -364,10 +364,10 @@ bool TargetInstrInfo::getStackSlotRange(const TargetRegisterClass *RC,
   Size = BitSize /= 8;
   Offset = (unsigned)BitOffset / 8;
 
-  assert(TRI->getSpillSize(*RC) >= (Offset + Size) && "bad subregister range");
+  assert(RC->getSize() >= (Offset + Size) && "bad subregister range");
 
   if (!MF.getDataLayout().isLittleEndian()) {
-    Offset = TRI->getSpillSize(*RC) - (Offset + Size);
+    Offset = RC->getSize() - (Offset + Size);
   }
   return true;
 }
@@ -428,8 +428,8 @@ static const TargetRegisterClass *canFoldCopy(const MachineInstr &MI,
   return nullptr;
 }
 
-void TargetInstrInfo::getNoop(MCInst &NopInst) const {
-  llvm_unreachable("Not implemented");
+void TargetInstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
+  llvm_unreachable("Not a MachO target");
 }
 
 static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
@@ -470,7 +470,7 @@ static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
 
   // No need to fold return, the meta data, and function arguments
   for (unsigned i = 0; i < StartIdx; ++i)
-    MIB.add(MI.getOperand(i));
+    MIB.addOperand(MI.getOperand(i));
 
   for (unsigned i = StartIdx; i < MI.getNumOperands(); ++i) {
     MachineOperand &MO = MI.getOperand(i);
@@ -490,7 +490,7 @@ static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr &MI,
       MIB.addImm(SpillOffset);
     }
     else
-      MIB.add(MO);
+      MIB.addOperand(MO);
   }
   return NewMI;
 }
@@ -941,10 +941,12 @@ int TargetInstrInfo::getSPAdjust(const MachineInstr &MI) const {
   unsigned FrameSetupOpcode = getCallFrameSetupOpcode();
   unsigned FrameDestroyOpcode = getCallFrameDestroyOpcode();
 
-  if (!isFrameInstr(MI))
+  if (MI.getOpcode() != FrameSetupOpcode &&
+      MI.getOpcode() != FrameDestroyOpcode)
     return 0;
 
-  int SPAdj = TFI->alignSPAdjust(getFrameSize(MI));
+  int SPAdj = MI.getOperand(0).getImm();
+  SPAdj = TFI->alignSPAdjust(SPAdj);
 
   if ((!StackGrowsDown && MI.getOpcode() == FrameSetupOpcode) ||
       (StackGrowsDown && MI.getOpcode() == FrameDestroyOpcode))

@@ -99,16 +99,22 @@ namespace llvm {
   class TargetOptions {
   public:
     TargetOptions()
-        : PrintMachineCode(false), UnsafeFPMath(false), NoInfsFPMath(false),
-          NoNaNsFPMath(false), NoTrappingFPMath(false),
-          NoSignedZerosFPMath(false),
+        : PrintMachineCode(false), LessPreciseFPMADOption(false),
+          UnsafeFPMath(false), NoInfsFPMath(false), NoNaNsFPMath(false),
+          NoTrappingFPMath(false),
           HonorSignDependentRoundingFPMathOption(false), NoZerosInBSS(false),
-          GuaranteedTailCallOpt(false), StackSymbolOrdering(true),
-          EnableFastISel(false), UseInitArray(false),
-          DisableIntegratedAS(false), RelaxELFRelocations(false),
-          FunctionSections(false), DataSections(false),
-          UniqueSectionNames(true), TrapUnreachable(false), EmulatedTLS(false),
-          EnableIPRA(false) {}
+          GuaranteedTailCallOpt(false), StackAlignmentOverride(0),
+          StackSymbolOrdering(true), EnableFastISel(false), UseInitArray(false),
+          DisableIntegratedAS(false), CompressDebugSections(false),
+          RelaxELFRelocations(false), FunctionSections(false),
+          DataSections(false), UniqueSectionNames(true), TrapUnreachable(false),
+          EmulatedTLS(false), EnableIPRA(false),
+          FloatABIType(FloatABI::Default),
+          AllowFPOpFusion(FPOpFusion::Standard),
+          ThreadModel(ThreadModel::POSIX),
+          EABIVersion(EABI::Default), DebuggerTuning(DebuggerKind::Default),
+          FPDenormalMode(FPDenormal::IEEE),
+          ExceptionModel(ExceptionHandling::None) {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
     /// option is specified on the command line, and should enable debugging
@@ -119,11 +125,20 @@ namespace llvm {
     /// optimization should be disabled for the given machine function.
     bool DisableFramePointerElim(const MachineFunction &MF) const;
 
+    /// LessPreciseFPMAD - This flag is enabled when the
+    /// -enable-fp-mad is specified on the command line.  When this flag is off
+    /// (the default), the code generator is not allowed to generate mad
+    /// (multiply add) if the result is "less precise" than doing those
+    /// operations individually.
+    unsigned LessPreciseFPMADOption : 1;
+    bool LessPreciseFPMAD() const;
+
     /// UnsafeFPMath - This flag is enabled when the
     /// -enable-unsafe-fp-math flag is specified on the command line.  When
     /// this flag is off (the default), the code generator is not allowed to
     /// produce results that are "less precise" than IEEE allows.  This includes
     /// use of X86 instructions like FSIN and FCOS instead of libcalls.
+    /// UnsafeFPMath implies LessPreciseFPMAD.
     unsigned UnsafeFPMath : 1;
 
     /// NoInfsFPMath - This flag is enabled when the
@@ -138,16 +153,10 @@ namespace llvm {
     /// assume the FP arithmetic arguments and results are never NaNs.
     unsigned NoNaNsFPMath : 1;
 
-    /// NoTrappingFPMath - This flag is enabled when the
-    /// -enable-no-trapping-fp-math is specified on the command line. This
+    /// NoTrappingFPMath - This flag is enabled when the 
+    /// -enable-no-trapping-fp-math is specified on the command line. This 
     /// specifies that there are no trap handlers to handle exceptions.
     unsigned NoTrappingFPMath : 1;
-
-    /// NoSignedZerosFPMath - This flag is enabled when the
-    /// -enable-no-signed-zeros-fp-math is specified on the command line. This
-    /// specifies that optimizations are allowed to treat the sign of a zero
-    /// argument or result as insignificant.
-    unsigned NoSignedZerosFPMath : 1;
 
     /// HonorSignDependentRoundingFPMath - This returns true when the
     /// -enable-sign-dependent-rounding-fp-math is specified.  If this returns
@@ -173,7 +182,7 @@ namespace llvm {
     unsigned GuaranteedTailCallOpt : 1;
 
     /// StackAlignmentOverride - Override default stack alignment for target.
-    unsigned StackAlignmentOverride = 0;
+    unsigned StackAlignmentOverride;
 
     /// StackSymbolOrdering - When true, this will allow CodeGen to order
     /// the local stack symbols (for code size, code locality, or any other
@@ -194,7 +203,7 @@ namespace llvm {
     unsigned DisableIntegratedAS : 1;
 
     /// Compress DWARF debug sections.
-    DebugCompressionType CompressDebugSections = DebugCompressionType::None;
+    unsigned CompressDebugSections : 1;
 
     unsigned RelaxELFRelocations : 1;
 
@@ -222,7 +231,7 @@ namespace llvm {
     /// software floating point, but does not indicate that FP hardware may not
     /// be used. Such a combination is unfortunately popular (e.g.
     /// arm-apple-darwin). Hard presumes that the normal FP ABI is used.
-    FloatABI::ABIType FloatABIType = FloatABI::Default;
+    FloatABI::ABIType FloatABIType;
 
     /// AllowFPOpFusion - This flag is set by the -fuse-fp-ops=xxx option.
     /// This controls the creation of fused FP ops that store intermediate
@@ -240,28 +249,64 @@ namespace llvm {
     /// optimizers.  Fused operations that are explicitly specified (e.g. FMA
     /// via the llvm.fma.* intrinsic) will always be honored, regardless of
     /// the value of this option.
-    FPOpFusion::FPOpFusionMode AllowFPOpFusion = FPOpFusion::Standard;
+    FPOpFusion::FPOpFusionMode AllowFPOpFusion;
 
     /// ThreadModel - This flag specifies the type of threading model to assume
     /// for things like atomics
-    ThreadModel::Model ThreadModel = ThreadModel::POSIX;
+    ThreadModel::Model ThreadModel;
 
     /// EABIVersion - This flag specifies the EABI version
-    EABI EABIVersion = EABI::Default;
+    EABI EABIVersion;
 
     /// Which debugger to tune for.
-    DebuggerKind DebuggerTuning = DebuggerKind::Default;
+    DebuggerKind DebuggerTuning;
 
     /// FPDenormalMode - This flags specificies which denormal numbers the code
     /// is permitted to require.
-    FPDenormal::DenormalMode FPDenormalMode = FPDenormal::IEEE;
+    FPDenormal::DenormalMode FPDenormalMode;
 
     /// What exception model to use
-    ExceptionHandling ExceptionModel = ExceptionHandling::None;
+    ExceptionHandling ExceptionModel;
 
     /// Machine level options.
     MCTargetOptions MCOptions;
   };
+
+// Comparison operators:
+
+
+inline bool operator==(const TargetOptions &LHS,
+                       const TargetOptions &RHS) {
+#define ARE_EQUAL(X) LHS.X == RHS.X
+  return
+    ARE_EQUAL(UnsafeFPMath) &&
+    ARE_EQUAL(NoInfsFPMath) &&
+    ARE_EQUAL(NoNaNsFPMath) &&
+    ARE_EQUAL(NoTrappingFPMath) &&
+    ARE_EQUAL(HonorSignDependentRoundingFPMathOption) &&
+    ARE_EQUAL(NoZerosInBSS) &&
+    ARE_EQUAL(GuaranteedTailCallOpt) &&
+    ARE_EQUAL(StackAlignmentOverride) &&
+    ARE_EQUAL(EnableFastISel) &&
+    ARE_EQUAL(UseInitArray) &&
+    ARE_EQUAL(TrapUnreachable) &&
+    ARE_EQUAL(EmulatedTLS) &&
+    ARE_EQUAL(FloatABIType) &&
+    ARE_EQUAL(AllowFPOpFusion) &&
+    ARE_EQUAL(ThreadModel) &&
+    ARE_EQUAL(EABIVersion) &&
+    ARE_EQUAL(DebuggerTuning) &&
+    ARE_EQUAL(FPDenormalMode) &&
+    ARE_EQUAL(ExceptionModel) &&
+    ARE_EQUAL(MCOptions) &&
+    ARE_EQUAL(EnableIPRA);
+#undef ARE_EQUAL
+}
+
+inline bool operator!=(const TargetOptions &LHS,
+                       const TargetOptions &RHS) {
+  return !(LHS == RHS);
+}
 
 } // End llvm namespace
 

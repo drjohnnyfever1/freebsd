@@ -23,11 +23,6 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_CTOR
 #include "NVPTXGenSubtargetInfo.inc"
 
-static cl::opt<bool>
-    NoF16Math("nvptx-no-f16-math", cl::ZeroOrMore, cl::Hidden,
-              cl::desc("NVPTX Specific: Disable generation of f16 math ops."),
-              cl::init(false));
-
 // Pin the vtable to this file.
 void NVPTXSubtarget::anchor() {}
 
@@ -61,8 +56,4 @@ bool NVPTXSubtarget::hasImageHandles() const {
 
   // Disabled, otherwise
   return false;
-}
-
-bool NVPTXSubtarget::allowFP16Math() const {
-  return hasFP16Math() && NoF16Math == false;
 }

@@ -1,4 +1,4 @@
-//===- MipsMCCodeEmitter.h - Convert Mips Code to Machine Code --*- C++ -*-===//
+//===-- MipsMCCodeEmitter.h - Convert Mips Code to Machine Code -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,25 +10,29 @@
 // This file defines the MipsMCCodeEmitter class.
 //
 //===----------------------------------------------------------------------===//
+//
 
 #ifndef LLVM_LIB_TARGET_MIPS_MCTARGETDESC_MIPSMCCODEEMITTER_H
 #define LLVM_LIB_TARGET_MIPS_MCTARGETDESC_MIPSMCCODEEMITTER_H
 
 #include "llvm/MC/MCCodeEmitter.h"
-#include <cstdint>
+#include "llvm/Support/DataTypes.h"
+
+using namespace llvm;
 
 namespace llvm {
-
 class MCContext;
 class MCExpr;
-class MCFixup;
 class MCInst;
 class MCInstrInfo;
+class MCFixup;
 class MCOperand;
 class MCSubtargetInfo;
 class raw_ostream;
 
 class MipsMCCodeEmitter : public MCCodeEmitter {
+  MipsMCCodeEmitter(const MipsMCCodeEmitter &) = delete;
+  void operator=(const MipsMCCodeEmitter &) = delete;
   const MCInstrInfo &MCII;
   MCContext &Ctx;
   bool IsLittleEndian;
@@ -39,9 +43,8 @@ class MipsMCCodeEmitter : public MCCodeEmitter {
 public:
   MipsMCCodeEmitter(const MCInstrInfo &mcii, MCContext &Ctx_, bool IsLittle)
       : MCII(mcii), Ctx(Ctx_), IsLittleEndian(IsLittle) {}
-  MipsMCCodeEmitter(const MipsMCCodeEmitter &) = delete;
-  MipsMCCodeEmitter &operator=(const MipsMCCodeEmitter &) = delete;
-  ~MipsMCCodeEmitter() override = default;
+
+  ~MipsMCCodeEmitter() override {}
 
   void EmitByte(unsigned char C, raw_ostream &OS) const;
 
@@ -267,11 +270,9 @@ public:
   unsigned getRegisterListOpValue16(const MCInst &MI, unsigned OpNo,
                                     SmallVectorImpl<MCFixup> &Fixups,
                                     const MCSubtargetInfo &STI) const;
-
-private:
+  private:
   void LowerCompactBranch(MCInst& Inst) const;
-};
+}; // class MipsMCCodeEmitter
+} // namespace llvm.
 
-} // end namespace llvm
-
-#endif // LLVM_LIB_TARGET_MIPS_MCTARGETDESC_MIPSMCCODEEMITTER_H
+#endif

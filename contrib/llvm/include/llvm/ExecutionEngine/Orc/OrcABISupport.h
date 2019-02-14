@@ -1,4 +1,4 @@
-//===- OrcABISupport.h - ABI support code -----------------------*- C++ -*-===//
+//===-------------- OrcABISupport.h - ABI support code  ---------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -18,12 +18,9 @@
 #ifndef LLVM_EXECUTIONENGINE_ORC_ORCABISUPPORT_H
 #define LLVM_EXECUTIONENGINE_ORC_ORCABISUPPORT_H
 
-#include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/Support/Error.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "IndirectionUtils.h"
 #include "llvm/Support/Memory.h"
-#include <algorithm>
-#include <cstdint>
+#include "llvm/Support/Process.h"
 
 namespace llvm {
 namespace orc {
@@ -40,8 +37,8 @@ public:
   static const unsigned TrampolineSize = 1;
   static const unsigned ResolverCodeSize = 1;
 
-  using JITReentryFn = JITTargetAddress (*)(void *CallbackMgr,
-                                            void *TrampolineId);
+  typedef JITTargetAddress (*JITReentryFn)(void *CallbackMgr,
+                                           void *TrampolineId);
 
   static void writeResolverCode(uint8_t *ResolveMem, JITReentryFn Reentry,
                                 void *CallbackMgr) {
@@ -58,7 +55,6 @@ public:
   class IndirectStubsInfo {
   public:
     const static unsigned StubSize = 1;
-
     unsigned getNumStubs() const { llvm_unreachable("Not supported"); }
     void *getStub(unsigned Idx) const { llvm_unreachable("Not supported"); }
     void **getPtr(unsigned Idx) const { llvm_unreachable("Not supported"); }
@@ -77,14 +73,13 @@ template <unsigned StubSizeVal> class GenericIndirectStubsInfo {
 public:
   const static unsigned StubSize = StubSizeVal;
 
-  GenericIndirectStubsInfo() = default;
+  GenericIndirectStubsInfo() : NumStubs(0) {}
   GenericIndirectStubsInfo(unsigned NumStubs, sys::OwningMemoryBlock StubsMem)
       : NumStubs(NumStubs), StubsMem(std::move(StubsMem)) {}
   GenericIndirectStubsInfo(GenericIndirectStubsInfo &&Other)
       : NumStubs(Other.NumStubs), StubsMem(std::move(Other.StubsMem)) {
     Other.NumStubs = 0;
   }
-
   GenericIndirectStubsInfo &operator=(GenericIndirectStubsInfo &&Other) {
     NumStubs = Other.NumStubs;
     Other.NumStubs = 0;
@@ -109,7 +104,7 @@ public:
   }
 
 private:
-  unsigned NumStubs = 0;
+  unsigned NumStubs;
   sys::OwningMemoryBlock StubsMem;
 };
 
@@ -119,10 +114,10 @@ public:
   static const unsigned TrampolineSize = 12;
   static const unsigned ResolverCodeSize = 0x120;
 
-  using IndirectStubsInfo = GenericIndirectStubsInfo<8>;
+  typedef GenericIndirectStubsInfo<8> IndirectStubsInfo;
 
-  using JITReentryFn = JITTargetAddress (*)(void *CallbackMgr,
-                                            void *TrampolineId);
+  typedef JITTargetAddress (*JITReentryFn)(void *CallbackMgr,
+                                           void *TrampolineId);
 
   /// @brief Write the resolver code into the given memory. The user is be
   ///        responsible for allocating the memory and setting permissions.
@@ -153,7 +148,7 @@ public:
   static const unsigned PointerSize = 8;
   static const unsigned TrampolineSize = 8;
 
-  using IndirectStubsInfo = GenericIndirectStubsInfo<8>;
+  typedef GenericIndirectStubsInfo<8> IndirectStubsInfo;
 
   /// @brief Write the requsted number of trampolines into the given memory,
   ///        which must be big enough to hold 1 pointer, plus NumTrampolines
@@ -177,9 +172,8 @@ public:
 class OrcX86_64_SysV : public OrcX86_64_Base {
 public:
   static const unsigned ResolverCodeSize = 0x6C;
-
-  using JITReentryFn = JITTargetAddress (*)(void *CallbackMgr,
-                                            void *TrampolineId);
+  typedef JITTargetAddress (*JITReentryFn)(void *CallbackMgr,
+                                           void *TrampolineId);
 
   /// @brief Write the resolver code into the given memory. The user is be
   ///        responsible for allocating the memory and setting permissions.
@@ -193,9 +187,8 @@ public:
 class OrcX86_64_Win32 : public OrcX86_64_Base {
 public:
   static const unsigned ResolverCodeSize = 0x74;
-
-  using JITReentryFn = JITTargetAddress (*)(void *CallbackMgr,
-                                            void *TrampolineId);
+  typedef JITTargetAddress (*JITReentryFn)(void *CallbackMgr,
+                                           void *TrampolineId);
 
   /// @brief Write the resolver code into the given memory. The user is be
   ///        responsible for allocating the memory and setting permissions.
@@ -212,10 +205,10 @@ public:
   static const unsigned TrampolineSize = 8;
   static const unsigned ResolverCodeSize = 0x4a;
 
-  using IndirectStubsInfo = GenericIndirectStubsInfo<8>;
+  typedef GenericIndirectStubsInfo<8> IndirectStubsInfo;
 
-  using JITReentryFn = JITTargetAddress (*)(void *CallbackMgr,
-                                            void *TrampolineId);
+  typedef JITTargetAddress (*JITReentryFn)(void *CallbackMgr,
+                                           void *TrampolineId);
 
   /// @brief Write the resolver code into the given memory. The user is be
   ///        responsible for allocating the memory and setting permissions.
@@ -238,7 +231,7 @@ public:
                                       unsigned MinStubs, void *InitialPtrVal);
 };
 
-} // end namespace orc
-} // end namespace llvm
+} // End namespace orc.
+} // End namespace llvm.
 
 #endif // LLVM_EXECUTIONENGINE_ORC_ORCABISUPPORT_H

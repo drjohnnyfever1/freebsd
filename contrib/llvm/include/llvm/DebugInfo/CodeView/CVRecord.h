@@ -14,9 +14,8 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/DebugInfo/CodeView/CodeViewError.h"
 #include "llvm/DebugInfo/CodeView/RecordSerialization.h"
-#include "llvm/DebugInfo/CodeView/TypeIndex.h"
-#include "llvm/Support/BinaryStreamReader.h"
-#include "llvm/Support/BinaryStreamRef.h"
+#include "llvm/DebugInfo/MSF/StreamReader.h"
+#include "llvm/DebugInfo/MSF/StreamRef.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include <cstdint>
@@ -27,19 +26,12 @@ namespace codeview {
 
 template <typename Kind> class CVRecord {
 public:
-  CVRecord() : Type(static_cast<Kind>(0)) {}
-
+  CVRecord() = default;
   CVRecord(Kind K, ArrayRef<uint8_t> Data) : Type(K), RecordData(Data) {}
-
-  bool valid() const { return Type != static_cast<Kind>(0); }
 
   uint32_t length() const { return RecordData.size(); }
   Kind kind() const { return Type; }
   ArrayRef<uint8_t> data() const { return RecordData; }
-  StringRef str_data() const {
-    return StringRef(reinterpret_cast<const char *>(RecordData.data()),
-                     RecordData.size());
-  }
 
   ArrayRef<uint8_t> content() const {
     return RecordData.drop_front(sizeof(RecordPrefix));
@@ -54,22 +46,17 @@ public:
   Optional<uint32_t> Hash;
 };
 
-template <typename Kind> struct RemappedRecord {
-  explicit RemappedRecord(const CVRecord<Kind> &R) : OriginalRecord(R) {}
-
-  CVRecord<Kind> OriginalRecord;
-  SmallVector<std::pair<uint32_t, TypeIndex>, 8> Mappings;
-};
-
 } // end namespace codeview
+
+namespace msf {
 
 template <typename Kind>
 struct VarStreamArrayExtractor<codeview::CVRecord<Kind>> {
-  Error operator()(BinaryStreamRef Stream, uint32_t &Len,
-                   codeview::CVRecord<Kind> &Item) {
+  Error operator()(ReadableStreamRef Stream, uint32_t &Len,
+                   codeview::CVRecord<Kind> &Item) const {
     using namespace codeview;
     const RecordPrefix *Prefix = nullptr;
-    BinaryStreamReader Reader(Stream);
+    StreamReader Reader(Stream);
     uint32_t Offset = Reader.getOffset();
 
     if (auto EC = Reader.readObject(Prefix))
@@ -88,6 +75,8 @@ struct VarStreamArrayExtractor<codeview::CVRecord<Kind>> {
     return Error::success();
   }
 };
+
+} // end namespace msf
 
 } // end namespace llvm
 

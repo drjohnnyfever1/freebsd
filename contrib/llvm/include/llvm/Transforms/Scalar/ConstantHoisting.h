@@ -36,7 +36,6 @@
 #ifndef LLVM_TRANSFORMS_SCALAR_CONSTANTHOISTING_H
 #define LLVM_TRANSFORMS_SCALAR_CONSTANTHOISTING_H
 
-#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/PassManager.h"
@@ -99,7 +98,7 @@ public:
 
   // Glue for old PM.
   bool runImpl(Function &F, TargetTransformInfo &TTI, DominatorTree &DT,
-               BlockFrequencyInfo *BFI, BasicBlock &Entry);
+               BasicBlock &Entry);
 
   void releaseMemory() {
     ConstantVec.clear();
@@ -113,7 +112,6 @@ private:
 
   const TargetTransformInfo *TTI;
   DominatorTree *DT;
-  BlockFrequencyInfo *BFI;
   BasicBlock *Entry;
 
   /// Keeps track of constant candidates found in the function.
@@ -126,13 +124,11 @@ private:
   SmallVector<consthoist::ConstantInfo, 8> ConstantVec;
 
   Instruction *findMatInsertPt(Instruction *Inst, unsigned Idx = ~0U) const;
-  SmallPtrSet<Instruction *, 8>
-  findConstantInsertionPoint(const consthoist::ConstantInfo &ConstInfo) const;
+  Instruction *findConstantInsertionPoint(
+      const consthoist::ConstantInfo &ConstInfo) const;
   void collectConstantCandidates(ConstCandMapType &ConstCandMap,
                                  Instruction *Inst, unsigned Idx,
                                  ConstantInt *ConstInt);
-  void collectConstantCandidates(ConstCandMapType &ConstCandMap,
-                                 Instruction *Inst, unsigned Idx);
   void collectConstantCandidates(ConstCandMapType &ConstCandMap,
                                  Instruction *Inst);
   void collectConstantCandidates(Function &Fn);

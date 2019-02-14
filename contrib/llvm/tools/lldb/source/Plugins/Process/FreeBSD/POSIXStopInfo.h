@@ -10,9 +10,15 @@
 #ifndef liblldb_POSIXStopInfo_H_
 #define liblldb_POSIXStopInfo_H_
 
-#include "FreeBSDThread.h"
-#include "Plugins/Process/POSIX/CrashReason.h"
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/StopInfo.h"
+
+#include "CrashReason.h"
+#include "FreeBSDThread.h"
+
 #include <string>
 
 //===----------------------------------------------------------------------===//
@@ -42,6 +48,19 @@ public:
   bool ShouldStop(lldb_private::Event *event_ptr);
 
   bool ShouldNotify(lldb_private::Event *event_ptr);
+};
+
+//===----------------------------------------------------------------------===//
+/// @class POSIXCrashStopInfo
+/// @brief Represents the stop state of process that is ready to crash.
+///
+class POSIXCrashStopInfo : public POSIXStopInfo {
+public:
+  POSIXCrashStopInfo(FreeBSDThread &thread, uint32_t status, CrashReason reason,
+                     lldb::addr_t fault_addr);
+  ~POSIXCrashStopInfo();
+
+  lldb::StopReason GetStopReason() const;
 };
 
 //===----------------------------------------------------------------------===//

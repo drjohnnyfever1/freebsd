@@ -23,6 +23,7 @@
 #include "llvm/LTO/legacy/LTOCodeGenerator.h"
 #include "llvm/LTO/legacy/LTOModule.h"
 #include "llvm/LTO/legacy/ThinLTOCodeGenerator.h"
+#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -61,10 +62,6 @@ static cl::opt<bool>
 static cl::opt<bool> DisableLTOVectorization(
     "disable-lto-vectorization", cl::init(false),
     cl::desc("Do not run loop or slp vectorization during LTO"));
-
-static cl::opt<bool> EnableFreestanding(
-    "lto-freestanding", cl::init(false),
-    cl::desc("Enable Freestanding (disable builtins / TLI) during LTO"));
 
 static cl::opt<bool> UseDiagnosticHandler(
     "use-diagnostic-handler", cl::init(false),
@@ -284,7 +281,7 @@ void printIndexStats() {
 
     unsigned Calls = 0, Refs = 0, Functions = 0, Alias = 0, Globals = 0;
     for (auto &Summaries : *Index) {
-      for (auto &Summary : Summaries.second.SummaryList) {
+      for (auto &Summary : Summaries.second) {
         Refs += Summary->refs().size();
         if (auto *FuncSummary = dyn_cast<FunctionSummary>(Summary.get())) {
           Functions++;
@@ -331,9 +328,12 @@ static void createCombinedModuleSummaryIndex() {
   uint64_t NextModuleId = 0;
   for (auto &Filename : InputFilenames) {
     ExitOnError ExitOnErr("llvm-lto: error loading file '" + Filename + "': ");
-    std::unique_ptr<MemoryBuffer> MB =
-        ExitOnErr(errorOrToExpected(MemoryBuffer::getFileOrSTDIN(Filename)));
-    ExitOnErr(readModuleSummaryIndex(*MB, CombinedIndex, ++NextModuleId));
+    std::unique_ptr<ModuleSummaryIndex> Index =
+        ExitOnErr(llvm::getModuleSummaryIndexForFile(Filename));
+    // Skip files without a module summary.
+    if (!Index)
+      continue;
+    CombinedIndex.mergeFrom(std::move(Index), ++NextModuleId);
   }
   std::error_code EC;
   assert(!OutputFilename.empty());
@@ -383,7 +383,7 @@ loadAllFilesForIndex(const ModuleSummaryIndex &Index) {
 
   for (auto &ModPath : Index.modulePaths()) {
     const auto &Filename = ModPath.first();
-    std::string CurrentActivity = ("loading file '" + Filename + "'").str();
+    auto CurrentActivity = "loading file '" + Filename + "'";
     auto InputOrErr = MemoryBuffer::getFile(Filename);
     error(InputOrErr, "error " + CurrentActivity);
     InputBuffers.push_back(std::move(*InputOrErr));
@@ -433,7 +433,6 @@ public:
     ThinGenerator.setCodePICModel(getRelocModel());
     ThinGenerator.setTargetOptions(Options);
     ThinGenerator.setCacheDir(ThinLTOCacheDir);
-    ThinGenerator.setFreestanding(EnableFreestanding);
 
     // Add all the exported symbols to the table of symbols to preserve.
     for (unsigned i = 0; i < ExportedSymbols.size(); ++i)
@@ -475,7 +474,7 @@ private:
     std::vector<std::unique_ptr<MemoryBuffer>> InputBuffers;
     for (unsigned i = 0; i < InputFilenames.size(); ++i) {
       auto &Filename = InputFilenames[i];
-      std::string CurrentActivity = "loading file '" + Filename + "'";
+      StringRef CurrentActivity = "loading file '" + Filename + "'";
       auto InputOrErr = MemoryBuffer::getFile(Filename);
       error(InputOrErr, "error " + CurrentActivity);
       InputBuffers.push_back(std::move(*InputOrErr));
@@ -669,30 +668,24 @@ private:
     if (!ThinLTOIndex.empty())
       errs() << "Warning: -thinlto-index ignored for codegen stage";
 
-    std::vector<std::unique_ptr<MemoryBuffer>> InputBuffers;
     for (auto &Filename : InputFilenames) {
       LLVMContext Ctx;
-      auto InputOrErr = MemoryBuffer::getFile(Filename);
-      error(InputOrErr, "error " + CurrentActivity);
-      InputBuffers.push_back(std::move(*InputOrErr));
-      ThinGenerator.addModule(Filename, InputBuffers.back()->getBuffer());
-    }
-    ThinGenerator.setCodeGenOnly(true);
-    ThinGenerator.run();
-    for (auto BinName :
-         zip(ThinGenerator.getProducedBinaries(), InputFilenames)) {
+      auto TheModule = loadModule(Filename, Ctx);
+
+      auto Buffer = ThinGenerator.codegen(*TheModule);
       std::string OutputName = OutputFilename;
-      if (OutputName.empty())
-        OutputName = std::get<1>(BinName) + ".thinlto.o";
-      else if (OutputName == "-") {
-        outs() << std::get<0>(BinName)->getBuffer();
+      if (OutputName.empty()) {
+        OutputName = Filename + ".thinlto.o";
+      }
+      if (OutputName == "-") {
+        outs() << Buffer->getBuffer();
         return;
       }
 
       std::error_code EC;
       raw_fd_ostream OS(OutputName, EC, sys::fs::OpenFlags::F_None);
       error(EC, "error opening the file '" + OutputName + "'");
-      OS << std::get<0>(BinName)->getBuffer();
+      OS << Buffer->getBuffer();
     }
   }
 
@@ -710,7 +703,7 @@ private:
     std::vector<std::unique_ptr<MemoryBuffer>> InputBuffers;
     for (unsigned i = 0; i < InputFilenames.size(); ++i) {
       auto &Filename = InputFilenames[i];
-      std::string CurrentActivity = "loading file '" + Filename + "'";
+      StringRef CurrentActivity = "loading file '" + Filename + "'";
       auto InputOrErr = MemoryBuffer::getFile(Filename);
       error(InputOrErr, "error " + CurrentActivity);
       InputBuffers.push_back(std::move(*InputOrErr));
@@ -816,7 +809,6 @@ int main(int argc, char **argv) {
     CodeGen.setDiagnosticHandler(handleDiagnostics, nullptr);
 
   CodeGen.setCodePICModel(getRelocModel());
-  CodeGen.setFreestanding(EnableFreestanding);
 
   CodeGen.setDebugInfo(LTO_DEBUG_MODEL_DWARF);
   CodeGen.setTargetOptions(Options);

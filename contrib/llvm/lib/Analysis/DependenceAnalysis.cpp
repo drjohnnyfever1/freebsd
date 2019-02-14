@@ -385,9 +385,9 @@ void DependenceInfo::Constraint::setAny(ScalarEvolution *NewSE) {
   Kind = Any;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+
 // For debugging purposes. Dumps the constraint out to OS.
-LLVM_DUMP_METHOD void DependenceInfo::Constraint::dump(raw_ostream &OS) const {
+void DependenceInfo::Constraint::dump(raw_ostream &OS) const {
   if (isEmpty())
     OS << " Empty\n";
   else if (isAny())
@@ -403,7 +403,6 @@ LLVM_DUMP_METHOD void DependenceInfo::Constraint::dump(raw_ostream &OS) const {
   else
     llvm_unreachable("unknown constraint type in Constraint::dump");
 }
-#endif
 
 
 // Updates X with the intersection
@@ -2984,7 +2983,7 @@ bool DependenceInfo::propagate(const SCEV *&Src, const SCEV *&Dst,
                                SmallVectorImpl<Constraint> &Constraints,
                                bool &Consistent) {
   bool Result = false;
-  for (unsigned LI : Loops.set_bits()) {
+  for (int LI = Loops.find_first(); LI >= 0; LI = Loops.find_next(LI)) {
     DEBUG(dbgs() << "\t    Constraint[" << LI << "] is");
     DEBUG(Constraints[LI].dump(dbgs()));
     if (Constraints[LI].isDistance())
@@ -3266,7 +3265,7 @@ bool DependenceInfo::tryDelinearize(Instruction *Src, Instruction *Dst,
 // For debugging purposes, dump a small bit vector to dbgs().
 static void dumpSmallBitVector(SmallBitVector &BV) {
   dbgs() << "{";
-  for (unsigned VI : BV.set_bits()) {
+  for (int VI = BV.find_first(); VI >= 0; VI = BV.find_next(VI)) {
     dbgs() << VI;
     if (BV.find_next(VI) >= 0)
       dbgs() << ' ';
@@ -3342,8 +3341,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
 
     UsefulGEP = isLoopInvariant(SrcPtrSCEV, LI->getLoopFor(Src->getParent())) &&
                 isLoopInvariant(DstPtrSCEV, LI->getLoopFor(Dst->getParent())) &&
-                (SrcGEP->getNumOperands() == DstGEP->getNumOperands()) &&
-                isKnownPredicate(CmpInst::ICMP_EQ, SrcPtrSCEV, DstPtrSCEV);
+                (SrcGEP->getNumOperands() == DstGEP->getNumOperands());
   }
   unsigned Pairs = UsefulGEP ? SrcGEP->idx_end() - SrcGEP->idx_begin() : 1;
   SmallVector<Subscript, 4> Pair(Pairs);
@@ -3372,7 +3370,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
 
   if (Delinearize && CommonLevels > 1) {
     if (tryDelinearize(Src, Dst, Pair)) {
-      DEBUG(dbgs() << "    delinearized GEP\n");
+      DEBUG(dbgs() << "    delinerized GEP\n");
       Pairs = Pair.size();
     }
   }
@@ -3507,7 +3505,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
   NewConstraint.setAny(SE);
 
   // test separable subscripts
-  for (unsigned SI : Separable.set_bits()) {
+  for (int SI = Separable.find_first(); SI >= 0; SI = Separable.find_next(SI)) {
     DEBUG(dbgs() << "testing subscript " << SI);
     switch (Pair[SI].Classification) {
     case Subscript::ZIV:
@@ -3546,14 +3544,14 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
     SmallVector<Constraint, 4> Constraints(MaxLevels + 1);
     for (unsigned II = 0; II <= MaxLevels; ++II)
       Constraints[II].setAny(SE);
-    for (unsigned SI : Coupled.set_bits()) {
+    for (int SI = Coupled.find_first(); SI >= 0; SI = Coupled.find_next(SI)) {
       DEBUG(dbgs() << "testing subscript group " << SI << " { ");
       SmallBitVector Group(Pair[SI].Group);
       SmallBitVector Sivs(Pairs);
       SmallBitVector Mivs(Pairs);
       SmallBitVector ConstrainedLevels(MaxLevels + 1);
       SmallVector<Subscript *, 4> PairsInGroup;
-      for (unsigned SJ : Group.set_bits()) {
+      for (int SJ = Group.find_first(); SJ >= 0; SJ = Group.find_next(SJ)) {
         DEBUG(dbgs() << SJ << " ");
         if (Pair[SJ].Classification == Subscript::SIV)
           Sivs.set(SJ);
@@ -3565,7 +3563,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
       DEBUG(dbgs() << "}\n");
       while (Sivs.any()) {
         bool Changed = false;
-        for (unsigned SJ : Sivs.set_bits()) {
+        for (int SJ = Sivs.find_first(); SJ >= 0; SJ = Sivs.find_next(SJ)) {
           DEBUG(dbgs() << "testing subscript " << SJ << ", SIV\n");
           // SJ is an SIV subscript that's part of the current coupled group
           unsigned Level;
@@ -3589,7 +3587,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
           DEBUG(dbgs() << "    propagating\n");
           DEBUG(dbgs() << "\tMivs = ");
           DEBUG(dumpSmallBitVector(Mivs));
-          for (unsigned SJ : Mivs.set_bits()) {
+          for (int SJ = Mivs.find_first(); SJ >= 0; SJ = Mivs.find_next(SJ)) {
             // SJ is an MIV subscript that's part of the current coupled group
             DEBUG(dbgs() << "\tSJ = " << SJ << "\n");
             if (propagate(Pair[SJ].Src, Pair[SJ].Dst, Pair[SJ].Loops,
@@ -3623,7 +3621,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
       }
 
       // test & propagate remaining RDIVs
-      for (unsigned SJ : Mivs.set_bits()) {
+      for (int SJ = Mivs.find_first(); SJ >= 0; SJ = Mivs.find_next(SJ)) {
         if (Pair[SJ].Classification == Subscript::RDIV) {
           DEBUG(dbgs() << "RDIV test\n");
           if (testRDIV(Pair[SJ].Src, Pair[SJ].Dst, Result))
@@ -3636,7 +3634,7 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
       // test remaining MIVs
       // This code is temporary.
       // Better to somehow test all remaining subscripts simultaneously.
-      for (unsigned SJ : Mivs.set_bits()) {
+      for (int SJ = Mivs.find_first(); SJ >= 0; SJ = Mivs.find_next(SJ)) {
         if (Pair[SJ].Classification == Subscript::MIV) {
           DEBUG(dbgs() << "MIV test\n");
           if (testMIV(Pair[SJ].Src, Pair[SJ].Dst, Pair[SJ].Loops, Result))
@@ -3648,8 +3646,9 @@ DependenceInfo::depends(Instruction *Src, Instruction *Dst,
 
       // update Result.DV from constraint vector
       DEBUG(dbgs() << "    updating\n");
-      for (unsigned SJ : ConstrainedLevels.set_bits()) {
-        if (SJ > CommonLevels)
+      for (int SJ = ConstrainedLevels.find_first(); SJ >= 0;
+           SJ = ConstrainedLevels.find_next(SJ)) {
+        if (SJ > (int)CommonLevels)
           break;
         updateDirection(Result.DV[SJ - 1], Constraints[SJ]);
         if (Result.DV[SJ - 1].Direction == Dependence::DVEntry::NONE)
@@ -3797,7 +3796,7 @@ const SCEV *DependenceInfo::getSplitIteration(const Dependence &Dep,
 
   if (Delinearize && CommonLevels > 1) {
     if (tryDelinearize(Src, Dst, Pair)) {
-      DEBUG(dbgs() << "    delinearized GEP\n");
+      DEBUG(dbgs() << "    delinerized GEP\n");
       Pairs = Pair.size();
     }
   }
@@ -3859,7 +3858,7 @@ const SCEV *DependenceInfo::getSplitIteration(const Dependence &Dep,
   NewConstraint.setAny(SE);
 
   // test separable subscripts
-  for (unsigned SI : Separable.set_bits()) {
+  for (int SI = Separable.find_first(); SI >= 0; SI = Separable.find_next(SI)) {
     switch (Pair[SI].Classification) {
     case Subscript::SIV: {
       unsigned Level;
@@ -3886,12 +3885,12 @@ const SCEV *DependenceInfo::getSplitIteration(const Dependence &Dep,
     SmallVector<Constraint, 4> Constraints(MaxLevels + 1);
     for (unsigned II = 0; II <= MaxLevels; ++II)
       Constraints[II].setAny(SE);
-    for (unsigned SI : Coupled.set_bits()) {
+    for (int SI = Coupled.find_first(); SI >= 0; SI = Coupled.find_next(SI)) {
       SmallBitVector Group(Pair[SI].Group);
       SmallBitVector Sivs(Pairs);
       SmallBitVector Mivs(Pairs);
       SmallBitVector ConstrainedLevels(MaxLevels + 1);
-      for (unsigned SJ : Group.set_bits()) {
+      for (int SJ = Group.find_first(); SJ >= 0; SJ = Group.find_next(SJ)) {
         if (Pair[SJ].Classification == Subscript::SIV)
           Sivs.set(SJ);
         else
@@ -3899,7 +3898,7 @@ const SCEV *DependenceInfo::getSplitIteration(const Dependence &Dep,
       }
       while (Sivs.any()) {
         bool Changed = false;
-        for (unsigned SJ : Sivs.set_bits()) {
+        for (int SJ = Sivs.find_first(); SJ >= 0; SJ = Sivs.find_next(SJ)) {
           // SJ is an SIV subscript that's part of the current coupled group
           unsigned Level;
           const SCEV *SplitIter = nullptr;
@@ -3914,7 +3913,7 @@ const SCEV *DependenceInfo::getSplitIteration(const Dependence &Dep,
         }
         if (Changed) {
           // propagate, possibly creating new SIVs and ZIVs
-          for (unsigned SJ : Mivs.set_bits()) {
+          for (int SJ = Mivs.find_first(); SJ >= 0; SJ = Mivs.find_next(SJ)) {
             // SJ is an MIV subscript that's part of the current coupled group
             if (propagate(Pair[SJ].Src, Pair[SJ].Dst,
                           Pair[SJ].Loops, Constraints, Result.Consistent)) {

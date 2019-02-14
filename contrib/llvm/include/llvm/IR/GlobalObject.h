@@ -63,17 +63,8 @@ public:
   }
   void setAlignment(unsigned Align);
 
-  unsigned getGlobalObjectSubClassData() const {
-    unsigned ValueData = getGlobalValueSubClassData();
-    return ValueData >> GlobalObjectBits;
-  }
-
-  void setGlobalObjectSubClassData(unsigned Val) {
-    unsigned OldData = getGlobalValueSubClassData();
-    setGlobalValueSubClassData((OldData & GlobalObjectMask) |
-                               (Val << GlobalObjectBits));
-    assert(getGlobalObjectSubClassData() == Val && "representation error");
-  }
+  unsigned getGlobalObjectSubClassData() const;
+  void setGlobalObjectSubClassData(unsigned Val);
 
   /// Check if this global has a custom object file section.
   ///
@@ -150,12 +141,10 @@ public:
 
   void addTypeMetadata(unsigned Offset, Metadata *TypeID);
 
-protected:
-  void copyAttributesFrom(const GlobalObject *Src);
+  void copyAttributesFrom(const GlobalValue *Src) override;
 
-public:
   // Methods for support type inquiry through isa, cast, and dyn_cast:
-  static bool classof(const Value *V) {
+  static inline bool classof(const Value *V) {
     return V->getValueID() == Value::FunctionVal ||
            V->getValueID() == Value::GlobalVariableVal;
   }

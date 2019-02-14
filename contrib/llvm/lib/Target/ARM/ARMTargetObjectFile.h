@@ -11,17 +11,19 @@
 #define LLVM_LIB_TARGET_ARM_ARMTARGETOBJECTFILE_H
 
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
-#include "llvm/MC/MCExpr.h"
 
 namespace llvm {
 
-class ARMElfTargetObjectFile : public TargetLoweringObjectFileELF {
-protected:
-  const MCSection *AttributesSection = nullptr;
+class MCContext;
+class TargetMachine;
 
+class ARMElfTargetObjectFile : public TargetLoweringObjectFileELF {
+  mutable bool genExecuteOnly = false;
+protected:
+  const MCSection *AttributesSection;
 public:
   ARMElfTargetObjectFile()
-      : TargetLoweringObjectFileELF() {
+      : TargetLoweringObjectFileELF(), AttributesSection(nullptr) {
     PLTRelativeVariantKind = MCSymbolRefExpr::VK_ARM_PREL31;
   }
 
@@ -45,4 +47,4 @@ public:
 
 } // end namespace llvm
 
-#endif // LLVM_LIB_TARGET_ARM_ARMTARGETOBJECTFILE_H
+#endif

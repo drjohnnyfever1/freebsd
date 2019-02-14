@@ -93,15 +93,14 @@ static tsan_block_context_t *AllocContext(ThreadState *thr, uptr pc,
   new_context->free_context_in_callback = true;
   new_context->submitted_synchronously = false;
   new_context->is_barrier_block = false;
-  new_context->non_queue_sync_object = 0;
   return new_context;
 }
 
-#define GET_QUEUE_SYNC_VARS(context, q)                                  \
-  bool is_queue_serial = q && IsQueueSerial(q);                          \
-  uptr sync_ptr = (uptr)q ?: context->non_queue_sync_object;             \
-  uptr serial_sync = (uptr)sync_ptr;                                     \
-  uptr concurrent_sync = sync_ptr ? ((uptr)sync_ptr) + sizeof(uptr) : 0; \
+#define GET_QUEUE_SYNC_VARS(context, q)                      \
+  bool is_queue_serial = q && IsQueueSerial(q);              \
+  uptr sync_ptr = (uptr)q ?: context->non_queue_sync_object; \
+  uptr serial_sync = (uptr)sync_ptr;                         \
+  uptr concurrent_sync = ((uptr)sync_ptr) + sizeof(uptr);    \
   bool serial_task = context->is_barrier_block || is_queue_serial
 
 static void dispatch_sync_pre_execute(ThreadState *thr, uptr pc,
@@ -112,8 +111,8 @@ static void dispatch_sync_pre_execute(ThreadState *thr, uptr pc,
   dispatch_queue_t q = context->queue;
   do {
     GET_QUEUE_SYNC_VARS(context, q);
-    if (serial_sync) Acquire(thr, pc, serial_sync);
-    if (serial_task && concurrent_sync) Acquire(thr, pc, concurrent_sync);
+    Acquire(thr, pc, serial_sync);
+    if (serial_task) Acquire(thr, pc, concurrent_sync);
 
     if (q) q = GetTargetQueueFromQueue(q);
   } while (q);
@@ -127,8 +126,7 @@ static void dispatch_sync_post_execute(ThreadState *thr, uptr pc,
   dispatch_queue_t q = context->queue;
   do {
     GET_QUEUE_SYNC_VARS(context, q);
-    if (serial_task && serial_sync) Release(thr, pc, serial_sync);
-    if (!serial_task && concurrent_sync) Release(thr, pc, concurrent_sync);
+    Release(thr, pc, serial_task ? serial_sync : concurrent_sync);
 
     if (q) q = GetTargetQueueFromQueue(q);
   } while (q);

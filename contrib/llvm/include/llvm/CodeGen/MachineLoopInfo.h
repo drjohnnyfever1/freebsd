@@ -33,8 +33,6 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/IR/DebugLoc.h"
-#include "llvm/Pass.h"
 
 namespace llvm {
 
@@ -62,18 +60,10 @@ public:
   /// multiple exiting blocks are present.
   MachineBasicBlock *findLoopControlBlock();
 
-  /// Return the debug location of the start of this loop.
-  /// This looks for a BB terminating instruction with a known debug
-  /// location by looking at the preheader and header blocks. If it
-  /// cannot find a terminating instruction with location information,
-  /// it returns an unknown location.
-  DebugLoc getStartLoc() const;
-
   void dump() const;
 
 private:
   friend class LoopInfoBase<MachineBasicBlock, MachineLoop>;
-
   explicit MachineLoop(MachineBasicBlock *MBB)
     : LoopBase<MachineBasicBlock, MachineLoop>(MBB) {}
 };
@@ -82,9 +72,11 @@ private:
 extern template class LoopInfoBase<MachineBasicBlock, MachineLoop>;
 
 class MachineLoopInfo : public MachineFunctionPass {
+  LoopInfoBase<MachineBasicBlock, MachineLoop> LI;
   friend class LoopBase<MachineBasicBlock, MachineLoop>;
 
-  LoopInfoBase<MachineBasicBlock, MachineLoop> LI;
+  void operator=(const MachineLoopInfo &) = delete;
+  MachineLoopInfo(const MachineLoopInfo &) = delete;
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -92,8 +84,6 @@ public:
   MachineLoopInfo() : MachineFunctionPass(ID) {
     initializeMachineLoopInfoPass(*PassRegistry::getPassRegistry());
   }
-  MachineLoopInfo(const MachineLoopInfo &) = delete;
-  MachineLoopInfo &operator=(const MachineLoopInfo &) = delete;
 
   LoopInfoBase<MachineBasicBlock, MachineLoop>& getBase() { return LI; }
 
@@ -106,7 +96,7 @@ public:
                                        bool SpeculativePreheader = false) const;
 
   /// The iterator interface to the top-level loops in the current function.
-  using iterator = LoopInfoBase<MachineBasicBlock, MachineLoop>::iterator;
+  typedef LoopInfoBase<MachineBasicBlock, MachineLoop>::iterator iterator;
   inline iterator begin() const { return LI.begin(); }
   inline iterator end() const { return LI.end(); }
   bool empty() const { return LI.empty(); }
@@ -169,10 +159,11 @@ public:
   }
 };
 
+
 // Allow clients to walk the list of nested loops...
 template <> struct GraphTraits<const MachineLoop*> {
-  using NodeRef = const MachineLoop *;
-  using ChildIteratorType = MachineLoopInfo::iterator;
+  typedef const MachineLoop *NodeRef;
+  typedef MachineLoopInfo::iterator ChildIteratorType;
 
   static NodeRef getEntryNode(const MachineLoop *L) { return L; }
   static ChildIteratorType child_begin(NodeRef N) { return N->begin(); }
@@ -180,14 +171,14 @@ template <> struct GraphTraits<const MachineLoop*> {
 };
 
 template <> struct GraphTraits<MachineLoop*> {
-  using NodeRef = MachineLoop *;
-  using ChildIteratorType = MachineLoopInfo::iterator;
+  typedef MachineLoop *NodeRef;
+  typedef MachineLoopInfo::iterator ChildIteratorType;
 
   static NodeRef getEntryNode(MachineLoop *L) { return L; }
   static ChildIteratorType child_begin(NodeRef N) { return N->begin(); }
   static ChildIteratorType child_end(NodeRef N) { return N->end(); }
 };
 
-} // end namespace llvm
+} // End llvm namespace
 
-#endif // LLVM_CODEGEN_MACHINELOOPINFO_H
+#endif

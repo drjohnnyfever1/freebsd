@@ -22,6 +22,8 @@
 
 /* seee eeee eeee mmmm mmmm mmmm mmmm mmmm | mmmm mmmm mmmm mmmm mmmm mmmm mmmm mmmm */
 
+ARM_EABI_FNALIAS(l2d, floatdidf)
+
 #ifndef __SOFT_FP__
 /* Support for systems that have hardware floating-point; we'll set the inexact flag
  * as a side-effect of this computation.
@@ -103,10 +105,3 @@ __floatdidf(di_int a)
     return fb.f;
 }
 #endif
-
-#if defined(__ARM_EABI__)
-AEABI_RTABI double __aeabi_l2d(di_int a) {
-  return __floatdidf(a);
-}
-#endif
-

@@ -15,8 +15,8 @@
 #ifndef LLVM_EXECUTIONENGINE_JITEVENTLISTENER_H
 #define LLVM_EXECUTIONENGINE_JITEVENTLISTENER_H
 
+#include "RuntimeDyld.h"
 #include "llvm/Config/llvm-config.h"
-#include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/IR/DebugLoc.h"
 #include <cstdint>
 #include <vector>
@@ -28,9 +28,7 @@ class MachineFunction;
 class OProfileWrapper;
 
 namespace object {
-
-class ObjectFile;
-
+  class ObjectFile;
 } // end namespace object
 
 /// JITEvent_EmittedFunctionDetails - Helper struct for containing information
@@ -59,7 +57,7 @@ struct JITEvent_EmittedFunctionDetails {
 /// The default implementation of each method does nothing.
 class JITEventListener {
 public:
-  using EmittedFunctionDetails = JITEvent_EmittedFunctionDetails;
+  typedef JITEvent_EmittedFunctionDetails EmittedFunctionDetails;
 
 public:
   JITEventListener() = default;

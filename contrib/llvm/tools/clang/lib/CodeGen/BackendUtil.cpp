@@ -35,6 +35,7 @@
 #include "llvm/LTO/LTOBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/SubtargetFeature.h"
+#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -49,21 +50,16 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#include "llvm/Transforms/IPO/ThinLTOBitcodeWriter.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/ObjCARC.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Utils/NameAnonGlobals.h"
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
 #include <memory>
 using namespace clang;
 using namespace llvm;
 
 namespace {
-
-// Default filename used for profile generation.
-static constexpr StringLiteral DefaultProfileGenName = "default_%m.profraw";
 
 class EmitAssemblyHelper {
   DiagnosticsEngine &Diags;
@@ -77,12 +73,16 @@ class EmitAssemblyHelper {
 
   std::unique_ptr<raw_pwrite_stream> OS;
 
+private:
   TargetIRAnalysis getTargetIRAnalysis() const {
     if (TM)
       return TM->getTargetIRAnalysis();
 
     return TargetIRAnalysis();
   }
+
+  /// Set LLVM command line options passed through -backend-option.
+  void setCommandLineOpts();
 
   void CreatePasses(legacy::PassManager &MPM, legacy::FunctionPassManager &FPM);
 
@@ -130,20 +130,16 @@ public:
 // that we add to the PassManagerBuilder.
 class PassManagerBuilderWrapper : public PassManagerBuilder {
 public:
-  PassManagerBuilderWrapper(const Triple &TargetTriple,
-                            const CodeGenOptions &CGOpts,
+  PassManagerBuilderWrapper(const CodeGenOptions &CGOpts,
                             const LangOptions &LangOpts)
-      : PassManagerBuilder(), TargetTriple(TargetTriple), CGOpts(CGOpts),
-        LangOpts(LangOpts) {}
-  const Triple &getTargetTriple() const { return TargetTriple; }
+      : PassManagerBuilder(), CGOpts(CGOpts), LangOpts(LangOpts) {}
   const CodeGenOptions &getCGOpts() const { return CGOpts; }
   const LangOptions &getLangOpts() const { return LangOpts; }
-
 private:
-  const Triple &TargetTriple;
   const CodeGenOptions &CGOpts;
   const LangOptions &LangOpts;
 };
+
 }
 
 static void addObjCARCAPElimPass(const PassManagerBuilder &Builder, PassManagerBase &PM) {
@@ -187,42 +183,19 @@ static void addSanitizerCoveragePass(const PassManagerBuilder &Builder,
   Opts.Use8bitCounters = CGOpts.SanitizeCoverage8bitCounters;
   Opts.TracePC = CGOpts.SanitizeCoverageTracePC;
   Opts.TracePCGuard = CGOpts.SanitizeCoverageTracePCGuard;
-  Opts.NoPrune = CGOpts.SanitizeCoverageNoPrune;
-  Opts.Inline8bitCounters = CGOpts.SanitizeCoverageInline8bitCounters;
   PM.add(createSanitizerCoverageModulePass(Opts));
-}
-
-// Check if ASan should use GC-friendly instrumentation for globals.
-// First of all, there is no point if -fdata-sections is off (expect for MachO,
-// where this is not a factor). Also, on ELF this feature requires an assembler
-// extension that only works with -integrated-as at the moment.
-static bool asanUseGlobalsGC(const Triple &T, const CodeGenOptions &CGOpts) {
-  if (!CGOpts.SanitizeAddressGlobalsDeadStripping)
-    return false;
-  switch (T.getObjectFormat()) {
-  case Triple::MachO:
-  case Triple::COFF:
-    return true;
-  case Triple::ELF:
-    return CGOpts.DataSections && !CGOpts.DisableIntegratedAS;
-  default:
-    return false;
-  }
 }
 
 static void addAddressSanitizerPasses(const PassManagerBuilder &Builder,
                                       legacy::PassManagerBase &PM) {
   const PassManagerBuilderWrapper &BuilderWrapper =
       static_cast<const PassManagerBuilderWrapper&>(Builder);
-  const Triple &T = BuilderWrapper.getTargetTriple();
   const CodeGenOptions &CGOpts = BuilderWrapper.getCGOpts();
   bool Recover = CGOpts.SanitizeRecover.has(SanitizerKind::Address);
   bool UseAfterScope = CGOpts.SanitizeAddressUseAfterScope;
-  bool UseGlobalsGC = asanUseGlobalsGC(T, CGOpts);
   PM.add(createAddressSanitizerFunctionPass(/*CompileKernel*/ false, Recover,
                                             UseAfterScope));
-  PM.add(createAddressSanitizerModulePass(/*CompileKernel*/ false, Recover,
-                                          UseGlobalsGC));
+  PM.add(createAddressSanitizerModulePass(/*CompileKernel*/false, Recover));
 }
 
 static void addKernelAddressSanitizerPasses(const PassManagerBuilder &Builder,
@@ -289,7 +262,7 @@ static TargetLibraryInfoImpl *createTLII(llvm::Triple &TargetTriple,
     TLII->disableAllFunctions();
   else {
     // Disable individual libc/libm calls in TargetLibraryInfo.
-    LibFunc F;
+    LibFunc::Func F;
     for (auto &FuncName : CodeGenOpts.getNoBuiltinFuncs())
       if (TLII->getLibFunc(FuncName, F))
         TLII->setUnavailable(F);
@@ -319,146 +292,14 @@ static void addSymbolRewriterPass(const CodeGenOptions &Opts,
   MPM->add(createRewriteSymbolsPass(DL));
 }
 
-static CodeGenOpt::Level getCGOptLevel(const CodeGenOptions &CodeGenOpts) {
-  switch (CodeGenOpts.OptimizationLevel) {
-  default:
-    llvm_unreachable("Invalid optimization level!");
-  case 0:
-    return CodeGenOpt::None;
-  case 1:
-    return CodeGenOpt::Less;
-  case 2:
-    return CodeGenOpt::Default; // O2/Os/Oz
-  case 3:
-    return CodeGenOpt::Aggressive;
-  }
-}
-
-static llvm::CodeModel::Model getCodeModel(const CodeGenOptions &CodeGenOpts) {
-  unsigned CodeModel =
-      llvm::StringSwitch<unsigned>(CodeGenOpts.CodeModel)
-      .Case("small", llvm::CodeModel::Small)
-      .Case("kernel", llvm::CodeModel::Kernel)
-      .Case("medium", llvm::CodeModel::Medium)
-      .Case("large", llvm::CodeModel::Large)
-      .Case("default", llvm::CodeModel::Default)
-      .Default(~0u);
-  assert(CodeModel != ~0u && "invalid code model!");
-  return static_cast<llvm::CodeModel::Model>(CodeModel);
-}
-
-static llvm::Reloc::Model getRelocModel(const CodeGenOptions &CodeGenOpts) {
-  // Keep this synced with the equivalent code in
-  // lib/Frontend/CompilerInvocation.cpp
-  llvm::Optional<llvm::Reloc::Model> RM;
-  RM = llvm::StringSwitch<llvm::Reloc::Model>(CodeGenOpts.RelocationModel)
-      .Case("static", llvm::Reloc::Static)
-      .Case("pic", llvm::Reloc::PIC_)
-      .Case("ropi", llvm::Reloc::ROPI)
-      .Case("rwpi", llvm::Reloc::RWPI)
-      .Case("ropi-rwpi", llvm::Reloc::ROPI_RWPI)
-      .Case("dynamic-no-pic", llvm::Reloc::DynamicNoPIC);
-  assert(RM.hasValue() && "invalid PIC model!");
-  return *RM;
-}
-
-static TargetMachine::CodeGenFileType getCodeGenFileType(BackendAction Action) {
-  if (Action == Backend_EmitObj)
-    return TargetMachine::CGFT_ObjectFile;
-  else if (Action == Backend_EmitMCNull)
-    return TargetMachine::CGFT_Null;
-  else {
-    assert(Action == Backend_EmitAssembly && "Invalid action!");
-    return TargetMachine::CGFT_AssemblyFile;
-  }
-}
-
-static void initTargetOptions(llvm::TargetOptions &Options,
-                              const CodeGenOptions &CodeGenOpts,
-                              const clang::TargetOptions &TargetOpts,
-                              const LangOptions &LangOpts,
-                              const HeaderSearchOptions &HSOpts) {
-  Options.ThreadModel =
-      llvm::StringSwitch<llvm::ThreadModel::Model>(CodeGenOpts.ThreadModel)
-          .Case("posix", llvm::ThreadModel::POSIX)
-          .Case("single", llvm::ThreadModel::Single);
-
-  // Set float ABI type.
-  assert((CodeGenOpts.FloatABI == "soft" || CodeGenOpts.FloatABI == "softfp" ||
-          CodeGenOpts.FloatABI == "hard" || CodeGenOpts.FloatABI.empty()) &&
-         "Invalid Floating Point ABI!");
-  Options.FloatABIType =
-      llvm::StringSwitch<llvm::FloatABI::ABIType>(CodeGenOpts.FloatABI)
-          .Case("soft", llvm::FloatABI::Soft)
-          .Case("softfp", llvm::FloatABI::Soft)
-          .Case("hard", llvm::FloatABI::Hard)
-          .Default(llvm::FloatABI::Default);
-
-  // Set FP fusion mode.
-  switch (LangOpts.getDefaultFPContractMode()) {
-  case LangOptions::FPC_Off:
-    // Preserve any contraction performed by the front-end.  (Strict performs
-    // splitting of the muladd instrinsic in the backend.)
-    Options.AllowFPOpFusion = llvm::FPOpFusion::Standard;
-    break;
-  case LangOptions::FPC_On:
-    Options.AllowFPOpFusion = llvm::FPOpFusion::Standard;
-    break;
-  case LangOptions::FPC_Fast:
-    Options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
-    break;
-  }
-
-  Options.UseInitArray = CodeGenOpts.UseInitArray;
-  Options.DisableIntegratedAS = CodeGenOpts.DisableIntegratedAS;
-  Options.CompressDebugSections = CodeGenOpts.getCompressDebugSections();
-  Options.RelaxELFRelocations = CodeGenOpts.RelaxELFRelocations;
-
-  // Set EABI version.
-  Options.EABIVersion = TargetOpts.EABIVersion;
-
-  if (LangOpts.SjLjExceptions)
-    Options.ExceptionModel = llvm::ExceptionHandling::SjLj;
-
-  Options.NoInfsFPMath = CodeGenOpts.NoInfsFPMath;
-  Options.NoNaNsFPMath = CodeGenOpts.NoNaNsFPMath;
-  Options.NoZerosInBSS = CodeGenOpts.NoZeroInitializedInBSS;
-  Options.UnsafeFPMath = CodeGenOpts.UnsafeFPMath;
-  Options.StackAlignmentOverride = CodeGenOpts.StackAlignment;
-  Options.FunctionSections = CodeGenOpts.FunctionSections;
-  Options.DataSections = CodeGenOpts.DataSections;
-  Options.UniqueSectionNames = CodeGenOpts.UniqueSectionNames;
-  Options.EmulatedTLS = CodeGenOpts.EmulatedTLS;
-  Options.DebuggerTuning = CodeGenOpts.getDebuggerTuning();
-
-  if (CodeGenOpts.EnableSplitDwarf)
-    Options.MCOptions.SplitDwarfFile = CodeGenOpts.SplitDwarfFile;
-  Options.MCOptions.MCRelaxAll = CodeGenOpts.RelaxAll;
-  Options.MCOptions.MCSaveTempLabels = CodeGenOpts.SaveTempLabels;
-  Options.MCOptions.MCUseDwarfDirectory = !CodeGenOpts.NoDwarfDirectoryAsm;
-  Options.MCOptions.MCNoExecStack = CodeGenOpts.NoExecStack;
-  Options.MCOptions.MCIncrementalLinkerCompatible =
-      CodeGenOpts.IncrementalLinkerCompatible;
-  Options.MCOptions.MCPIECopyRelocations = CodeGenOpts.PIECopyRelocations;
-  Options.MCOptions.MCFatalWarnings = CodeGenOpts.FatalWarnings;
-  Options.MCOptions.AsmVerbose = CodeGenOpts.AsmVerbose;
-  Options.MCOptions.PreserveAsmComments = CodeGenOpts.PreserveAsmComments;
-  Options.MCOptions.ABIName = TargetOpts.ABI;
-  for (const auto &Entry : HSOpts.UserEntries)
-    if (!Entry.IsFramework &&
-        (Entry.Group == frontend::IncludeDirGroup::Quoted ||
-         Entry.Group == frontend::IncludeDirGroup::Angled ||
-         Entry.Group == frontend::IncludeDirGroup::System))
-      Options.MCOptions.IASSearchPaths.push_back(
-          Entry.IgnoreSysRoot ? Entry.Path : HSOpts.Sysroot + Entry.Path);
-}
-
 void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
                                       legacy::FunctionPassManager &FPM) {
   // Handle disabling of all LLVM passes, where we want to preserve the
   // internal module before any optimization.
   if (CodeGenOpts.DisableLLVMPasses)
     return;
+
+  PassManagerBuilderWrapper PMBuilder(CodeGenOpts, LangOpts);
 
   // Figure out TargetLibraryInfo.  This needs to be added to MPM and FPM
   // manually (and not via PMBuilder), since some passes (eg. InstrProfiling)
@@ -468,8 +309,6 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
   std::unique_ptr<TargetLibraryInfoImpl> TLII(
       createTLII(TargetTriple, CodeGenOpts));
 
-  PassManagerBuilderWrapper PMBuilder(TargetTriple, CodeGenOpts, LangOpts);
-
   // At O0 and O1 we only run the always inliner which is more efficient. At
   // higher optimization levels we run the normal inliner.
   if (CodeGenOpts.OptimizationLevel <= 1) {
@@ -477,17 +316,13 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
                                      !CodeGenOpts.DisableLifetimeMarkers);
     PMBuilder.Inliner = createAlwaysInlinerLegacyPass(InsertLifetimeIntrinsics);
   } else {
-    // We do not want to inline hot callsites for SamplePGO module-summary build
-    // because profile annotation will happen again in ThinLTO backend, and we
-    // want the IR of the hot path to match the profile.
     PMBuilder.Inliner = createFunctionInliningPass(
-        CodeGenOpts.OptimizationLevel, CodeGenOpts.OptimizeSize,
-        (!CodeGenOpts.SampleProfileFile.empty() &&
-         CodeGenOpts.EmitSummaryIndex));
+        CodeGenOpts.OptimizationLevel, CodeGenOpts.OptimizeSize);
   }
 
   PMBuilder.OptLevel = CodeGenOpts.OptimizationLevel;
   PMBuilder.SizeLevel = CodeGenOpts.OptimizeSize;
+  PMBuilder.BBVectorize = CodeGenOpts.VectorizeBB;
   PMBuilder.SLPVectorize = CodeGenOpts.VectorizeSLP;
   PMBuilder.LoopVectorize = CodeGenOpts.VectorizeLoop;
 
@@ -499,13 +334,16 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
 
   MPM.add(new TargetLibraryInfoWrapperPass(*TLII));
 
+  // Add target-specific passes that need to run as early as possible.
   if (TM)
-    TM->adjustPassManager(PMBuilder);
+    PMBuilder.addExtension(
+        PassManagerBuilder::EP_EarlyAsPossible,
+        [&](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
+          TM->addEarlyAsPossiblePasses(PM);
+        });
 
-  if (CodeGenOpts.DebugInfoForProfiling ||
-      !CodeGenOpts.SampleProfileFile.empty())
-    PMBuilder.addExtension(PassManagerBuilder::EP_EarlyAsPossible,
-                           addAddDiscriminatorsPass);
+  PMBuilder.addExtension(PassManagerBuilder::EP_EarlyAsPossible,
+                         addAddDiscriminatorsPass);
 
   // In ObjC ARC mode, add the main ARC optimization passes.
   if (LangOpts.ObjCAutoRefCount) {
@@ -616,7 +454,7 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
     if (!CodeGenOpts.InstrProfileOutput.empty())
       PMBuilder.PGOInstrGen = CodeGenOpts.InstrProfileOutput;
     else
-      PMBuilder.PGOInstrGen = DefaultProfileGenName;
+      PMBuilder.PGOInstrGen = "default_%m.profraw";
   }
   if (CodeGenOpts.hasProfileIRUse())
     PMBuilder.PGOInstrUse = CodeGenOpts.ProfileInstrumentUsePath;
@@ -628,7 +466,7 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
   PMBuilder.populateModulePassManager(MPM);
 }
 
-static void setCommandLineOpts(const CodeGenOptions &CodeGenOpts) {
+void EmitAssemblyHelper::setCommandLineOpts() {
   SmallVector<const char *, 16> BackendArgs;
   BackendArgs.push_back("clang"); // Fake program name.
   if (!CodeGenOpts.DebugPass.empty()) {
@@ -657,14 +495,126 @@ void EmitAssemblyHelper::CreateTargetMachine(bool MustCreateTM) {
     return;
   }
 
-  llvm::CodeModel::Model CM  = getCodeModel(CodeGenOpts);
+  unsigned CodeModel =
+    llvm::StringSwitch<unsigned>(CodeGenOpts.CodeModel)
+      .Case("small", llvm::CodeModel::Small)
+      .Case("kernel", llvm::CodeModel::Kernel)
+      .Case("medium", llvm::CodeModel::Medium)
+      .Case("large", llvm::CodeModel::Large)
+      .Case("default", llvm::CodeModel::Default)
+      .Default(~0u);
+  assert(CodeModel != ~0u && "invalid code model!");
+  llvm::CodeModel::Model CM = static_cast<llvm::CodeModel::Model>(CodeModel);
+
   std::string FeaturesStr =
       llvm::join(TargetOpts.Features.begin(), TargetOpts.Features.end(), ",");
-  llvm::Reloc::Model RM = getRelocModel(CodeGenOpts);
-  CodeGenOpt::Level OptLevel = getCGOptLevel(CodeGenOpts);
+
+  // Keep this synced with the equivalent code in tools/driver/cc1as_main.cpp.
+  llvm::Optional<llvm::Reloc::Model> RM;
+  RM = llvm::StringSwitch<llvm::Reloc::Model>(CodeGenOpts.RelocationModel)
+           .Case("static", llvm::Reloc::Static)
+           .Case("pic", llvm::Reloc::PIC_)
+           .Case("ropi", llvm::Reloc::ROPI)
+           .Case("rwpi", llvm::Reloc::RWPI)
+           .Case("ropi-rwpi", llvm::Reloc::ROPI_RWPI)
+           .Case("dynamic-no-pic", llvm::Reloc::DynamicNoPIC);
+  assert(RM.hasValue() && "invalid PIC model!");
+
+  CodeGenOpt::Level OptLevel;
+  switch (CodeGenOpts.OptimizationLevel) {
+  default:
+    llvm_unreachable("Invalid optimization level!");
+  case 0:
+    OptLevel = CodeGenOpt::None;
+    break;
+  case 1:
+    OptLevel = CodeGenOpt::Less;
+    break;
+  case 2:
+    OptLevel = CodeGenOpt::Default;
+    break; // O2/Os/Oz
+  case 3:
+    OptLevel = CodeGenOpt::Aggressive;
+    break;
+  }
 
   llvm::TargetOptions Options;
-  initTargetOptions(Options, CodeGenOpts, TargetOpts, LangOpts, HSOpts);
+
+  Options.ThreadModel =
+    llvm::StringSwitch<llvm::ThreadModel::Model>(CodeGenOpts.ThreadModel)
+      .Case("posix", llvm::ThreadModel::POSIX)
+      .Case("single", llvm::ThreadModel::Single);
+
+  // Set float ABI type.
+  assert((CodeGenOpts.FloatABI == "soft" || CodeGenOpts.FloatABI == "softfp" ||
+          CodeGenOpts.FloatABI == "hard" || CodeGenOpts.FloatABI.empty()) &&
+         "Invalid Floating Point ABI!");
+  Options.FloatABIType =
+      llvm::StringSwitch<llvm::FloatABI::ABIType>(CodeGenOpts.FloatABI)
+          .Case("soft", llvm::FloatABI::Soft)
+          .Case("softfp", llvm::FloatABI::Soft)
+          .Case("hard", llvm::FloatABI::Hard)
+          .Default(llvm::FloatABI::Default);
+
+  // Set FP fusion mode.
+  switch (CodeGenOpts.getFPContractMode()) {
+  case CodeGenOptions::FPC_Off:
+    Options.AllowFPOpFusion = llvm::FPOpFusion::Strict;
+    break;
+  case CodeGenOptions::FPC_On:
+    Options.AllowFPOpFusion = llvm::FPOpFusion::Standard;
+    break;
+  case CodeGenOptions::FPC_Fast:
+    Options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
+    break;
+  }
+
+  Options.UseInitArray = CodeGenOpts.UseInitArray;
+  Options.DisableIntegratedAS = CodeGenOpts.DisableIntegratedAS;
+  Options.CompressDebugSections = CodeGenOpts.CompressDebugSections;
+  Options.RelaxELFRelocations = CodeGenOpts.RelaxELFRelocations;
+
+  // Set EABI version.
+  Options.EABIVersion = llvm::StringSwitch<llvm::EABI>(TargetOpts.EABIVersion)
+                            .Case("4", llvm::EABI::EABI4)
+                            .Case("5", llvm::EABI::EABI5)
+                            .Case("gnu", llvm::EABI::GNU)
+                            .Default(llvm::EABI::Default);
+
+  if (LangOpts.SjLjExceptions)
+    Options.ExceptionModel = llvm::ExceptionHandling::SjLj;
+
+  Options.LessPreciseFPMADOption = CodeGenOpts.LessPreciseFPMAD;
+  Options.NoInfsFPMath = CodeGenOpts.NoInfsFPMath;
+  Options.NoNaNsFPMath = CodeGenOpts.NoNaNsFPMath;
+  Options.NoZerosInBSS = CodeGenOpts.NoZeroInitializedInBSS;
+  Options.UnsafeFPMath = CodeGenOpts.UnsafeFPMath;
+  Options.StackAlignmentOverride = CodeGenOpts.StackAlignment;
+  Options.FunctionSections = CodeGenOpts.FunctionSections;
+  Options.DataSections = CodeGenOpts.DataSections;
+  Options.UniqueSectionNames = CodeGenOpts.UniqueSectionNames;
+  Options.EmulatedTLS = CodeGenOpts.EmulatedTLS;
+  Options.DebuggerTuning = CodeGenOpts.getDebuggerTuning();
+
+  Options.MCOptions.MCRelaxAll = CodeGenOpts.RelaxAll;
+  Options.MCOptions.MCSaveTempLabels = CodeGenOpts.SaveTempLabels;
+  Options.MCOptions.MCUseDwarfDirectory = !CodeGenOpts.NoDwarfDirectoryAsm;
+  Options.MCOptions.MCNoExecStack = CodeGenOpts.NoExecStack;
+  Options.MCOptions.MCIncrementalLinkerCompatible =
+      CodeGenOpts.IncrementalLinkerCompatible;
+  Options.MCOptions.MCPIECopyRelocations = CodeGenOpts.PIECopyRelocations;
+  Options.MCOptions.MCFatalWarnings = CodeGenOpts.FatalWarnings;
+  Options.MCOptions.AsmVerbose = CodeGenOpts.AsmVerbose;
+  Options.MCOptions.PreserveAsmComments = CodeGenOpts.PreserveAsmComments;
+  Options.MCOptions.ABIName = TargetOpts.ABI;
+  for (const auto &Entry : HSOpts.UserEntries)
+    if (!Entry.IsFramework &&
+        (Entry.Group == frontend::IncludeDirGroup::Quoted ||
+         Entry.Group == frontend::IncludeDirGroup::Angled ||
+         Entry.Group == frontend::IncludeDirGroup::System))
+      Options.MCOptions.IASSearchPaths.push_back(
+          Entry.IgnoreSysRoot ? Entry.Path : HSOpts.Sysroot + Entry.Path);
+
   TM.reset(TheTarget->createTargetMachine(Triple, TargetOpts.CPU, FeaturesStr,
                                           Options, RM, CM, OptLevel));
 }
@@ -680,7 +630,13 @@ bool EmitAssemblyHelper::AddEmitPasses(legacy::PassManager &CodeGenPasses,
 
   // Normal mode, emit a .s or .o file by running the code generator. Note,
   // this also adds codegenerator level optimization passes.
-  TargetMachine::CodeGenFileType CGFT = getCodeGenFileType(Action);
+  TargetMachine::CodeGenFileType CGFT = TargetMachine::CGFT_AssemblyFile;
+  if (Action == Backend_EmitObj)
+    CGFT = TargetMachine::CGFT_ObjectFile;
+  else if (Action == Backend_EmitMCNull)
+    CGFT = TargetMachine::CGFT_Null;
+  else
+    assert(Action == Backend_EmitAssembly && "Invalid action!");
 
   // Add ObjC ARC final-cleanup optimizations. This is done as part of the
   // "codegen" passes so that it isn't run multiple times when there is
@@ -701,7 +657,7 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
                                       std::unique_ptr<raw_pwrite_stream> OS) {
   TimeRegion Region(llvm::TimePassesIsEnabled ? &CodeGenerationTime : nullptr);
 
-  setCommandLineOpts(CodeGenOpts);
+  setCommandLineOpts();
 
   bool UsesCodeGen = (Action != Backend_EmitNothing &&
                       Action != Backend_EmitBC &&
@@ -727,31 +683,14 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   CodeGenPasses.add(
       createTargetTransformInfoWrapperPass(getTargetIRAnalysis()));
 
-  std::unique_ptr<raw_fd_ostream> ThinLinkOS;
-
   switch (Action) {
   case Backend_EmitNothing:
     break;
 
   case Backend_EmitBC:
-    if (CodeGenOpts.EmitSummaryIndex) {
-      if (!CodeGenOpts.ThinLinkBitcodeFile.empty()) {
-        std::error_code EC;
-        ThinLinkOS.reset(new llvm::raw_fd_ostream(
-            CodeGenOpts.ThinLinkBitcodeFile, EC,
-            llvm::sys::fs::F_None));
-        if (EC) {
-          Diags.Report(diag::err_fe_unable_to_open_output) << CodeGenOpts.ThinLinkBitcodeFile
-                                                           << EC.message();
-          return;
-        }
-      }
-      PerModulePasses.add(
-          createWriteThinLTOBitcodePass(*OS, ThinLinkOS.get()));
-    }
-    else
-      PerModulePasses.add(
-          createBitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists));
+    PerModulePasses.add(createBitcodeWriterPass(
+        *OS, CodeGenOpts.EmitLLVMUseLists, CodeGenOpts.EmitSummaryIndex,
+        CodeGenOpts.EmitSummaryIndex));
     break;
 
   case Backend_EmitLL:
@@ -830,7 +769,7 @@ static PassBuilder::OptimizationLevel mapToLevel(const CodeGenOptions &Opts) {
 void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
     BackendAction Action, std::unique_ptr<raw_pwrite_stream> OS) {
   TimeRegion Region(llvm::TimePassesIsEnabled ? &CodeGenerationTime : nullptr);
-  setCommandLineOpts(CodeGenOpts);
+  setCommandLineOpts();
 
   // The new pass manager always makes a target machine available to passes
   // during construction.
@@ -840,28 +779,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
     return;
   TheModule->setDataLayout(TM->createDataLayout());
 
-  PGOOptions PGOOpt;
-
-  // -fprofile-generate.
-  PGOOpt.RunProfileGen = CodeGenOpts.hasProfileIRInstr();
-  if (PGOOpt.RunProfileGen)
-    PGOOpt.ProfileGenFile = CodeGenOpts.InstrProfileOutput.empty() ?
-      DefaultProfileGenName : CodeGenOpts.InstrProfileOutput;
-
-  // -fprofile-use.
-  if (CodeGenOpts.hasProfileIRUse())
-    PGOOpt.ProfileUseFile = CodeGenOpts.ProfileInstrumentUsePath;
-
-  if (!CodeGenOpts.SampleProfileFile.empty())
-    PGOOpt.SampleProfileFile = CodeGenOpts.SampleProfileFile;
-
-  // Only pass a PGO options struct if -fprofile-generate or
-  // -fprofile-use were passed on the cmdline.
-  PassBuilder PB(TM.get(),
-    (PGOOpt.RunProfileGen ||
-      !PGOOpt.ProfileUseFile.empty() ||
-      !PGOOpt.SampleProfileFile.empty()) ?
-        Optional<PGOOptions>(PGOOpt) : None);
+  PassBuilder PB(TM.get());
 
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
@@ -878,34 +796,20 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-  ModulePassManager MPM(CodeGenOpts.DebugPassManager);
+  ModulePassManager MPM;
 
   if (!CodeGenOpts.DisableLLVMPasses) {
-    bool IsThinLTO = CodeGenOpts.EmitSummaryIndex;
-    bool IsLTO = CodeGenOpts.PrepareForLTO;
-
     if (CodeGenOpts.OptimizationLevel == 0) {
       // Build a minimal pipeline based on the semantics required by Clang,
       // which is just that always inlining occurs.
       MPM.addPass(AlwaysInlinerPass());
-      if (IsThinLTO)
-        MPM.addPass(NameAnonGlobalPass());
     } else {
-      // Map our optimization levels into one of the distinct levels used to
-      // configure the pipeline.
+      // Otherwise, use the default pass pipeline. We also have to map our
+      // optimization levels into one of the distinct levels used to configure
+      // the pipeline.
       PassBuilder::OptimizationLevel Level = mapToLevel(CodeGenOpts);
 
-      if (IsThinLTO) {
-        MPM = PB.buildThinLTOPreLinkDefaultPipeline(
-            Level, CodeGenOpts.DebugPassManager);
-        MPM.addPass(NameAnonGlobalPass());
-      } else if (IsLTO) {
-        MPM = PB.buildLTOPreLinkDefaultPipeline(Level,
-                                                CodeGenOpts.DebugPassManager);
-      } else {
-        MPM = PB.buildPerModuleDefaultPipeline(Level,
-                                               CodeGenOpts.DebugPassManager);
-      }
+      MPM = PB.buildPerModuleDefaultPipeline(Level);
     }
   }
 
@@ -913,7 +817,6 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
   // create that pass manager here and use it as needed below.
   legacy::PassManager CodeGenPasses;
   bool NeedCodeGen = false;
-  Optional<raw_fd_ostream> ThinLinkOS;
 
   // Append any output we need to the pass manager.
   switch (Action) {
@@ -921,24 +824,9 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
     break;
 
   case Backend_EmitBC:
-    if (CodeGenOpts.EmitSummaryIndex) {
-      if (!CodeGenOpts.ThinLinkBitcodeFile.empty()) {
-        std::error_code EC;
-        ThinLinkOS.emplace(CodeGenOpts.ThinLinkBitcodeFile, EC,
-                           llvm::sys::fs::F_None);
-        if (EC) {
-          Diags.Report(diag::err_fe_unable_to_open_output)
-              << CodeGenOpts.ThinLinkBitcodeFile << EC.message();
-          return;
-        }
-      }
-      MPM.addPass(
-          ThinLTOBitcodeWriterPass(*OS, ThinLinkOS ? &*ThinLinkOS : nullptr));
-    } else {
-      MPM.addPass(BitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists,
-                                    CodeGenOpts.EmitSummaryIndex,
-                                    CodeGenOpts.EmitSummaryIndex));
-    }
+    MPM.addPass(BitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists,
+                                  CodeGenOpts.EmitSummaryIndex,
+                                  CodeGenOpts.EmitSummaryIndex));
     break;
 
   case Backend_EmitLL:
@@ -973,50 +861,21 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
   }
 }
 
-Expected<BitcodeModule> clang::FindThinLTOModule(MemoryBufferRef MBRef) {
-  Expected<std::vector<BitcodeModule>> BMsOrErr = getBitcodeModuleList(MBRef);
-  if (!BMsOrErr)
-    return BMsOrErr.takeError();
-
-  // The bitcode file may contain multiple modules, we want the one that is
-  // marked as being the ThinLTO module.
-  for (BitcodeModule &BM : *BMsOrErr) {
-    Expected<BitcodeLTOInfo> LTOInfo = BM.getLTOInfo();
-    if (LTOInfo && LTOInfo->IsThinLTO)
-      return BM;
-  }
-
-  return make_error<StringError>("Could not find module summary",
-                                 inconvertibleErrorCode());
-}
-
 static void runThinLTOBackend(ModuleSummaryIndex *CombinedIndex, Module *M,
-                              const HeaderSearchOptions &HeaderOpts,
-                              const CodeGenOptions &CGOpts,
-                              const clang::TargetOptions &TOpts,
-                              const LangOptions &LOpts,
-                              std::unique_ptr<raw_pwrite_stream> OS,
-                              std::string SampleProfile,
-                              BackendAction Action) {
-  StringMap<DenseMap<GlobalValue::GUID, GlobalValueSummary *>>
+                              std::unique_ptr<raw_pwrite_stream> OS) {
+  StringMap<std::map<GlobalValue::GUID, GlobalValueSummary *>>
       ModuleToDefinedGVSummaries;
   CombinedIndex->collectDefinedGVSummariesPerModule(ModuleToDefinedGVSummaries);
-
-  setCommandLineOpts(CGOpts);
 
   // We can simply import the values mentioned in the combined index, since
   // we should only invoke this using the individual indexes written out
   // via a WriteIndexesThinBackend.
   FunctionImporter::ImportMapTy ImportList;
   for (auto &GlobalList : *CombinedIndex) {
-    // Ignore entries for undefined references.
-    if (GlobalList.second.SummaryList.empty())
-      continue;
-
     auto GUID = GlobalList.first;
-    assert(GlobalList.second.SummaryList.size() == 1 &&
+    assert(GlobalList.second.size() == 1 &&
            "Expected individual combined index to have one summary per GUID");
-    auto &Summary = GlobalList.second.SummaryList[0];
+    auto &Summary = GlobalList.second[0];
     // Skip the summaries for the importing module. These are included to
     // e.g. record required linkage changes.
     if (Summary->modulePath() == M->getModuleIdentifier())
@@ -1038,15 +897,32 @@ static void runThinLTOBackend(ModuleSummaryIndex *CombinedIndex, Module *M,
       return;
     }
 
-    Expected<BitcodeModule> BMOrErr = FindThinLTOModule(**MBOrErr);
-    if (!BMOrErr) {
-      handleAllErrors(BMOrErr.takeError(), [&](ErrorInfoBase &EIB) {
+    Expected<std::vector<BitcodeModule>> BMsOrErr =
+        getBitcodeModuleList(**MBOrErr);
+    if (!BMsOrErr) {
+      handleAllErrors(BMsOrErr.takeError(), [&](ErrorInfoBase &EIB) {
         errs() << "Error loading imported file '" << I.first()
                << "': " << EIB.message() << '\n';
       });
       return;
     }
-    ModuleMap.insert({I.first(), *BMOrErr});
+
+    // The bitcode file may contain multiple modules, we want the one with a
+    // summary.
+    bool FoundModule = false;
+    for (BitcodeModule &BM : *BMsOrErr) {
+      Expected<bool> HasSummary = BM.hasSummary();
+      if (HasSummary && *HasSummary) {
+        ModuleMap.insert({I.first(), BM});
+        FoundModule = true;
+        break;
+      }
+    }
+    if (!FoundModule) {
+      errs() << "Error loading imported file '" << I.first()
+             << "': Could not find module summary\n";
+      return;
+    }
 
     OwnedImports.push_back(std::move(*MBOrErr));
   }
@@ -1054,36 +930,6 @@ static void runThinLTOBackend(ModuleSummaryIndex *CombinedIndex, Module *M,
     return llvm::make_unique<lto::NativeObjectStream>(std::move(OS));
   };
   lto::Config Conf;
-  Conf.CPU = TOpts.CPU;
-  Conf.CodeModel = getCodeModel(CGOpts);
-  Conf.MAttrs = TOpts.Features;
-  Conf.RelocModel = getRelocModel(CGOpts);
-  Conf.CGOptLevel = getCGOptLevel(CGOpts);
-  initTargetOptions(Conf.Options, CGOpts, TOpts, LOpts, HeaderOpts);
-  Conf.SampleProfile = std::move(SampleProfile);
-  Conf.UseNewPM = CGOpts.ExperimentalNewPassManager;
-  switch (Action) {
-  case Backend_EmitNothing:
-    Conf.PreCodeGenModuleHook = [](size_t Task, const Module &Mod) {
-      return false;
-    };
-    break;
-  case Backend_EmitLL:
-    Conf.PreCodeGenModuleHook = [&](size_t Task, const Module &Mod) {
-      M->print(*OS, nullptr, CGOpts.EmitLLVMUseLists);
-      return false;
-    };
-    break;
-  case Backend_EmitBC:
-    Conf.PreCodeGenModuleHook = [&](size_t Task, const Module &Mod) {
-      WriteBitcodeToFile(M, *OS, CGOpts.EmitLLVMUseLists);
-      return false;
-    };
-    break;
-  default:
-    Conf.CGFileType = getCodeGenFileType(Action);
-    break;
-  }
   if (Error E = thinBackend(
           Conf, 0, AddStream, *M, *CombinedIndex, ImportList,
           ModuleToDefinedGVSummaries[M->getModuleIdentifier()], ModuleMap)) {
@@ -1106,8 +952,7 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
     // into memory and pass it into runThinLTOBackend, which will run the
     // function importer and invoke LTO passes.
     Expected<std::unique_ptr<ModuleSummaryIndex>> IndexOrErr =
-        llvm::getModuleSummaryIndexForFile(CGOpts.ThinLTOIndexFile,
-                                           /*IgnoreEmptyThinLTOIndexFile*/true);
+        llvm::getModuleSummaryIndexForFile(CGOpts.ThinLTOIndexFile);
     if (!IndexOrErr) {
       logAllUnhandledErrors(IndexOrErr.takeError(), errs(),
                             "Error loading index file '" +
@@ -1120,8 +965,7 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
     // of an error).
     bool DoThinLTOBackend = CombinedIndex != nullptr;
     if (DoThinLTOBackend) {
-      runThinLTOBackend(CombinedIndex.get(), M, HeaderOpts, CGOpts, TOpts,
-                        LOpts, std::move(OS), CGOpts.SampleProfileFile, Action);
+      runThinLTOBackend(CombinedIndex.get(), M, std::move(OS));
       return;
     }
   }
@@ -1152,7 +996,6 @@ static const char* getSectionNameForBitcode(const Triple &T) {
     return "__LLVM,__bitcode";
   case Triple::COFF:
   case Triple::ELF:
-  case Triple::Wasm:
   case Triple::UnknownObjectFormat:
     return ".llvmbc";
   }
@@ -1165,7 +1008,6 @@ static const char* getSectionNameForCommandline(const Triple &T) {
     return "__LLVM,__cmdline";
   case Triple::COFF:
   case Triple::ELF:
-  case Triple::Wasm:
   case Triple::UnknownObjectFormat:
     return ".llvmcmd";
   }

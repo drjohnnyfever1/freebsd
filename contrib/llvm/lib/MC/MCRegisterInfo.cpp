@@ -1,4 +1,4 @@
-//===- MC/MCRegisterInfo.cpp - Target Register Description ----------------===//
+//=== MC/MCRegisterInfo.cpp - Target Register Description -------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,11 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <algorithm>
-#include <cassert>
-#include <cstdint>
+#include "llvm/Support/Format.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 

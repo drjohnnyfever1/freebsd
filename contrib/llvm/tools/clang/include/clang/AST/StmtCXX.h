@@ -296,9 +296,7 @@ public:
 /// \brief Represents the body of a coroutine. This wraps the normal function
 /// body and holds the additional semantic context required to set up and tear
 /// down the coroutine frame.
-class CoroutineBodyStmt final
-    : public Stmt,
-      private llvm::TrailingObjects<CoroutineBodyStmt, Stmt *> {
+class CoroutineBodyStmt : public Stmt {
   enum SubStmt {
     Body,          ///< The body of the coroutine.
     Promise,       ///< The promise statement.
@@ -308,109 +306,66 @@ class CoroutineBodyStmt final
     OnFallthrough, ///< Handler for control flow falling off the body.
     Allocate,      ///< Coroutine frame memory allocation.
     Deallocate,    ///< Coroutine frame memory deallocation.
-    ReturnValue,   ///< Return value for thunk function: p.get_return_object().
-    ResultDecl,    ///< Declaration holding the result of get_return_object.
-    ReturnStmt,    ///< Return statement for the thunk function.
-    ReturnStmtOnAllocFailure, ///< Return statement if allocation failed.
+    ReturnValue,   ///< Return value for thunk function.
     FirstParamMove ///< First offset for move construction of parameter copies.
   };
-  unsigned NumParams;
+  Stmt *SubStmts[SubStmt::FirstParamMove];
 
   friend class ASTStmtReader;
-  friend class ASTReader;
-  friend TrailingObjects;
-
-  Stmt **getStoredStmts() { return getTrailingObjects<Stmt *>(); }
-
-  Stmt *const *getStoredStmts() const { return getTrailingObjects<Stmt *>(); }
-
 public:
-
-  struct CtorArgs {
-    Stmt *Body = nullptr;
-    Stmt *Promise = nullptr;
-    Expr *InitialSuspend = nullptr;
-    Expr *FinalSuspend = nullptr;
-    Stmt *OnException = nullptr;
-    Stmt *OnFallthrough = nullptr;
-    Expr *Allocate = nullptr;
-    Expr *Deallocate = nullptr;
-    Expr *ReturnValue = nullptr;
-    Stmt *ResultDecl = nullptr;
-    Stmt *ReturnStmt = nullptr;
-    Stmt *ReturnStmtOnAllocFailure = nullptr;
-    ArrayRef<Stmt *> ParamMoves;
-  };
-
-private:
-
-  CoroutineBodyStmt(CtorArgs const& Args);
-
-public:
-  static CoroutineBodyStmt *Create(const ASTContext &C, CtorArgs const &Args);
-  static CoroutineBodyStmt *Create(const ASTContext &C, EmptyShell,
-                                   unsigned NumParams);
-
-  bool hasDependentPromiseType() const {
-    return getPromiseDecl()->getType()->isDependentType();
+  CoroutineBodyStmt(Stmt *Body, Stmt *Promise, Stmt *InitSuspend,
+                    Stmt *FinalSuspend, Stmt *OnException, Stmt *OnFallthrough,
+                    Expr *Allocate, Stmt *Deallocate,
+                    Expr *ReturnValue, ArrayRef<Expr *> ParamMoves)
+      : Stmt(CoroutineBodyStmtClass) {
+    SubStmts[CoroutineBodyStmt::Body] = Body;
+    SubStmts[CoroutineBodyStmt::Promise] = Promise;
+    SubStmts[CoroutineBodyStmt::InitSuspend] = InitSuspend;
+    SubStmts[CoroutineBodyStmt::FinalSuspend] = FinalSuspend;
+    SubStmts[CoroutineBodyStmt::OnException] = OnException;
+    SubStmts[CoroutineBodyStmt::OnFallthrough] = OnFallthrough;
+    SubStmts[CoroutineBodyStmt::Allocate] = Allocate;
+    SubStmts[CoroutineBodyStmt::Deallocate] = Deallocate;
+    SubStmts[CoroutineBodyStmt::ReturnValue] = ReturnValue;
+    // FIXME: Tail-allocate space for parameter move expressions and store them.
+    assert(ParamMoves.empty() && "not implemented yet");
   }
 
   /// \brief Retrieve the body of the coroutine as written. This will be either
   /// a CompoundStmt or a TryStmt.
   Stmt *getBody() const {
-    return getStoredStmts()[SubStmt::Body];
+    return SubStmts[SubStmt::Body];
   }
 
-  Stmt *getPromiseDeclStmt() const {
-    return getStoredStmts()[SubStmt::Promise];
-  }
+  Stmt *getPromiseDeclStmt() const { return SubStmts[SubStmt::Promise]; }
   VarDecl *getPromiseDecl() const {
     return cast<VarDecl>(cast<DeclStmt>(getPromiseDeclStmt())->getSingleDecl());
   }
 
-  Stmt *getInitSuspendStmt() const {
-    return getStoredStmts()[SubStmt::InitSuspend];
-  }
-  Stmt *getFinalSuspendStmt() const {
-    return getStoredStmts()[SubStmt::FinalSuspend];
-  }
+  Stmt *getInitSuspendStmt() const { return SubStmts[SubStmt::InitSuspend]; }
+  Stmt *getFinalSuspendStmt() const { return SubStmts[SubStmt::FinalSuspend]; }
 
-  Stmt *getExceptionHandler() const {
-    return getStoredStmts()[SubStmt::OnException];
-  }
+  Stmt *getExceptionHandler() const { return SubStmts[SubStmt::OnException]; }
   Stmt *getFallthroughHandler() const {
-    return getStoredStmts()[SubStmt::OnFallthrough];
+    return SubStmts[SubStmt::OnFallthrough];
   }
 
-  Expr *getAllocate() const {
-    return cast_or_null<Expr>(getStoredStmts()[SubStmt::Allocate]);
-  }
-  Expr *getDeallocate() const {
-    return cast_or_null<Expr>(getStoredStmts()[SubStmt::Deallocate]);
-  }
+  Expr *getAllocate() const { return cast<Expr>(SubStmts[SubStmt::Allocate]); }
+  Stmt *getDeallocate() const { return SubStmts[SubStmt::Deallocate]; }
+
   Expr *getReturnValueInit() const {
-    return cast<Expr>(getStoredStmts()[SubStmt::ReturnValue]);
-  }
-  Stmt *getResultDecl() const { return getStoredStmts()[SubStmt::ResultDecl]; }
-  Stmt *getReturnStmt() const { return getStoredStmts()[SubStmt::ReturnStmt]; }
-  Stmt *getReturnStmtOnAllocFailure() const {
-    return getStoredStmts()[SubStmt::ReturnStmtOnAllocFailure];
-  }
-  ArrayRef<Stmt const *> getParamMoves() const {
-    return {getStoredStmts() + SubStmt::FirstParamMove, NumParams};
+    return cast<Expr>(SubStmts[SubStmt::ReturnValue]);
   }
 
   SourceLocation getLocStart() const LLVM_READONLY {
-    return getBody() ? getBody()->getLocStart()
-            : getPromiseDecl()->getLocStart();
+    return getBody()->getLocStart();
   }
   SourceLocation getLocEnd() const LLVM_READONLY {
-    return getBody() ? getBody()->getLocEnd() : getPromiseDecl()->getLocEnd();
+    return getBody()->getLocEnd();
   }
 
   child_range children() {
-    return child_range(getStoredStmts(),
-                       getStoredStmts() + SubStmt::FirstParamMove + NumParams);
+    return child_range(SubStmts, SubStmts + SubStmt::FirstParamMove);
   }
 
   static bool classof(const Stmt *T) {
@@ -435,19 +390,13 @@ class CoreturnStmt : public Stmt {
   enum SubStmt { Operand, PromiseCall, Count };
   Stmt *SubStmts[SubStmt::Count];
 
-  bool IsImplicit : 1;
-
   friend class ASTStmtReader;
 public:
-  CoreturnStmt(SourceLocation CoreturnLoc, Stmt *Operand, Stmt *PromiseCall,
-               bool IsImplicit = false)
-      : Stmt(CoreturnStmtClass), CoreturnLoc(CoreturnLoc),
-        IsImplicit(IsImplicit) {
+  CoreturnStmt(SourceLocation CoreturnLoc, Stmt *Operand, Stmt *PromiseCall)
+      : Stmt(CoreturnStmtClass), CoreturnLoc(CoreturnLoc) {
     SubStmts[SubStmt::Operand] = Operand;
     SubStmts[SubStmt::PromiseCall] = PromiseCall;
   }
-
-  CoreturnStmt(EmptyShell) : CoreturnStmt({}, {}, {}) {}
 
   SourceLocation getKeywordLoc() const { return CoreturnLoc; }
 
@@ -461,9 +410,6 @@ public:
   Expr *getPromiseCall() const {
     return static_cast<Expr*>(SubStmts[PromiseCall]);
   }
-
-  bool isImplicit() const { return IsImplicit; }
-  void setIsImplicit(bool value = true) { IsImplicit = value; }
 
   SourceLocation getLocStart() const LLVM_READONLY { return CoreturnLoc; }
   SourceLocation getLocEnd() const LLVM_READONLY {

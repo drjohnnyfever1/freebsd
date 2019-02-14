@@ -160,16 +160,15 @@ static u32 countAndClearShadowValues(u32 BitIdx, uptr ShadowStart,
 static u32 computeWorkingSizeAndReset(u32 BitIdx) {
   u32 WorkingSetSize = 0;
   MemoryMappingLayout MemIter(true/*cache*/);
-  MemoryMappedSegment Segment;
-  while (MemIter.Next(&Segment)) {
-    VPrintf(4, "%s: considering %p-%p app=%d shadow=%d prot=%u\n", __FUNCTION__,
-            Segment.start, Segment.end, Segment.protection,
-            isAppMem(Segment.start), isShadowMem(Segment.start));
-    if (isShadowMem(Segment.start) && Segment.IsWritable()) {
-      VPrintf(3, "%s: walking %p-%p\n", __FUNCTION__, Segment.start,
-              Segment.end);
-      WorkingSetSize +=
-          countAndClearShadowValues(BitIdx, Segment.start, Segment.end);
+  uptr Start, End, Prot;
+  while (MemIter.Next(&Start, &End, nullptr/*offs*/, nullptr/*file*/,
+                      0/*file size*/, &Prot)) {
+    VPrintf(4, "%s: considering %p-%p app=%d shadow=%d prot=%u\n",
+            __FUNCTION__, Start, End, Prot, isAppMem(Start),
+            isShadowMem(Start));
+    if (isShadowMem(Start) && (Prot & MemoryMappingLayout::kProtectionWrite)) {
+      VPrintf(3, "%s: walking %p-%p\n", __FUNCTION__, Start, End);
+      WorkingSetSize += countAndClearShadowValues(BitIdx, Start, End);
     }
   }
   return WorkingSetSize;

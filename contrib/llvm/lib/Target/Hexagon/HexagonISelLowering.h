@@ -50,24 +50,42 @@ namespace HexagonISD {
       JT,          // Jump table.
       CP,          // Constant pool.
 
+      POPCOUNT,
       COMBINE,
       PACKHL,
-      VSPLAT,
-      VASL,
-      VASR,
-      VLSR,
+      VSPLATB,
+      VSPLATH,
+      SHUFFEB,
+      SHUFFEH,
+      SHUFFOB,
+      SHUFFOH,
+      VSXTBH,
+      VSXTBW,
+      VSRAW,
+      VSRAH,
+      VSRLW,
+      VSRLH,
+      VSHLW,
+      VSHLH,
+      VCMPBEQ,
+      VCMPBGT,
+      VCMPBGTU,
+      VCMPHEQ,
+      VCMPHGT,
+      VCMPHGTU,
+      VCMPWEQ,
+      VCMPWGT,
+      VCMPWGTU,
 
       INSERT,
       INSERTRP,
       EXTRACTU,
       EXTRACTURP,
       VCOMBINE,
-      VPACKE,
-      VPACKO,
+      VPACK,
       TC_RETURN,
       EH_RETURN,
       DCFETCH,
-      READCYCLE,
 
       OP_END
     };
@@ -128,7 +146,6 @@ namespace HexagonISD {
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerPREFETCH(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerREADCYCLECOUNTER(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_LABEL(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
     SDValue
@@ -146,7 +163,7 @@ namespace HexagonISD {
     SDValue LowerToTLSLocalExecModel(GlobalAddressSDNode *GA,
         SelectionDAG &DAG) const;
     SDValue GetDynamicTLSAddr(SelectionDAG &DAG, SDValue Chain,
-        GlobalAddressSDNode *GA, SDValue InFlag, EVT PtrVT,
+        GlobalAddressSDNode *GA, SDValue *InFlag, EVT PtrVT,
         unsigned ReturnReg, unsigned char OperandFlags) const;
     SDValue LowerGLOBAL_OFFSET_TABLE(SDValue Op, SelectionDAG &DAG) const;
 
@@ -162,21 +179,18 @@ namespace HexagonISD {
 
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVSELECT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerCTPOP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
-
-    bool CanLowerReturn(CallingConv::ID CallConv,
-                        MachineFunction &MF, bool isVarArg,
-                        const SmallVectorImpl<ISD::OutputArg> &Outs,
-                        LLVMContext &Context) const override;
+    SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
                         const SmallVectorImpl<ISD::OutputArg> &Outs,
                         const SmallVectorImpl<SDValue> &OutVals,
                         const SDLoc &dl, SelectionDAG &DAG) const override;
 
-    bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
+    bool mayBeEmittedAsTailCall(CallInst *CI) const override;
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.

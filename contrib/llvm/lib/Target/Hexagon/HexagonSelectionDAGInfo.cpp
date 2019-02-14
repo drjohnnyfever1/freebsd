@@ -51,12 +51,11 @@ SDValue HexagonSelectionDAGInfo::EmitTargetCodeForMemcpy(
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl)
       .setChain(Chain)
-      .setLibCallee(
-          TLI.getLibcallCallingConv(RTLIB::MEMCPY),
-          Type::getVoidTy(*DAG.getContext()),
-          DAG.getTargetExternalSymbol(
-              SpecialMemcpyName, TLI.getPointerTy(DAG.getDataLayout()), Flags),
-          std::move(Args))
+      .setCallee(TLI.getLibcallCallingConv(RTLIB::MEMCPY),
+                 Type::getVoidTy(*DAG.getContext()),
+                 DAG.getTargetExternalSymbol(SpecialMemcpyName,
+                      TLI.getPointerTy(DAG.getDataLayout()), Flags),
+                 std::move(Args))
       .setDiscardResult();
 
   std::pair<SDValue, SDValue> CallResult = TLI.LowerCallTo(CLI);

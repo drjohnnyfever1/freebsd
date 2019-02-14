@@ -36,7 +36,7 @@ unsigned WebAssemblyTTIImpl::getNumberOfRegisters(bool Vector) {
   return Result;
 }
 
-unsigned WebAssemblyTTIImpl::getRegisterBitWidth(bool Vector) const {
+unsigned WebAssemblyTTIImpl::getRegisterBitWidth(bool Vector) {
   if (Vector && getST()->hasSIMD128())
     return 128;
 

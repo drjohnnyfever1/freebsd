@@ -113,6 +113,8 @@ __gedf2(fp_t a, fp_t b) {
     }
 }
 
+ARM_EABI_FNALIAS(dcmpun, unorddf2)
+
 COMPILER_RT_ABI int
 __unorddf2(fp_t a, fp_t b) {
     const rep_t aAbs = toRep(a) & absMask;
@@ -141,10 +143,4 @@ COMPILER_RT_ABI enum GE_RESULT
 __gtdf2(fp_t a, fp_t b) {
     return __gedf2(a, b);
 }
-
-#if defined(__ARM_EABI__)
-AEABI_RTABI int __aeabi_dcmpun(fp_t a, fp_t b) {
-  return __unorddf2(a, b);
-}
-#endif
 

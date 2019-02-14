@@ -24,7 +24,7 @@
 #include "lldb/Expression/REPL.h"
 #include "lldb/Expression/UserExpression.h"
 #include "lldb/Host/Host.h"
-#include "lldb/Host/OptionParser.h"
+#include "lldb/Host/StringConvert.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -69,10 +69,10 @@ static OptionDefinition g_expression_options[] = {
     // clang-format on
 };
 
-Status CommandObjectExpression::CommandOptions::SetOptionValue(
+Error CommandObjectExpression::CommandOptions::SetOptionValue(
     uint32_t option_idx, llvm::StringRef option_arg,
     ExecutionContext *execution_context) {
-  Status error;
+  Error error;
 
   const int short_option = GetDefinitions()[option_idx].short_option;
 
@@ -295,15 +295,15 @@ CommandObjectExpression::~CommandObjectExpression() = default;
 
 Options *CommandObjectExpression::GetOptions() { return &m_option_group; }
 
-static lldb_private::Status
+static lldb_private::Error
 CanBeUsedForElementCountPrinting(ValueObject &valobj) {
   CompilerType type(valobj.GetCompilerType());
   CompilerType pointee;
   if (!type.IsPointerType(&pointee))
-    return Status("as it does not refer to a pointer");
+    return Error("as it does not refer to a pointer");
   if (pointee.IsVoidType())
-    return Status("as it refers to a pointer to void");
-  return Status();
+    return Error("as it refers to a pointer to void");
+  return Error();
 }
 
 bool CommandObjectExpression::EvaluateExpression(const char *expr,
@@ -384,7 +384,7 @@ bool CommandObjectExpression::EvaluateExpression(const char *expr,
             result_valobj_sp->SetFormat(format);
 
           if (m_varobj_options.elem_count > 0) {
-            Status error(CanBeUsedForElementCountPrinting(*result_valobj_sp));
+            Error error(CanBeUsedForElementCountPrinting(*result_valobj_sp));
             if (error.Fail()) {
               result->AppendErrorWithFormat(
                   "expression cannot be used with --element-count %s\n",
@@ -533,7 +533,7 @@ bool CommandObjectExpression::DoExecute(const char *command,
       if (!ParseOptions(args, result))
         return false;
 
-      Status error(m_option_group.NotifyOptionParsingFinished(&exe_ctx));
+      Error error(m_option_group.NotifyOptionParsingFinished(&exe_ctx));
       if (error.Fail()) {
         result.AppendError(error.AsCString());
         result.SetStatus(eReturnStatusFailed);
@@ -564,7 +564,7 @@ bool CommandObjectExpression::DoExecute(const char *command,
             // interpreter,
             // so just push one
             bool initialize = false;
-            Status repl_error;
+            Error repl_error;
             REPLSP repl_sp(target->GetREPL(
                 repl_error, m_command_options.language, nullptr, false));
 

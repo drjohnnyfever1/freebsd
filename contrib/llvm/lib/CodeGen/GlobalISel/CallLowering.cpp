@@ -24,42 +24,40 @@
 using namespace llvm;
 
 bool CallLowering::lowerCall(
-    MachineIRBuilder &MIRBuilder, ImmutableCallSite CS, unsigned ResReg,
+    MachineIRBuilder &MIRBuilder, const CallInst &CI, unsigned ResReg,
     ArrayRef<unsigned> ArgRegs, std::function<unsigned()> GetCalleeReg) const {
-  auto &DL = CS.getParent()->getParent()->getParent()->getDataLayout();
+  auto &DL = CI.getParent()->getParent()->getParent()->getDataLayout();
 
   // First step is to marshall all the function's parameters into the correct
   // physregs and memory locations. Gather the sequence of argument types that
   // we'll pass to the assigner function.
   SmallVector<ArgInfo, 8> OrigArgs;
   unsigned i = 0;
-  unsigned NumFixedArgs = CS.getFunctionType()->getNumParams();
-  for (auto &Arg : CS.args()) {
-    ArgInfo OrigArg{ArgRegs[i], Arg->getType(), ISD::ArgFlagsTy{},
-                    i < NumFixedArgs};
-    setArgFlags(OrigArg, i + AttributeList::FirstArgIndex, DL, CS);
+  for (auto &Arg : CI.arg_operands()) {
+    ArgInfo OrigArg{ArgRegs[i], Arg->getType(), ISD::ArgFlagsTy{}};
+    setArgFlags(OrigArg, i + 1, DL, CI);
     OrigArgs.push_back(OrigArg);
     ++i;
   }
 
   MachineOperand Callee = MachineOperand::CreateImm(0);
-  if (const Function *F = CS.getCalledFunction())
+  if (Function *F = CI.getCalledFunction())
     Callee = MachineOperand::CreateGA(F, 0);
   else
     Callee = MachineOperand::CreateReg(GetCalleeReg(), false);
 
-  ArgInfo OrigRet{ResReg, CS.getType(), ISD::ArgFlagsTy{}};
+  ArgInfo OrigRet{ResReg, CI.getType(), ISD::ArgFlagsTy{}};
   if (!OrigRet.Ty->isVoidTy())
-    setArgFlags(OrigRet, AttributeList::ReturnIndex, DL, CS);
+    setArgFlags(OrigRet, AttributeSet::ReturnIndex, DL, CI);
 
-  return lowerCall(MIRBuilder, CS.getCallingConv(), Callee, OrigRet, OrigArgs);
+  return lowerCall(MIRBuilder, Callee, OrigRet, OrigArgs);
 }
 
 template <typename FuncInfoTy>
 void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                const DataLayout &DL,
                                const FuncInfoTy &FuncInfo) const {
-  const AttributeList &Attrs = FuncInfo.getAttributes();
+  const AttributeSet &Attrs = FuncInfo.getAttributes();
   if (Attrs.hasAttribute(OpIdx, Attribute::ZExt))
     Arg.Flags.setZExt();
   if (Attrs.hasAttribute(OpIdx, Attribute::SExt))
@@ -83,8 +81,8 @@ void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
     // For ByVal, alignment should be passed from FE.  BE will guess if
     // this info is not there but there are cases it cannot get right.
     unsigned FrameAlign;
-    if (FuncInfo.getParamAlignment(OpIdx - 2))
-      FrameAlign = FuncInfo.getParamAlignment(OpIdx - 2);
+    if (FuncInfo.getParamAlignment(OpIdx))
+      FrameAlign = FuncInfo.getParamAlignment(OpIdx);
     else
       FrameAlign = getTLI()->getByValTypeAlignment(ElementTy, DL);
     Arg.Flags.setByValAlign(FrameAlign);
@@ -105,6 +103,7 @@ CallLowering::setArgFlags<CallInst>(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                     const CallInst &FuncInfo) const;
 
 bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
+                                     CCAssignFn *AssignFn,
                                      ArrayRef<ArgInfo> Args,
                                      ValueHandler &Handler) const {
   MachineFunction &MF = MIRBuilder.getMF();
@@ -117,20 +116,12 @@ bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
   unsigned NumArgs = Args.size();
   for (unsigned i = 0; i != NumArgs; ++i) {
     MVT CurVT = MVT::getVT(Args[i].Ty);
-    if (Handler.assignArg(i, CurVT, CurVT, CCValAssign::Full, Args[i], CCInfo))
+    if (AssignFn(i, CurVT, CurVT, CCValAssign::Full, Args[i].Flags, CCInfo))
       return false;
   }
 
-  for (unsigned i = 0, e = Args.size(), j = 0; i != e; ++i, ++j) {
-    assert(j < ArgLocs.size() && "Skipped too many arg locs");
-
-    CCValAssign &VA = ArgLocs[j];
-    assert(VA.getValNo() == i && "Location doesn't correspond to current arg");
-
-    if (VA.needsCustom()) {
-      j += Handler.assignCustomValue(Args[i], makeArrayRef(ArgLocs).slice(j));
-      continue;
-    }
+  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+    CCValAssign &VA = ArgLocs[i];
 
     if (VA.isRegLoc())
       Handler.assignValueToReg(Args[i].Reg, VA.getLocReg(), VA);

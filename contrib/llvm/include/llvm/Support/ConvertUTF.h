@@ -90,8 +90,8 @@
 #ifndef LLVM_SUPPORT_CONVERTUTF_H
 #define LLVM_SUPPORT_CONVERTUTF_H
 
-#include <cstddef>
 #include <string>
+#include <cstddef>
 
 // Wrap everything in namespace llvm so that programs can link with llvm and
 // their own version of the unicode libraries.

@@ -1,4 +1,4 @@
-//===- ArrayRef.h - Array Reference Wrapper ---------------------*- C++ -*-===//
+//===--- ArrayRef.h - Array Reference Wrapper -------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,21 +12,12 @@
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/None.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/Compiler.h"
-#include <algorithm>
+#include "llvm/ADT/SmallVector.h"
 #include <array>
-#include <cassert>
-#include <cstddef>
-#include <initializer_list>
-#include <iterator>
-#include <memory>
-#include <type_traits>
 #include <vector>
 
 namespace llvm {
-
   /// ArrayRef - Represent a constant reference to an array (0 or more elements
   /// consecutively in memory), i.e. a start pointer and a length.  It allows
   /// various APIs to take consecutive elements easily and conveniently.
@@ -41,27 +32,28 @@ namespace llvm {
   template<typename T>
   class LLVM_NODISCARD ArrayRef {
   public:
-    using iterator = const T *;
-    using const_iterator = const T *;
-    using size_type = size_t;
-    using reverse_iterator = std::reverse_iterator<iterator>;
+    typedef const T *iterator;
+    typedef const T *const_iterator;
+    typedef size_t size_type;
+
+    typedef std::reverse_iterator<iterator> reverse_iterator;
 
   private:
     /// The start of the array, in an external buffer.
-    const T *Data = nullptr;
+    const T *Data;
 
     /// The number of elements.
-    size_type Length = 0;
+    size_type Length;
 
   public:
     /// @name Constructors
     /// @{
 
     /// Construct an empty ArrayRef.
-    /*implicit*/ ArrayRef() = default;
+    /*implicit*/ ArrayRef() : Data(nullptr), Length(0) {}
 
     /// Construct an empty ArrayRef from None.
-    /*implicit*/ ArrayRef(NoneType) {}
+    /*implicit*/ ArrayRef(NoneType) : Data(nullptr), Length(0) {}
 
     /// Construct an ArrayRef from a single element.
     /*implicit*/ ArrayRef(const T &OneElt)
@@ -290,8 +282,9 @@ namespace llvm {
   template<typename T>
   class LLVM_NODISCARD MutableArrayRef : public ArrayRef<T> {
   public:
-    using iterator = T *;
-    using reverse_iterator = std::reverse_iterator<iterator>;
+    typedef T *iterator;
+
+    typedef std::reverse_iterator<iterator> reverse_iterator;
 
     /// Construct an empty MutableArrayRef.
     /*implicit*/ MutableArrayRef() : ArrayRef<T>() {}
@@ -423,23 +416,19 @@ namespace llvm {
   /// This is a MutableArrayRef that owns its array.
   template <typename T> class OwningArrayRef : public MutableArrayRef<T> {
   public:
-    OwningArrayRef() = default;
+    OwningArrayRef() {}
     OwningArrayRef(size_t Size) : MutableArrayRef<T>(new T[Size], Size) {}
-
     OwningArrayRef(ArrayRef<T> Data)
         : MutableArrayRef<T>(new T[Data.size()], Data.size()) {
       std::copy(Data.begin(), Data.end(), this->begin());
     }
-
     OwningArrayRef(OwningArrayRef &&Other) { *this = Other; }
-
     OwningArrayRef &operator=(OwningArrayRef &&Other) {
       delete[] this->data();
       this->MutableArrayRef<T>::operator=(Other);
       Other.MutableArrayRef<T>::operator=(MutableArrayRef<T>());
       return *this;
     }
-
     ~OwningArrayRef() { delete[] this->data(); }
   };
 
@@ -498,18 +487,6 @@ namespace llvm {
     return ArrayRef<T>(Arr);
   }
 
-  /// Construct a MutableArrayRef from a single element.
-  template<typename T>
-  MutableArrayRef<T> makeMutableArrayRef(T &OneElt) {
-    return OneElt;
-  }
-
-  /// Construct a MutableArrayRef from a pointer and length.
-  template<typename T>
-  MutableArrayRef<T> makeMutableArrayRef(T *data, size_t length) {
-    return MutableArrayRef<T>(data, length);
-  }
-
   /// @}
   /// @name ArrayRef Comparison Operators
   /// @{
@@ -528,14 +505,13 @@ namespace llvm {
 
   // ArrayRefs can be treated like a POD type.
   template <typename T> struct isPodLike;
-  template <typename T> struct isPodLike<ArrayRef<T>> {
+  template <typename T> struct isPodLike<ArrayRef<T> > {
     static const bool value = true;
   };
 
   template <typename T> hash_code hash_value(ArrayRef<T> S) {
     return hash_combine_range(S.begin(), S.end());
   }
-
 } // end namespace llvm
 
 #endif // LLVM_ADT_ARRAYREF_H

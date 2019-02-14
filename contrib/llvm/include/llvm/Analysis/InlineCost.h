@@ -14,14 +14,13 @@
 #ifndef LLVM_ANALYSIS_INLINECOST_H
 #define LLVM_ANALYSIS_INLINECOST_H
 
-#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include <cassert>
 #include <climits>
 
 namespace llvm {
 class AssumptionCacheTracker;
-class BlockFrequencyInfo;
 class CallSite;
 class DataLayout;
 class Function;
@@ -138,9 +137,6 @@ struct InlineParams {
 
   /// Threshold to use when the callsite is considered hot.
   Optional<int> HotCallSiteThreshold;
-
-  /// Threshold to use when the callsite is considered cold.
-  Optional<int> ColdCallSiteThreshold;
 };
 
 /// Generate the parameters to tune the inline cost analysis based only on the
@@ -160,10 +156,6 @@ InlineParams getInlineParams(int Threshold);
 /// the -Oz flag.
 InlineParams getInlineParams(unsigned OptLevel, unsigned SizeOptLevel);
 
-/// Return the cost associated with a callsite, including parameter passing
-/// and the call/return instruction.
-int getCallsiteCost(CallSite CS, const DataLayout &DL);
-
 /// \brief Get an InlineCost object representing the cost of inlining this
 /// callsite.
 ///
@@ -179,7 +171,6 @@ InlineCost
 getInlineCost(CallSite CS, const InlineParams &Params,
               TargetTransformInfo &CalleeTTI,
               std::function<AssumptionCache &(Function &)> &GetAssumptionCache,
-              Optional<function_ref<BlockFrequencyInfo &(Function &)>> GetBFI,
               ProfileSummaryInfo *PSI);
 
 /// \brief Get an InlineCost with the callee explicitly specified.
@@ -191,7 +182,6 @@ InlineCost
 getInlineCost(CallSite CS, Function *Callee, const InlineParams &Params,
               TargetTransformInfo &CalleeTTI,
               std::function<AssumptionCache &(Function &)> &GetAssumptionCache,
-              Optional<function_ref<BlockFrequencyInfo &(Function &)>> GetBFI,
               ProfileSummaryInfo *PSI);
 
 /// \brief Minimal filter to detect invalid constructs for inlining.

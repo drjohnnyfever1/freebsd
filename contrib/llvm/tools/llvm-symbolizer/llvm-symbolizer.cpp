@@ -85,9 +85,6 @@ static cl::opt<int> ClPrintSourceContextLines(
     "print-source-context-lines", cl::init(0),
     cl::desc("Print N number of source file context"));
 
-static cl::opt<bool> ClVerbose("verbose", cl::init(false),
-                               cl::desc("Print verbose line info"));
-
 template<typename T>
 static bool error(Expected<T> &ResOrErr) {
   if (ResOrErr)
@@ -163,7 +160,7 @@ int main(int argc, char **argv) {
   LLVMSymbolizer Symbolizer(Opts);
 
   DIPrinter Printer(outs(), ClPrintFunctions != FunctionNameKind::None,
-                    ClPrettyPrint, ClPrintSourceContextLines, ClVerbose);
+                    ClPrettyPrint, ClPrintSourceContextLines);
 
   const int kMaxInputStringLength = 1024;
   char InputString[kMaxInputStringLength];

@@ -35,8 +35,7 @@ public:
   /// Code Generation virtual methods...
   const MCPhysReg *getCalleeSavedRegs(const MachineFunction *MF)
         const override;
-  const uint32_t *getCallPreservedMask(const MachineFunction &MF,
-        CallingConv::ID) const override;
+
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
@@ -77,6 +76,7 @@ public:
   unsigned getFirstCallerSavedNonParamReg() const;
 
   bool isEHReturnCalleeSaveReg(unsigned Reg) const;
+  bool isCalleeSaveReg(unsigned Reg) const;
 };
 
 } // end namespace llvm

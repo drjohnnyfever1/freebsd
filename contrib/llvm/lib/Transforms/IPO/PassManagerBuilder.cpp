@@ -38,22 +38,21 @@
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Scalar/SimpleLoopUnswitch.h"
 #include "llvm/Transforms/Vectorize.h"
 
 using namespace llvm;
 
 static cl::opt<bool>
-    RunPartialInlining("enable-partial-inlining", cl::init(false), cl::Hidden,
-                       cl::ZeroOrMore, cl::desc("Run Partial inlinining pass"));
-
-static cl::opt<bool>
-    RunLoopVectorization("vectorize-loops", cl::Hidden,
-                         cl::desc("Run the Loop vectorization passes"));
+RunLoopVectorization("vectorize-loops", cl::Hidden,
+                     cl::desc("Run the Loop vectorization passes"));
 
 static cl::opt<bool>
 RunSLPVectorization("vectorize-slp", cl::Hidden,
                     cl::desc("Run the SLP vectorization passes"));
+
+static cl::opt<bool>
+RunBBVectorization("vectorize-slp-aggressive", cl::Hidden,
+                    cl::desc("Run the BB vectorization passes"));
 
 static cl::opt<bool>
 UseGVNAfterVectorization("use-gvn-after-vectorization",
@@ -67,6 +66,10 @@ static cl::opt<bool> ExtraVectorizerPasses(
 static cl::opt<bool>
 RunLoopRerolling("reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
+
+static cl::opt<bool> RunLoadCombine("combine-loads", cl::init(false),
+                                    cl::Hidden,
+                                    cl::desc("Run the load combining pass"));
 
 static cl::opt<bool> RunNewGVN("enable-newgvn", cl::init(false), cl::Hidden,
                                cl::desc("Run the NewGVN pass"));
@@ -89,6 +92,10 @@ static cl::opt<CFLAAType>
                                    "Enable inclusion-based CFL-AA"),
                         clEnumValN(CFLAAType::Both, "both",
                                    "Enable both variants of CFL-AA")));
+
+static cl::opt<bool>
+EnableMLSM("mlsm", cl::init(true), cl::Hidden,
+           cl::desc("Enable motion of merged load and store"));
 
 static cl::opt<bool> EnableLoopInterchange(
     "enable-loopinterchange", cl::init(false), cl::Hidden,
@@ -133,27 +140,14 @@ static cl::opt<int> PreInlineThreshold(
     cl::desc("Control the amount of inlining in pre-instrumentation inliner "
              "(default = 75)"));
 
-static cl::opt<bool> EnableEarlyCSEMemSSA(
-    "enable-earlycse-memssa", cl::init(true), cl::Hidden,
-    cl::desc("Enable the EarlyCSE w/ MemorySSA pass (default = on)"));
-
 static cl::opt<bool> EnableGVNHoist(
     "enable-gvn-hoist", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN hoisting pass (default = off)"));
+    cl::desc("Enable the GVN hoisting pass"));
 
 static cl::opt<bool>
     DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
                               cl::Hidden,
                               cl::desc("Disable shrink-wrap library calls"));
-
-static cl::opt<bool>
-    EnableSimpleLoopUnswitch("enable-simple-loop-unswitch", cl::init(false),
-                             cl::Hidden,
-                             cl::desc("Enable the simple loop unswitch pass."));
-
-static cl::opt<bool> EnableGVNSink(
-    "enable-gvn-sink", cl::init(false), cl::Hidden,
-    cl::desc("Enable the GVN sinking pass (default = off)"));
 
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
@@ -162,9 +156,11 @@ PassManagerBuilder::PassManagerBuilder() {
     Inliner = nullptr;
     DisableUnitAtATime = false;
     DisableUnrollLoops = false;
+    BBVectorize = RunBBVectorization;
     SLPVectorize = RunSLPVectorization;
     LoopVectorize = RunLoopVectorization;
     RerollLoops = RunLoopRerolling;
+    LoadCombine = RunLoadCombine;
     NewGVN = RunNewGVN;
     DisableGVNLoadPRE = false;
     VerifyInput = false;
@@ -176,7 +172,6 @@ PassManagerBuilder::PassManagerBuilder() {
     PGOInstrUse = RunPGOInstrUse;
     PrepareForThinLTO = EnablePrepareForThinLTO;
     PerformThinLTO = false;
-    DivergentTarget = false;
 }
 
 PassManagerBuilder::~PassManagerBuilder() {
@@ -187,13 +182,6 @@ PassManagerBuilder::~PassManagerBuilder() {
 /// Set of global extensions, automatically added as part of the standard set.
 static ManagedStatic<SmallVector<std::pair<PassManagerBuilder::ExtensionPointTy,
    PassManagerBuilder::ExtensionFn>, 8> > GlobalExtensions;
-
-/// Check if GlobalExtensions is constructed and not empty.
-/// Since GlobalExtensions is a managed static, calling 'empty()' will trigger
-/// the construction of the object.
-static bool GlobalExtensionsNotEmpty() {
-  return GlobalExtensions.isConstructed() && !GlobalExtensions->empty();
-}
 
 void PassManagerBuilder::addGlobalExtension(
     PassManagerBuilder::ExtensionPointTy Ty,
@@ -207,12 +195,9 @@ void PassManagerBuilder::addExtension(ExtensionPointTy Ty, ExtensionFn Fn) {
 
 void PassManagerBuilder::addExtensionsToPM(ExtensionPointTy ETy,
                                            legacy::PassManagerBase &PM) const {
-  if (GlobalExtensionsNotEmpty()) {
-    for (auto &Ext : *GlobalExtensions) {
-      if (Ext.first == ETy)
-        Ext.second(*this, PM);
-    }
-  }
+  for (unsigned i = 0, e = GlobalExtensions->size(); i != e; ++i)
+    if ((*GlobalExtensions)[i].first == ETy)
+      (*GlobalExtensions)[i].second(*this, PM);
   for (unsigned i = 0, e = Extensions.size(); i != e; ++i)
     if (Extensions[i].first == ETy)
       Extensions[i].second(*this, PM);
@@ -263,17 +248,18 @@ void PassManagerBuilder::populateFunctionPassManager(
   FPM.add(createCFGSimplificationPass());
   FPM.add(createSROAPass());
   FPM.add(createEarlyCSEPass());
+  if(EnableGVNHoist)
+    FPM.add(createGVNHoistPass());
   FPM.add(createLowerExpectIntrinsicPass());
 }
 
 // Do PGO instrumentation generation or use pass as the option specified.
 void PassManagerBuilder::addPGOInstrPasses(legacy::PassManagerBase &MPM) {
-  if (!EnablePGOInstrGen && PGOInstrUse.empty() && PGOSampleUse.empty())
+  if (!EnablePGOInstrGen && PGOInstrUse.empty())
     return;
   // Perform the preinline and cleanup passes for O1 and above.
   // And avoid doing them if optimizing for size.
-  if (OptLevel > 0 && SizeLevel == 0 && !DisablePreInliner &&
-      PGOSampleUse.empty()) {
+  if (OptLevel > 0 && SizeLevel == 0 && !DisablePreInliner) {
     // Create preinline pass. We construct an InlineParams object and specify
     // the threshold here to avoid the command line options of the regular
     // inliner to influence pre-inlining. The only fields of InlineParams we
@@ -297,32 +283,17 @@ void PassManagerBuilder::addPGOInstrPasses(legacy::PassManagerBase &MPM) {
     InstrProfOptions Options;
     if (!PGOInstrGen.empty())
       Options.InstrProfileOutput = PGOInstrGen;
-    Options.DoCounterPromotion = true;
-    MPM.add(createLoopRotatePass());
     MPM.add(createInstrProfilingLegacyPass(Options));
   }
   if (!PGOInstrUse.empty())
     MPM.add(createPGOInstrumentationUseLegacyPass(PGOInstrUse));
-  // Indirect call promotion that promotes intra-module targets only.
-  // For ThinLTO this is done earlier due to interactions with globalopt
-  // for imported functions. We don't run this at -O0.
-  if (OptLevel > 0)
-    MPM.add(
-        createPGOIndirectCallPromotionLegacyPass(false, !PGOSampleUse.empty()));
 }
 void PassManagerBuilder::addFunctionSimplificationPasses(
     legacy::PassManagerBase &MPM) {
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
   MPM.add(createSROAPass());
-  MPM.add(createEarlyCSEPass(EnableEarlyCSEMemSSA)); // Catch trivial redundancies
-  if (EnableGVNHoist)
-    MPM.add(createGVNHoistPass());
-  if (EnableGVNSink) {
-    MPM.add(createGVNSinkPass());
-    MPM.add(createCFGSimplificationPass());
-  }
-
+  MPM.add(createEarlyCSEPass());              // Catch trivial redundancies
   // Speculative execution if the target has divergent branches; otherwise nop.
   MPM.add(createSpeculativeExecutionIfHasBranchDivergencePass());
   MPM.add(createJumpThreadingPass());         // Thread jumps.
@@ -334,37 +305,29 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
     MPM.add(createLibCallsShrinkWrapPass());
   addExtensionsToPM(EP_Peephole, MPM);
 
-  // Optimize memory intrinsic calls based on the profiled size information.
-  if (SizeLevel == 0)
-    MPM.add(createPGOMemOPSizeOptLegacyPass());
-
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
   // Rotate Loop - disable header duplication at -Oz
   MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
   MPM.add(createLICMPass());                  // Hoist loop invariants
-  if (EnableSimpleLoopUnswitch)
-    MPM.add(createSimpleLoopUnswitchLegacyPass());
-  else
-    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
+  MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
   MPM.add(createCFGSimplificationPass());
   addInstructionCombiningPass(MPM);
   MPM.add(createIndVarSimplifyPass());        // Canonicalize indvars
   MPM.add(createLoopIdiomPass());             // Recognize idioms like memset.
-  addExtensionsToPM(EP_LateLoopOptimizations, MPM);
   MPM.add(createLoopDeletionPass());          // Delete dead loops
-
   if (EnableLoopInterchange) {
     MPM.add(createLoopInterchangePass()); // Interchange loops
     MPM.add(createCFGSimplificationPass());
   }
   if (!DisableUnrollLoops)
-    MPM.add(createSimpleLoopUnrollPass(OptLevel));    // Unroll small loops
+    MPM.add(createSimpleLoopUnrollPass());    // Unroll small loops
   addExtensionsToPM(EP_LoopOptimizerEnd, MPM);
 
   if (OptLevel > 1) {
-    MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
+    if (EnableMLSM)
+      MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
     MPM.add(NewGVN ? createNewGVNPass()
                    : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
   }
@@ -389,8 +352,29 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
 
   if (RerollLoops)
     MPM.add(createLoopRerollPass());
-  if (!RunSLPAfterLoopVectorization && SLPVectorize)
-    MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
+  if (!RunSLPAfterLoopVectorization) {
+    if (SLPVectorize)
+      MPM.add(createSLPVectorizerPass());   // Vectorize parallel scalar chains.
+
+    if (BBVectorize) {
+      MPM.add(createBBVectorizePass());
+      addInstructionCombiningPass(MPM);
+      addExtensionsToPM(EP_Peephole, MPM);
+      if (OptLevel > 1 && UseGVNAfterVectorization)
+        MPM.add(NewGVN
+                    ? createNewGVNPass()
+                    : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
+      else
+        MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
+
+      // BBVectorize may have significantly shortened a loop body; unroll again.
+      if (!DisableUnrollLoops)
+        MPM.add(createLoopUnrollPass());
+    }
+  }
+
+  if (LoadCombine)
+    MPM.add(createLoadCombinePass());
 
   MPM.add(createAggressiveDCEPass());         // Delete dead instructions
   MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
@@ -425,17 +409,14 @@ void PassManagerBuilder::populateModulePassManager(
     // builds. The function merging pass is
     if (MergeFunctions)
       MPM.add(createMergeFunctionsPass());
-    else if (GlobalExtensionsNotEmpty() || !Extensions.empty())
+    else if (!GlobalExtensions->empty() || !Extensions.empty())
       MPM.add(createBarrierNoopPass());
 
-    addExtensionsToPM(EP_EnabledOnOptLevel0, MPM);
-
-    // Rename anon globals to be able to export them in the summary.
-    // This has to be done after we add the extensions to the pass manager
-    // as there could be passes (e.g. Adddress sanitizer) which introduce
-    // new unnamed globals.
     if (PrepareForThinLTO)
+      // Rename anon globals to be able to export them in the summary.
       MPM.add(createNameAnonGlobalPass());
+
+    addExtensionsToPM(EP_EnabledOnOptLevel0, MPM);
     return;
   }
 
@@ -453,16 +434,7 @@ void PassManagerBuilder::populateModulePassManager(
   // earlier in the pass pipeline, here before globalopt. Otherwise imported
   // available_externally functions look unreferenced and are removed.
   if (PerformThinLTO)
-    MPM.add(createPGOIndirectCallPromotionLegacyPass(/*InLTO = */ true,
-                                                     !PGOSampleUse.empty()));
-
-  // For SamplePGO in ThinLTO compile phase, we do not want to unroll loops
-  // as it will change the CFG too much to make the 2nd profile annotation
-  // in backend more difficult.
-  bool PrepareForThinLTOUsingPGOSampleProfile =
-      PrepareForThinLTO && !PGOSampleUse.empty();
-  if (PrepareForThinLTOUsingPGOSampleProfile)
-    DisableUnrollLoops = true;
+    MPM.add(createPGOIndirectCallPromotionLegacyPass(/*InLTO = */ true));
 
   if (!DisableUnitAtATime) {
     // Infer attributes about declarations if possible.
@@ -482,13 +454,15 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createCFGSimplificationPass()); // Clean up after IPCP & DAE
   }
 
-  // For SamplePGO in ThinLTO compile phase, we do not want to do indirect
-  // call promotion as it will change the CFG too much to make the 2nd
-  // profile annotation in backend more difficult.
-  // PGO instrumentation is added during the compile phase for ThinLTO, do
-  // not run it a second time
-  if (!PerformThinLTO && !PrepareForThinLTOUsingPGOSampleProfile)
+  if (!PerformThinLTO) {
+    /// PGO instrumentation is added during the compile phase for ThinLTO, do
+    /// not run it a second time
     addPGOInstrPasses(MPM);
+    // Indirect call promotion that promotes intra-module targets only.
+    // For ThinLTO this is done earlier due to interactions with globalopt
+    // for imported functions.
+    MPM.add(createPGOIndirectCallPromotionLegacyPass());
+  }
 
   if (EnableNonLTOGlobalsModRef)
     // We add a module alias analysis pass here. In part due to bugs in the
@@ -515,8 +489,6 @@ void PassManagerBuilder::populateModulePassManager(
   // pass manager that we are specifically trying to avoid. To prevent this
   // we must insert a no-op module pass to reset the pass manager.
   MPM.add(createBarrierNoopPass());
-  if (RunPartialInlining)
-    MPM.add(createPartialInliningPass());
 
   if (!DisableUnitAtATime && OptLevel > 1 && !PrepareForLTO &&
       !PrepareForThinLTO)
@@ -617,24 +589,42 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createCorrelatedValuePropagationPass());
     addInstructionCombiningPass(MPM);
     MPM.add(createLICMPass());
-    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
+    MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3));
     MPM.add(createCFGSimplificationPass());
     addInstructionCombiningPass(MPM);
   }
 
-  if (RunSLPAfterLoopVectorization && SLPVectorize) {
-    MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
-    if (OptLevel > 1 && ExtraVectorizerPasses) {
-      MPM.add(createEarlyCSEPass());
+  if (RunSLPAfterLoopVectorization) {
+    if (SLPVectorize) {
+      MPM.add(createSLPVectorizerPass());   // Vectorize parallel scalar chains.
+      if (OptLevel > 1 && ExtraVectorizerPasses) {
+        MPM.add(createEarlyCSEPass());
+      }
+    }
+
+    if (BBVectorize) {
+      MPM.add(createBBVectorizePass());
+      addInstructionCombiningPass(MPM);
+      addExtensionsToPM(EP_Peephole, MPM);
+      if (OptLevel > 1 && UseGVNAfterVectorization)
+        MPM.add(NewGVN
+                    ? createNewGVNPass()
+                    : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
+      else
+        MPM.add(createEarlyCSEPass());      // Catch trivial redundancies
+
+      // BBVectorize may have significantly shortened a loop body; unroll again.
+      if (!DisableUnrollLoops)
+        MPM.add(createLoopUnrollPass());
     }
   }
 
   addExtensionsToPM(EP_Peephole, MPM);
-  MPM.add(createLateCFGSimplificationPass()); // Switches to lookup tables
+  MPM.add(createCFGSimplificationPass());
   addInstructionCombiningPass(MPM);
 
   if (!DisableUnrollLoops) {
-    MPM.add(createLoopUnrollPass(OptLevel));    // Unroll small loops
+    MPM.add(createLoopUnrollPass());    // Unroll small loops
 
     // LoopUnroll may generate some redundency to cleanup.
     addInstructionCombiningPass(MPM);
@@ -672,11 +662,6 @@ void PassManagerBuilder::populateModulePassManager(
   MPM.add(createLoopSinkPass());
   // Get rid of LCSSA nodes.
   MPM.add(createInstructionSimplifierPass());
-
-  // LoopSink (and other loop passes since the last simplifyCFG) might have
-  // resulted in single-entry-single-exit or empty blocks. Clean up the CFG.
-  MPM.add(createCFGSimplificationPass());
-
   addExtensionsToPM(EP_OptimizerLast, MPM);
 }
 
@@ -699,8 +684,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
     // left by the earlier promotion pass that promotes intra-module targets.
     // This two-step promotion is to save the compile time. For LTO, it should
     // produce the same result as if we only do promotion here.
-    PM.add(
-        createPGOIndirectCallPromotionLegacyPass(true, !PGOSampleUse.empty()));
+    PM.add(createPGOIndirectCallPromotionLegacyPass(true));
 
     // Propagate constants at call sites into the functions they call.  This
     // opens opportunities for globalopt (and inlining) by substituting function
@@ -719,7 +703,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createGlobalSplitPass());
 
   // Apply whole-program devirtualization and virtual constant propagation.
-  PM.add(createWholeProgramDevirtPass(ExportSummary, nullptr));
+  PM.add(createWholeProgramDevirtPass());
 
   // That's all we need at opt level 1.
   if (OptLevel == 1)
@@ -775,7 +759,8 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createGlobalsAAWrapperPass()); // IP alias analysis.
 
   PM.add(createLICMPass());                 // Hoist loop invariants.
-  PM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds.
+  if (EnableMLSM)
+    PM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds.
   PM.add(NewGVN ? createNewGVNPass()
                 : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
   PM.add(createMemCpyOptPass());            // Remove dead memcpys.
@@ -790,11 +775,11 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
     PM.add(createLoopInterchangePass());
 
   if (!DisableUnrollLoops)
-    PM.add(createSimpleLoopUnrollPass(OptLevel));   // Unroll small loops
+    PM.add(createSimpleLoopUnrollPass());   // Unroll small loops
   PM.add(createLoopVectorizePass(true, LoopVectorize));
   // The vectorizer may have significantly shortened a loop body; unroll again.
   if (!DisableUnrollLoops)
-    PM.add(createLoopUnrollPass(OptLevel));
+    PM.add(createLoopUnrollPass());
 
   // Now that we've optimized loops (in particular loop induction variables),
   // we may have exposed more scalar opportunities. Run parts of the scalar
@@ -813,6 +798,9 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   // After vectorization, assume intrinsics may tell us more about pointer
   // alignments.
   PM.add(createAlignmentFromAssumptionsPass());
+
+  if (LoadCombine)
+    PM.add(createLoadCombinePass());
 
   // Cleanup and simplify the code after the scalar optimizations.
   addInstructionCombiningPass(PM);
@@ -845,23 +833,6 @@ void PassManagerBuilder::populateThinLTOPassManager(
   if (VerifyInput)
     PM.add(createVerifierPass());
 
-  if (ImportSummary) {
-    // These passes import type identifier resolutions for whole-program
-    // devirtualization and CFI. They must run early because other passes may
-    // disturb the specific instruction patterns that these passes look for,
-    // creating dependencies on resolutions that may not appear in the summary.
-    //
-    // For example, GVN may transform the pattern assume(type.test) appearing in
-    // two basic blocks into assume(phi(type.test, type.test)), which would
-    // transform a dependency on a WPD resolution into a dependency on a type
-    // identifier resolution for CFI.
-    //
-    // Also, WPD has access to more precise information than ICP and can
-    // devirtualize more effectively, so it should operate on the IR first.
-    PM.add(createWholeProgramDevirtPass(nullptr, ImportSummary));
-    PM.add(createLowerTypeTestsPass(nullptr, ImportSummary));
-  }
-
   populateModulePassManager(PM);
 
   if (VerifyOutput)
@@ -878,12 +849,6 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
 
   if (OptLevel != 0)
     addLTOOptimizationPasses(PM);
-  else {
-    // The whole-program-devirt pass needs to run at -O0 because only it knows
-    // about the llvm.type.checked.load intrinsic: it needs to both lower the
-    // intrinsic itself and handle it in the summary.
-    PM.add(createWholeProgramDevirtPass(ExportSummary, nullptr));
-  }
 
   // Create a function that performs CFI checks for cross-DSO calls with targets
   // in the current module.
@@ -892,7 +857,8 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
   // Lower type metadata and the type.test intrinsic. This pass supports Clang's
   // control flow integrity mechanisms (-fsanitize=cfi*) and needs to run at
   // link time if CFI is enabled. The pass does nothing if CFI is disabled.
-  PM.add(createLowerTypeTestsPass(ExportSummary, nullptr));
+  PM.add(createLowerTypeTestsPass(LowerTypeTestsSummaryAction::None,
+                                  /*Summary=*/nullptr));
 
   if (OptLevel != 0)
     addLateLTOOptimizationPasses(PM);

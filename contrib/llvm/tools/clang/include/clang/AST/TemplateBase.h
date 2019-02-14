@@ -119,7 +119,10 @@ private:
   
 public:
   /// \brief Construct an empty, invalid template argument.
-  constexpr TemplateArgument() : TypeOrValue({Null, 0}) {}
+  TemplateArgument() {
+    TypeOrValue.Kind = Null;
+    TypeOrValue.V = 0;
+  }
 
   /// \brief Construct a template type argument.
   TemplateArgument(QualType T, bool isNullPtr = false) {
@@ -385,8 +388,8 @@ private:
   };
 
 public:
-  constexpr TemplateArgumentLocInfo() : Template({nullptr, nullptr, 0, 0}) {}
-
+  TemplateArgumentLocInfo();
+  
   TemplateArgumentLocInfo(TypeSourceInfo *TInfo) : Declarator(TInfo) {}
   
   TemplateArgumentLocInfo(Expr *E) : Expression(E) {}
@@ -430,7 +433,7 @@ class TemplateArgumentLoc {
   TemplateArgumentLocInfo LocInfo;
 
 public:
-  constexpr TemplateArgumentLoc() {}
+  TemplateArgumentLoc() {}
 
   TemplateArgumentLoc(const TemplateArgument &Argument,
                       TemplateArgumentLocInfo Opaque)
@@ -575,7 +578,6 @@ struct ASTTemplateArgumentListInfo final
                                     TemplateArgumentLoc> {
 private:
   friend TrailingObjects;
-  friend class ASTNodeImporter;
 
   ASTTemplateArgumentListInfo(const TemplateArgumentListInfo &List);
 

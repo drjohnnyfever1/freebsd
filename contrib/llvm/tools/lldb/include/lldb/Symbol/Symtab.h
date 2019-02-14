@@ -40,7 +40,6 @@ public:
   Symtab(ObjectFile *objfile);
   ~Symtab();
 
-  void PreloadSymbols();
   void Reserve(size_t count);
   Symbol *Resize(size_t count);
   uint32_t AddSymbol(const Symbol &symbol);

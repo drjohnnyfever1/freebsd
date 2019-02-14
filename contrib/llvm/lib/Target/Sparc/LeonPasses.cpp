@@ -21,6 +21,9 @@
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
 
+LEONMachineFunctionPass::LEONMachineFunctionPass(TargetMachine &tm, char &ID)
+    : MachineFunctionPass(ID) {}
+
 LEONMachineFunctionPass::LEONMachineFunctionPass(char &ID)
     : MachineFunctionPass(ID) {}
 
@@ -69,7 +72,8 @@ int LEONMachineFunctionPass::getUnusedFPRegister(MachineRegisterInfo &MRI) {
 //
 char InsertNOPLoad::ID = 0;
 
-InsertNOPLoad::InsertNOPLoad() : LEONMachineFunctionPass(ID) {}
+InsertNOPLoad::InsertNOPLoad(TargetMachine &tm)
+    : LEONMachineFunctionPass(tm, ID) {}
 
 bool InsertNOPLoad::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<SparcSubtarget>();
@@ -110,7 +114,7 @@ bool InsertNOPLoad::runOnMachineFunction(MachineFunction &MF) {
 //
 char FixFSMULD::ID = 0;
 
-FixFSMULD::FixFSMULD() : LEONMachineFunctionPass(ID) {}
+FixFSMULD::FixFSMULD(TargetMachine &tm) : LEONMachineFunctionPass(tm, ID) {}
 
 bool FixFSMULD::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<SparcSubtarget>();
@@ -199,7 +203,8 @@ bool FixFSMULD::runOnMachineFunction(MachineFunction &MF) {
 //
 char ReplaceFMULS::ID = 0;
 
-ReplaceFMULS::ReplaceFMULS() : LEONMachineFunctionPass(ID) {}
+ReplaceFMULS::ReplaceFMULS(TargetMachine &tm)
+    : LEONMachineFunctionPass(tm, ID) {}
 
 bool ReplaceFMULS::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<SparcSubtarget>();
@@ -282,7 +287,8 @@ bool ReplaceFMULS::runOnMachineFunction(MachineFunction &MF) {
 
 char DetectRoundChange::ID = 0;
 
-DetectRoundChange::DetectRoundChange() : LEONMachineFunctionPass(ID) {}
+DetectRoundChange::DetectRoundChange(TargetMachine &tm)
+    : LEONMachineFunctionPass(tm, ID) {}
 
 bool DetectRoundChange::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<SparcSubtarget>();
@@ -332,7 +338,8 @@ bool DetectRoundChange::runOnMachineFunction(MachineFunction &MF) {
 //
 char FixAllFDIVSQRT::ID = 0;
 
-FixAllFDIVSQRT::FixAllFDIVSQRT() : LEONMachineFunctionPass(ID) {}
+FixAllFDIVSQRT::FixAllFDIVSQRT(TargetMachine &tm)
+    : LEONMachineFunctionPass(tm, ID) {}
 
 bool FixAllFDIVSQRT::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<SparcSubtarget>();

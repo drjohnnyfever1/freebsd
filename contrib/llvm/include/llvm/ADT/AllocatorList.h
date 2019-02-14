@@ -10,16 +10,10 @@
 #ifndef LLVM_ADT_ALLOCATORLIST_H
 #define LLVM_ADT_ALLOCATORLIST_H
 
-#include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/ADT/simple_ilist.h"
 #include "llvm/Support/Allocator.h"
-#include <algorithm>
-#include <cassert>
-#include <cstddef>
-#include <iterator>
 #include <type_traits>
-#include <utility>
 
 namespace llvm {
 
@@ -45,8 +39,7 @@ template <class T, class AllocatorT> class AllocatorList : AllocatorT {
     T V;
   };
 
-  using list_type = simple_ilist<Node>;
-
+  typedef simple_ilist<Node> list_type;
   list_type List;
 
   AllocatorT &getAlloc() { return *this; }
@@ -58,17 +51,13 @@ template <class T, class AllocatorT> class AllocatorList : AllocatorT {
 
   struct Cloner {
     AllocatorList &AL;
-
     Cloner(AllocatorList &AL) : AL(AL) {}
-
     Node *operator()(const Node &N) const { return AL.create(N.V); }
   };
 
   struct Disposer {
     AllocatorList &AL;
-
     Disposer(AllocatorList &AL) : AL(AL) {}
-
     void operator()(Node *N) const {
       N->~Node();
       AL.getAlloc().Deallocate(N);
@@ -76,13 +65,13 @@ template <class T, class AllocatorT> class AllocatorList : AllocatorT {
   };
 
 public:
-  using value_type = T;
-  using pointer = T *;
-  using reference = T &;
-  using const_pointer = const T *;
-  using const_reference = const T &;
-  using size_type = typename list_type::size_type;
-  using difference_type = typename list_type::difference_type;
+  typedef T value_type;
+  typedef T *pointer;
+  typedef T &reference;
+  typedef const T *const_pointer;
+  typedef const T &const_reference;
+  typedef typename list_type::size_type size_type;
+  typedef typename list_type::difference_type difference_type;
 
 private:
   template <class ValueT, class IteratorBase>
@@ -94,18 +83,20 @@ private:
     friend class IteratorImpl;
     friend AllocatorList;
 
-    using base_type =
-        iterator_adaptor_base<IteratorImpl<ValueT, IteratorBase>, IteratorBase,
-                              std::bidirectional_iterator_tag, ValueT>;
+    typedef iterator_adaptor_base<IteratorImpl<ValueT, IteratorBase>,
+                                  IteratorBase, std::bidirectional_iterator_tag,
+                                  ValueT>
+        base_type;
 
   public:
-    using value_type = ValueT;
-    using pointer = ValueT *;
-    using reference = ValueT &;
+    typedef ValueT value_type;
+    typedef ValueT *pointer;
+    typedef ValueT &reference;
 
     IteratorImpl() = default;
     IteratorImpl(const IteratorImpl &) = default;
     IteratorImpl &operator=(const IteratorImpl &) = default;
+    ~IteratorImpl() = default;
 
     explicit IteratorImpl(const IteratorBase &I) : base_type(I) {}
 
@@ -114,8 +105,6 @@ private:
                  typename std::enable_if<std::is_convertible<
                      OtherIteratorBase, IteratorBase>::value>::type * = nullptr)
         : base_type(X.wrapped()) {}
-
-    ~IteratorImpl() = default;
 
     reference operator*() const { return base_type::wrapped()->V; }
     pointer operator->() const { return &operator*(); }
@@ -129,34 +118,30 @@ private:
   };
 
 public:
-  using iterator = IteratorImpl<T, typename list_type::iterator>;
-  using reverse_iterator =
-      IteratorImpl<T, typename list_type::reverse_iterator>;
-  using const_iterator =
-      IteratorImpl<const T, typename list_type::const_iterator>;
-  using const_reverse_iterator =
-      IteratorImpl<const T, typename list_type::const_reverse_iterator>;
+  typedef IteratorImpl<T, typename list_type::iterator> iterator;
+  typedef IteratorImpl<T, typename list_type::reverse_iterator>
+      reverse_iterator;
+  typedef IteratorImpl<const T, typename list_type::const_iterator>
+      const_iterator;
+  typedef IteratorImpl<const T, typename list_type::const_reverse_iterator>
+      const_reverse_iterator;
 
   AllocatorList() = default;
   AllocatorList(AllocatorList &&X)
       : AllocatorT(std::move(X.getAlloc())), List(std::move(X.List)) {}
-
   AllocatorList(const AllocatorList &X) {
     List.cloneFrom(X.List, Cloner(*this), Disposer(*this));
   }
-
   AllocatorList &operator=(AllocatorList &&X) {
     clear(); // Dispose of current nodes explicitly.
     List = std::move(X.List);
     getAlloc() = std::move(X.getAlloc());
     return *this;
   }
-
   AllocatorList &operator=(const AllocatorList &X) {
     List.cloneFrom(X.List, Cloner(*this), Disposer(*this));
     return *this;
   }
-
   ~AllocatorList() { clear(); }
 
   void swap(AllocatorList &RHS) {

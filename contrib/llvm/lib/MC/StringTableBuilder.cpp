@@ -1,4 +1,4 @@
-//===- StringTableBuilder.cpp - String table building utility -------------===//
+//===-- StringTableBuilder.cpp - String table building utility ------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,23 +8,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/StringTableBuilder.h"
-#include "llvm/ADT/CachedHashString.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/BinaryFormat/COFF.h"
+#include "llvm/Support/COFF.h"
 #include "llvm/Support/Endian.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <utility>
+
 #include <vector>
 
 using namespace llvm;
 
-StringTableBuilder::~StringTableBuilder() = default;
+StringTableBuilder::~StringTableBuilder() {}
 
 void StringTableBuilder::initSize() {
   // Account for leading bytes in table so that offsets returned from add are
@@ -54,11 +48,11 @@ void StringTableBuilder::write(raw_ostream &OS) const {
   assert(isFinalized());
   SmallString<0> Data;
   Data.resize(getSize());
-  write((uint8_t *)Data.data());
+  write((uint8_t *)&Data[0]);
   OS << Data;
 }
 
-using StringPair = std::pair<CachedHashStringRef, size_t>;
+typedef std::pair<CachedHashStringRef, size_t> StringPair;
 
 void StringTableBuilder::write(uint8_t *Buf) const {
   assert(isFinalized());

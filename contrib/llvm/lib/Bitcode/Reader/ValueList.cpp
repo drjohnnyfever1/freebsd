@@ -58,7 +58,7 @@ void BitcodeReaderValueList::assignValue(Value *V, unsigned Idx) {
   if (Idx >= size())
     resize(Idx + 1);
 
-  WeakTrackingVH &OldV = ValuePtrs[Idx];
+  WeakVH &OldV = ValuePtrs[Idx];
   if (!OldV) {
     OldV = V;
     return;
@@ -73,7 +73,7 @@ void BitcodeReaderValueList::assignValue(Value *V, unsigned Idx) {
     // If there was a forward reference to this value, replace it.
     Value *PrevVal = OldV;
     OldV->replaceAllUsesWith(V);
-    PrevVal->deleteValue();
+    delete PrevVal;
   }
 }
 
@@ -194,6 +194,6 @@ void BitcodeReaderValueList::resolveConstantForwardRefs() {
 
     // Update all ValueHandles, they should be the only users at this point.
     Placeholder->replaceAllUsesWith(RealVal);
-    Placeholder->deleteValue();
+    delete Placeholder;
   }
 }

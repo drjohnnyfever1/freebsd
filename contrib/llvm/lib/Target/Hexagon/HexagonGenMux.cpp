@@ -28,7 +28,6 @@
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -41,8 +40,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/MathExtras.h"
 #include <algorithm>
-#include <iterator>
 #include <limits>
+#include <iterator>
 #include <utility>
 
 using namespace llvm;
@@ -60,7 +59,9 @@ namespace {
   public:
     static char ID;
 
-    HexagonGenMux() : MachineFunctionPass(ID) {}
+    HexagonGenMux() : MachineFunctionPass(ID), HII(nullptr), HRI(nullptr) {
+      initializeHexagonGenMuxPass(*PassRegistry::getPassRegistry());
+    }
 
     StringRef getPassName() const override {
       return "Hexagon generate mux instructions";
@@ -78,8 +79,8 @@ namespace {
     }
 
   private:
-    const HexagonInstrInfo *HII = nullptr;
-    const HexagonRegisterInfo *HRI = nullptr;
+    const HexagonInstrInfo *HII;
+    const HexagonRegisterInfo *HRI;
 
     struct CondsetInfo {
       unsigned PredR = 0;
@@ -133,7 +134,7 @@ namespace {
 
 } // end anonymous namespace
 
-INITIALIZE_PASS(HexagonGenMux, "hexagon-gen-mux",
+INITIALIZE_PASS(HexagonGenMux, "hexagon-mux",
   "Hexagon generate mux instructions", false, false)
 
 void HexagonGenMux::getSubRegs(unsigned Reg, BitVector &SRs) const {
@@ -234,11 +235,8 @@ bool HexagonGenMux::genMuxInBlock(MachineBasicBlock &B) {
     unsigned DR = MI->getOperand(0).getReg();
     if (isRegPair(DR))
       continue;
-    MachineOperand &PredOp = MI->getOperand(1);
-    if (PredOp.isUndef())
-      continue;
 
-    unsigned PR = PredOp.getReg();
+    unsigned PR = MI->getOperand(1).getReg();
     unsigned Idx = I2X.lookup(MI);
     CondsetMap::iterator F = CM.find(DR);
     bool IfTrue = HII->isPredicatedTrue(Opc);
@@ -318,47 +316,20 @@ bool HexagonGenMux::genMuxInBlock(MachineBasicBlock &B) {
     ML.push_back(MuxInfo(At, DR, PR, SrcT, SrcF, Def1, Def2));
   }
 
-  for (MuxInfo &MX : ML) {
+  for (unsigned I = 0, N = ML.size(); I < N; ++I) {
+    MuxInfo &MX = ML[I];
+    MachineBasicBlock &B = *MX.At->getParent();
+    DebugLoc DL = MX.At->getDebugLoc();
     unsigned MxOpc = getMuxOpcode(*MX.SrcT, *MX.SrcF);
     if (!MxOpc)
       continue;
-    MachineBasicBlock &B = *MX.At->getParent();
-    const DebugLoc &DL = B.findDebugLoc(MX.At);
-    auto NewMux = BuildMI(B, MX.At, DL, HII->get(MxOpc), MX.DefR)
-                      .addReg(MX.PredR)
-                      .add(*MX.SrcT)
-                      .add(*MX.SrcF);
-    NewMux->clearKillInfo();
+    BuildMI(B, MX.At, DL, HII->get(MxOpc), MX.DefR)
+      .addReg(MX.PredR)
+      .addOperand(*MX.SrcT)
+      .addOperand(*MX.SrcF);
     B.erase(MX.Def1);
     B.erase(MX.Def2);
     Changed = true;
-  }
-
-  // Fix up kill flags.
-
-  LivePhysRegs LPR(*HRI);
-  LPR.addLiveOuts(B);
-  auto IsLive = [&LPR,this] (unsigned Reg) -> bool {
-    for (MCSubRegIterator S(Reg, HRI, true); S.isValid(); ++S)
-      if (LPR.contains(*S))
-        return true;
-    return false;
-  };
-  for (auto I = B.rbegin(), E = B.rend(); I != E; ++I) {
-    if (I->isDebugValue())
-      continue;
-    // This isn't 100% accurate, but it's safe.
-    // It won't detect (as a kill) a case like this
-    //   r0 = add r0, 1    <-- r0 should be "killed"
-    //   ... = r0
-    for (MachineOperand &Op : I->operands()) {
-      if (!Op.isReg() || !Op.isUse())
-        continue;
-      assert(Op.getSubReg() == 0 && "Should have physical registers only");
-      bool Live = IsLive(Op.getReg());
-      Op.setIsKill(!Live);
-    }
-    LPR.stepBackward(*I);
   }
 
   return Changed;

@@ -615,8 +615,8 @@ std::string AnalysisConsumer::getFunctionName(const Decl *D) {
            << OC->getIdentifier()->getNameStart() << ')';
       }
     } else if (const auto *OCD = dyn_cast<ObjCCategoryImplDecl>(DC)) {
-      OS << OCD->getClassInterface()->getName() << '('
-         << OCD->getName() << ')';
+      OS << ((const NamedDecl *)OCD)->getIdentifier()->getNameStart() << '('
+         << OCD->getIdentifier()->getNameStart() << ')';
     } else if (isa<ObjCProtocolDecl>(DC)) {
       // We can extract the type of the class from the self pointer.
       if (ImplicitParamDecl *SelfDecl = OMD->getSelfDecl()) {
@@ -674,8 +674,10 @@ void AnalysisConsumer::HandleCode(Decl *D, AnalysisMode Mode,
 
   DisplayFunction(D, Mode, IMode);
   CFG *DeclCFG = Mgr->getCFG(D);
-  if (DeclCFG)
-    MaxCFGSize.updateMax(DeclCFG->size());
+  if (DeclCFG) {
+    unsigned CFGSize = DeclCFG->size();
+    MaxCFGSize = MaxCFGSize < CFGSize ? CFGSize : MaxCFGSize;
+  }
 
   BugReporter BR(*Mgr);
 

@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/MipsBaseInfo.h"
 #include "Mips.h"
+#include "MCTargetDesc/MipsBaseInfo.h"
 #include "MipsMachineFunction.h"
 #include "MipsTargetMachine.h"
 #include "llvm/ADT/ScopedHashTable.h"
@@ -59,7 +59,7 @@ private:
 
 class OptimizePICCall : public MachineFunctionPass {
 public:
-  OptimizePICCall() : MachineFunctionPass(ID) {}
+  OptimizePICCall(TargetMachine &tm) : MachineFunctionPass(ID) {}
 
   StringRef getPassName() const override { return "Mips OptimizePICCall"; }
 
@@ -116,10 +116,9 @@ static MachineOperand *getCallTargetRegOpnd(MachineInstr &MI) {
 
 /// Return type of register Reg.
 static MVT::SimpleValueType getRegTy(unsigned Reg, MachineFunction &MF) {
-  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
   const TargetRegisterClass *RC = MF.getRegInfo().getRegClass(Reg);
-  assert(TRI.legalclasstypes_end(*RC) - TRI.legalclasstypes_begin(*RC) == 1);
-  return *TRI.legalclasstypes_begin(*RC);
+  assert(RC->vt_end() - RC->vt_begin() == 1);
+  return *RC->vt_begin();
 }
 
 /// Do the following transformation:
@@ -257,7 +256,7 @@ bool OptimizePICCall::isCallViaRegister(MachineInstr &MI, unsigned &Reg,
 
   // Get the instruction that loads the function address from the GOT.
   Reg = MO->getReg();
-  Val = nullptr;
+  Val = (Value*)nullptr;
   MachineRegisterInfo &MRI = MI.getParent()->getParent()->getRegInfo();
   MachineInstr *DefMI = MRI.getVRegDef(Reg);
 
@@ -297,6 +296,6 @@ void OptimizePICCall::incCntAndSetReg(ValueType Entry, unsigned Reg) {
 }
 
 /// Return an OptimizeCall object.
-FunctionPass *llvm::createMipsOptimizePICCallPass() {
-  return new OptimizePICCall();
+FunctionPass *llvm::createMipsOptimizePICCallPass(MipsTargetMachine &TM) {
+  return new OptimizePICCall(TM);
 }

@@ -1,4 +1,4 @@
-//===- StringRef.h - Constant String Reference Wrapper ----------*- C++ -*-===//
+//===--- StringRef.h - Constant String Reference Wrapper --------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,18 +15,16 @@
 #include "llvm/Support/Compiler.h"
 #include <algorithm>
 #include <cassert>
-#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <string>
-#include <type_traits>
 #include <utility>
 
 namespace llvm {
-
+  template <typename T>
+  class SmallVectorImpl;
   class APInt;
   class hash_code;
-  template <typename T> class SmallVectorImpl;
   class StringRef;
 
   /// Helper functions for StringRef::getAsInteger.
@@ -48,11 +46,10 @@ namespace llvm {
   /// general safe to store a StringRef.
   class StringRef {
   public:
+    typedef const char *iterator;
+    typedef const char *const_iterator;
     static const size_t npos = ~size_t(0);
-
-    using iterator = const char *;
-    using const_iterator = const char *;
-    using size_type = size_t;
+    typedef size_t size_type;
 
   private:
     /// The start of the string, in an external buffer.
@@ -560,14 +557,6 @@ namespace llvm {
     /// string is well-formed in the given radix.
     bool getAsInteger(unsigned Radix, APInt &Result) const;
 
-    /// Parse the current string as an IEEE double-precision floating
-    /// point value.  The string must be a well-formed double.
-    ///
-    /// If \p AllowInexact is false, the function will fail if the string
-    /// cannot be represented exactly.  Otherwise, the function only fails
-    /// in case of an overflow or underflow.
-    bool getAsDouble(double &Result, bool AllowInexact = true) const;
-
     /// @}
     /// @name String Operations
     /// @{
@@ -611,7 +600,7 @@ namespace llvm {
       return drop_back(size() - N);
     }
 
-    /// Return a StringRef equal to 'this' but with only the last \p N
+    /// Return a StringRef equal to 'this' but with only the first \p N
     /// elements remaining.  If \p N is greater than the length of the
     /// string, the entire string is returned.
     LLVM_NODISCARD
@@ -909,7 +898,6 @@ namespace llvm {
   // StringRefs can be treated like a POD type.
   template <typename T> struct isPodLike;
   template <> struct isPodLike<StringRef> { static const bool value = true; };
+}
 
-} // end namespace llvm
-
-#endif // LLVM_ADT_STRINGREF_H
+#endif

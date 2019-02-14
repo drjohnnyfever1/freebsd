@@ -47,14 +47,6 @@ public:
     return Error::success();
   }
 
-  Error visitTypeBegin(CVType &Record, TypeIndex Index) override {
-    for (auto Visitor : Pipeline) {
-      if (auto EC = Visitor->visitTypeBegin(Record, Index))
-        return EC;
-    }
-    return Error::success();
-  }
-
   Error visitTypeEnd(CVType &Record) override {
     for (auto Visitor : Pipeline) {
       if (auto EC = Visitor->visitTypeEnd(Record))
@@ -94,7 +86,7 @@ public:
   }
 #define TYPE_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
 #define MEMBER_RECORD_ALIAS(EnumName, EnumVal, Name, AliasName)
-#include "llvm/DebugInfo/CodeView/CodeViewTypes.def"
+#include "llvm/DebugInfo/CodeView/TypeRecords.def"
 
 private:
   template <typename T> Error visitKnownRecordImpl(CVType &CVR, T &Record) {

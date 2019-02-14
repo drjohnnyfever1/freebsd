@@ -56,16 +56,12 @@ def LSU_lat1    : SchedWrite;
 // Floating point unit (zEC12 and earlier)
 def FPU  : SchedWrite;
 def FPU2 : SchedWrite;
-def DFU  : SchedWrite;
-def DFU2 : SchedWrite;
 
-// Vector sub units (z13 and later)
+// Vector sub units (z13)
 def VecBF     : SchedWrite;
 def VecBF2    : SchedWrite;
 def VecDF     : SchedWrite;
 def VecDF2    : SchedWrite;
-def VecDFX    : SchedWrite;
-def VecDFX2   : SchedWrite;
 def VecFPd    : SchedWrite; // Blocking BFP div/sqrt unit.
 def VecMul    : SchedWrite;
 def VecStr    : SchedWrite;
@@ -75,7 +71,6 @@ def VecXsPm   : SchedWrite;
 def VBU         : SchedWrite;
 
 
-include "SystemZScheduleZ14.td"
 include "SystemZScheduleZ13.td"
 include "SystemZScheduleZEC12.td"
 include "SystemZScheduleZ196.td"

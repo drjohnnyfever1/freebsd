@@ -47,6 +47,7 @@
 #endif
 
 using namespace llvm;
+using namespace sys;
 
 // This function retrieves the page size using GetNativeSystemInfo() and is
 // present solely so it can be called once to initialize the self_process member

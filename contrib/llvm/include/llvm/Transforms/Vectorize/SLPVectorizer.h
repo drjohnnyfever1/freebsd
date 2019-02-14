@@ -24,7 +24,6 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/DemandedBits.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Function.h"
@@ -41,8 +40,8 @@ class BoUpSLP;
 struct SLPVectorizerPass : public PassInfoMixin<SLPVectorizerPass> {
   typedef SmallVector<StoreInst *, 8> StoreList;
   typedef MapVector<Value *, StoreList> StoreListMap;
-  typedef SmallVector<WeakTrackingVH, 8> WeakTrackingVHList;
-  typedef MapVector<Value *, WeakTrackingVHList> WeakTrackingVHListMap;
+  typedef SmallVector<WeakVH, 8> WeakVHList;
+  typedef MapVector<Value *, WeakVHList> WeakVHListMap;
 
   ScalarEvolution *SE = nullptr;
   TargetTransformInfo *TTI = nullptr;
@@ -60,8 +59,7 @@ public:
   // Glue for old PM.
   bool runImpl(Function &F, ScalarEvolution *SE_, TargetTransformInfo *TTI_,
                TargetLibraryInfo *TLI_, AliasAnalysis *AA_, LoopInfo *LI_,
-               DominatorTree *DT_, AssumptionCache *AC_, DemandedBits *DB_,
-               OptimizationRemarkEmitter *ORE_);
+               DominatorTree *DT_, AssumptionCache *AC_, DemandedBits *DB_);
 
 private:
   /// \brief Collect store and getelementptr instructions and organize them
@@ -84,7 +82,7 @@ private:
                           ArrayRef<Value *> BuildVector = None,
                           bool AllowReorder = false);
 
-  /// \brief Try to vectorize a chain that may start at the operands of \p V.
+  /// \brief Try to vectorize a chain that may start at the operands of \V;
   bool tryToVectorize(BinaryOperator *V, slpvectorizer::BoUpSLP &R);
 
   /// \brief Vectorize the store instructions collected in Stores.
@@ -93,12 +91,6 @@ private:
   /// \brief Vectorize the index computations of the getelementptr instructions
   /// collected in GEPs.
   bool vectorizeGEPIndices(BasicBlock *BB, slpvectorizer::BoUpSLP &R);
-
-  /// Try to find horizontal reduction or otherwise vectorize a chain of binary
-  /// operators.
-  bool vectorizeRootInstruction(PHINode *P, Value *V, BasicBlock *BB,
-                                slpvectorizer::BoUpSLP &R,
-                                TargetTransformInfo *TTI);
 
   /// \brief Scan the basic block and look for patterns that are likely to start
   /// a vectorization chain.
@@ -113,7 +105,7 @@ private:
   StoreListMap Stores;
 
   /// The getelementptr instructions in a basic block organized by base pointer.
-  WeakTrackingVHListMap GEPs;
+  WeakVHListMap GEPs;
 };
 }
 

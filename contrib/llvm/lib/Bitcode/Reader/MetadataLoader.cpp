@@ -53,7 +53,6 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -359,9 +358,6 @@ class PlaceholderQueue {
   std::deque<DistinctMDOperandPlaceholder> PHs;
 
 public:
-  ~PlaceholderQueue() {
-    assert(empty() && "PlaceholderQueue hasn't been flushed before being destroyed");
-  }
   bool empty() { return PHs.empty(); }
   DistinctMDOperandPlaceholder &getPlaceholderOp(unsigned ID);
   void flush(BitcodeReaderMetadataList &MetadataList);
@@ -406,11 +402,6 @@ void PlaceholderQueue::flush(BitcodeReaderMetadataList &MetadataList) {
 }
 
 } // anonynous namespace
-
-static Error error(const Twine &Message) {
-  return make_error<StringError>(
-      Message, make_error_code(BitcodeError::CorruptedBitcode));
-}
 
 class MetadataLoader::MetadataLoaderImpl {
   BitcodeReaderMetadataList MetadataList;
@@ -458,7 +449,6 @@ class MetadataLoader::MetadataLoaderImpl {
   bool StripTBAA = false;
   bool HasSeenOldLoopTags = false;
   bool NeedUpgradeToDIGlobalVariableExpression = false;
-  bool NeedDeclareExpressionUpgrade = false;
 
   /// True if metadata is being parsed for a module being ThinLTO imported.
   bool IsImporting = false;
@@ -467,7 +457,7 @@ class MetadataLoader::MetadataLoaderImpl {
                          PlaceholderQueue &Placeholders, StringRef Blob,
                          unsigned &NextMetadataNo);
   Error parseMetadataStrings(ArrayRef<uint64_t> Record, StringRef Blob,
-                             function_ref<void(StringRef)> CallBack);
+                             std::function<void(StringRef)> CallBack);
   Error parseGlobalObjectAttachment(GlobalObject &GO,
                                     ArrayRef<uint64_t> Record);
   Error parseMetadataKindRecord(SmallVectorImpl<uint64_t> &Record);
@@ -479,8 +469,8 @@ class MetadataLoader::MetadataLoaderImpl {
     for (auto CU_SP : CUSubprograms)
       if (auto *SPs = dyn_cast_or_null<MDTuple>(CU_SP.second))
         for (auto &Op : SPs->operands())
-          if (auto *SP = dyn_cast_or_null<DISubprogram>(Op))
-            SP->replaceUnit(CU_SP.first);
+          if (auto *SP = dyn_cast_or_null<MDNode>(Op))
+            SP->replaceOperandWith(7, CU_SP.first);
     CUSubprograms.clear();
   }
 
@@ -505,7 +495,7 @@ class MetadataLoader::MetadataLoaderImpl {
 
     // Upgrade variables attached to globals.
     for (auto &GV : TheModule.globals()) {
-      SmallVector<MDNode *, 1> MDs;
+      SmallVector<MDNode *, 1> MDs, NewMDs;
       GV.getMetadata(LLVMContext::MD_dbg, MDs);
       GV.eraseMetadata(LLVMContext::MD_dbg);
       for (auto *MD : MDs)
@@ -516,108 +506,6 @@ class MetadataLoader::MetadataLoaderImpl {
         } else
           GV.addMetadata(LLVMContext::MD_dbg, *MD);
     }
-  }
-
-  /// Remove a leading DW_OP_deref from DIExpressions in a dbg.declare that
-  /// describes a function argument.
-  void upgradeDeclareExpressions(Function &F) {
-    if (!NeedDeclareExpressionUpgrade)
-      return;
-
-    for (auto &BB : F)
-      for (auto &I : BB)
-        if (auto *DDI = dyn_cast<DbgDeclareInst>(&I))
-          if (auto *DIExpr = DDI->getExpression())
-            if (DIExpr->startsWithDeref() &&
-                dyn_cast_or_null<Argument>(DDI->getAddress())) {
-              SmallVector<uint64_t, 8> Ops;
-              Ops.append(std::next(DIExpr->elements_begin()),
-                         DIExpr->elements_end());
-              auto *E = DIExpression::get(Context, Ops);
-              DDI->setOperand(2, MetadataAsValue::get(Context, E));
-            }
-  }
-
-  /// Upgrade the expression from previous versions.
-  Error upgradeDIExpression(uint64_t FromVersion,
-                            MutableArrayRef<uint64_t> &Expr,
-                            SmallVectorImpl<uint64_t> &Buffer) {
-    auto N = Expr.size();
-    switch (FromVersion) {
-    default:
-      return error("Invalid record");
-    case 0:
-      if (N >= 3 && Expr[N - 3] == dwarf::DW_OP_bit_piece)
-        Expr[N - 3] = dwarf::DW_OP_LLVM_fragment;
-      LLVM_FALLTHROUGH;
-    case 1:
-      // Move DW_OP_deref to the end.
-      if (N && Expr[0] == dwarf::DW_OP_deref) {
-        auto End = Expr.end();
-        if (Expr.size() >= 3 &&
-            *std::prev(End, 3) == dwarf::DW_OP_LLVM_fragment)
-          End = std::prev(End, 3);
-        std::move(std::next(Expr.begin()), End, Expr.begin());
-        *std::prev(End) = dwarf::DW_OP_deref;
-      }
-      NeedDeclareExpressionUpgrade = true;
-      LLVM_FALLTHROUGH;
-    case 2: {
-      // Change DW_OP_plus to DW_OP_plus_uconst.
-      // Change DW_OP_minus to DW_OP_uconst, DW_OP_minus
-      auto SubExpr = ArrayRef<uint64_t>(Expr);
-      while (!SubExpr.empty()) {
-        // Skip past other operators with their operands
-        // for this version of the IR, obtained from
-        // from historic DIExpression::ExprOperand::getSize().
-        size_t HistoricSize;
-        switch (SubExpr.front()) {
-        default:
-          HistoricSize = 1;
-          break;
-        case dwarf::DW_OP_constu:
-        case dwarf::DW_OP_minus:
-        case dwarf::DW_OP_plus:
-          HistoricSize = 2;
-          break;
-        case dwarf::DW_OP_LLVM_fragment:
-          HistoricSize = 3;
-          break;
-        }
-
-        // If the expression is malformed, make sure we don't
-        // copy more elements than we should.
-        HistoricSize = std::min(SubExpr.size(), HistoricSize);
-        ArrayRef<uint64_t> Args = SubExpr.slice(1, HistoricSize-1);
-
-        switch (SubExpr.front()) {
-        case dwarf::DW_OP_plus:
-          Buffer.push_back(dwarf::DW_OP_plus_uconst);
-          Buffer.append(Args.begin(), Args.end());
-          break;
-        case dwarf::DW_OP_minus:
-          Buffer.push_back(dwarf::DW_OP_constu);
-          Buffer.append(Args.begin(), Args.end());
-          Buffer.push_back(dwarf::DW_OP_minus);
-          break;
-        default:
-          Buffer.push_back(*SubExpr.begin());
-          Buffer.append(Args.begin(), Args.end());
-          break;
-        }
-
-        // Continue with remaining elements.
-        SubExpr = SubExpr.slice(HistoricSize);
-      }
-      Expr = MutableArrayRef<uint64_t>(Buffer);
-      LLVM_FALLTHROUGH;
-    }
-    case 3:
-      // Up-to-date!
-      break;
-    }
-
-    return Error::success();
   }
 
   void upgradeDebugInfo() {
@@ -632,7 +520,7 @@ public:
                      bool IsImporting)
       : MetadataList(TheModule.getContext()), ValueList(ValueList),
         Stream(Stream), Context(TheModule.getContext()), TheModule(TheModule),
-        getTypeByID(std::move(getTypeByID)), IsImporting(IsImporting) {}
+        getTypeByID(getTypeByID), IsImporting(IsImporting) {}
 
   Error parseMetadata(bool ModuleLevel);
 
@@ -674,8 +562,12 @@ public:
 
   unsigned size() const { return MetadataList.size(); }
   void shrinkTo(unsigned N) { MetadataList.shrinkTo(N); }
-  void upgradeDebugIntrinsics(Function &F) { upgradeDeclareExpressions(F); }
 };
+
+Error error(const Twine &Message) {
+  return make_error<StringError>(
+      Message, make_error_code(BitcodeError::CorruptedBitcode));
+}
 
 Expected<bool>
 MetadataLoader::MetadataLoaderImpl::lazyLoadModuleMetadataBlock() {
@@ -1215,14 +1107,8 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_DERIVED_TYPE: {
-    if (Record.size() < 12 || Record.size() > 13)
+    if (Record.size() != 12)
       return error("Invalid record");
-
-    // DWARF address space is encoded as N->getDWARFAddressSpace() + 1. 0 means
-    // that there is no DWARF address space associated with DIDerivedType.
-    Optional<unsigned> DWARFAddressSpace;
-    if (Record.size() > 12 && Record[12])
-      DWARFAddressSpace = Record[12] - 1;
 
     IsDistinct = Record[0];
     DINode::DIFlags Flags = static_cast<DINode::DIFlags>(Record[10]);
@@ -1232,8 +1118,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
                          getMDOrNull(Record[3]), Record[4],
                          getDITypeRefOrNull(Record[5]),
                          getDITypeRefOrNull(Record[6]), Record[7], Record[8],
-                         Record[9], DWARFAddressSpace, Flags,
-                         getDITypeRefOrNull(Record[11]))),
+                         Record[9], Flags, getDITypeRefOrNull(Record[11]))),
         NextMetadataNo);
     NextMetadataNo++;
     break;
@@ -1355,7 +1240,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_COMPILE_UNIT: {
-    if (Record.size() < 14 || Record.size() > 18)
+    if (Record.size() < 14 || Record.size() > 17)
       return error("Invalid record");
 
     // Ignore Record[0], which indicates whether this compile unit is
@@ -1368,8 +1253,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
         getMDOrNull(Record[12]), getMDOrNull(Record[13]),
         Record.size() <= 15 ? nullptr : getMDOrNull(Record[15]),
         Record.size() <= 14 ? 0 : Record[14],
-        Record.size() <= 16 ? true : Record[16],
-        Record.size() <= 17 ? false : Record[17]);
+        Record.size() <= 16 ? true : Record[16]);
 
     MetadataList.assignValue(CU, NextMetadataNo);
     NextMetadataNo++;
@@ -1380,7 +1264,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_SUBPROGRAM: {
-    if (Record.size() < 18 || Record.size() > 21)
+    if (Record.size() < 18 || Record.size() > 20)
       return error("Invalid record");
 
     IsDistinct =
@@ -1396,31 +1280,29 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     unsigned Offset = Record.size() >= 19 ? 1 : 0;
     bool HasFn = Offset && !HasUnit;
     bool HasThisAdj = Record.size() >= 20;
-    bool HasThrownTypes = Record.size() >= 21;
     DISubprogram *SP = GET_OR_DISTINCT(
-        DISubprogram,
-        (Context,
-         getDITypeRefOrNull(Record[1]),                     // scope
-         getMDString(Record[2]),                            // name
-         getMDString(Record[3]),                            // linkageName
-         getMDOrNull(Record[4]),                            // file
-         Record[5],                                         // line
-         getMDOrNull(Record[6]),                            // type
-         Record[7],                                         // isLocal
-         Record[8],                                         // isDefinition
-         Record[9],                                         // scopeLine
-         getDITypeRefOrNull(Record[10]),                    // containingType
-         Record[11],                                        // virtuality
-         Record[12],                                        // virtualIndex
-         HasThisAdj ? Record[19] : 0,                       // thisAdjustment
-         static_cast<DINode::DIFlags>(Record[13]),          // flags
-         Record[14],                                        // isOptimized
-         HasUnit ? CUorFn : nullptr,                        // unit
-         getMDOrNull(Record[15 + Offset]),                  // templateParams
-         getMDOrNull(Record[16 + Offset]),                  // declaration
-         getMDOrNull(Record[17 + Offset]),                  // variables
-         HasThrownTypes ? getMDOrNull(Record[20]) : nullptr // thrownTypes
-         ));
+        DISubprogram, (Context,
+                       getDITypeRefOrNull(Record[1]),          // scope
+                       getMDString(Record[2]),                 // name
+                       getMDString(Record[3]),                 // linkageName
+                       getMDOrNull(Record[4]),                 // file
+                       Record[5],                              // line
+                       getMDOrNull(Record[6]),                 // type
+                       Record[7],                              // isLocal
+                       Record[8],                              // isDefinition
+                       Record[9],                              // scopeLine
+                       getDITypeRefOrNull(Record[10]),         // containingType
+                       Record[11],                             // virtuality
+                       Record[12],                             // virtualIndex
+                       HasThisAdj ? Record[19] : 0,            // thisAdjustment
+                       static_cast<DINode::DIFlags>(Record[13] // flags
+                                                    ),
+                       Record[14],                       // isOptimized
+                       HasUnit ? CUorFn : nullptr,       // unit
+                       getMDOrNull(Record[15 + Offset]), // templateParams
+                       getMDOrNull(Record[16 + Offset]), // declaration
+                       getMDOrNull(Record[17 + Offset])  // variables
+                       ));
     MetadataList.assignValue(SP, NextMetadataNo);
     NextMetadataNo++;
 
@@ -1465,20 +1347,16 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_NAMESPACE: {
-    // Newer versions of DINamespace dropped file and line.
-    MDString *Name;
-    if (Record.size() == 3)
-      Name = getMDString(Record[2]);
-    else if (Record.size() == 5)
-      Name = getMDString(Record[3]);
-    else
+    if (Record.size() != 5)
       return error("Invalid record");
 
     IsDistinct = Record[0] & 1;
     bool ExportSymbols = Record[0] & 2;
     MetadataList.assignValue(
         GET_OR_DISTINCT(DINamespace,
-                        (Context, getMDOrNull(Record[1]), Name, ExportSymbols)),
+                        (Context, getMDOrNull(Record[1]),
+                         getMDOrNull(Record[2]), getMDString(Record[3]),
+                         Record[4], ExportSymbols)),
         NextMetadataNo);
     NextMetadataNo++;
     break;
@@ -1555,7 +1433,6 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     } else if (Version == 0) {
       // Upgrade old metadata, which stored a global variable reference or a
       // ConstantInt here.
-      NeedUpgradeToDIGlobalVariableExpression = true;
       Metadata *Expr = getMDOrNull(Record[9]);
       uint32_t AlignInBits = 0;
       if (Record.size() > 11) {
@@ -1586,6 +1463,8 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
       DIGlobalVariableExpression *DGVE = nullptr;
       if (Attach || Expr)
         DGVE = DIGlobalVariableExpression::getDistinct(Context, DGV, Expr);
+      else
+        NeedUpgradeToDIGlobalVariableExpression = true;
       if (Attach)
         Attach->addDebugInfo(DGVE);
 
@@ -1606,7 +1485,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     bool HasAlignment = Record[0] & 2;
     // 2nd field used to be an artificial tag, either DW_TAG_auto_variable or
     // DW_TAG_arg_variable, if we have alignment flag encoded it means, that
-    // this is newer version of record which doesn't have artificial tag.
+    // this is newer version of record which doesn't have artifical tag.
     bool HasTag = !HasAlignment && Record.size() > 8;
     DINode::DIFlags Flags = static_cast<DINode::DIFlags>(Record[7 + HasTag]);
     uint32_t AlignInBits = 0;
@@ -1631,15 +1510,16 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
       return error("Invalid record");
 
     IsDistinct = Record[0] & 1;
-    uint64_t Version = Record[0] >> 1;
+    bool HasOpFragment = Record[0] & 2;
     auto Elts = MutableArrayRef<uint64_t>(Record).slice(1);
-
-    SmallVector<uint64_t, 6> Buffer;
-    if (Error Err = upgradeDIExpression(Version, Elts, Buffer))
-      return Err;
+    if (!HasOpFragment)
+      if (unsigned N = Elts.size())
+        if (N >= 3 && Elts[N - 3] == dwarf::DW_OP_bit_piece)
+          Elts[N - 3] = dwarf::DW_OP_LLVM_fragment;
 
     MetadataList.assignValue(
-        GET_OR_DISTINCT(DIExpression, (Context, Elts)), NextMetadataNo);
+        GET_OR_DISTINCT(DIExpression, (Context, makeArrayRef(Record).slice(1))),
+        NextMetadataNo);
     NextMetadataNo++;
     break;
   }
@@ -1671,17 +1551,15 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_IMPORTED_ENTITY: {
-    if (Record.size() != 6 && Record.size() != 7)
+    if (Record.size() != 6)
       return error("Invalid record");
 
     IsDistinct = Record[0];
-    bool HasFile = (Record.size() == 7);
     MetadataList.assignValue(
         GET_OR_DISTINCT(DIImportedEntity,
                         (Context, Record[1], getMDOrNull(Record[2]),
-                         getDITypeRefOrNull(Record[3]),
-                         HasFile ? getMDOrNull(Record[6]) : nullptr,
-                         HasFile ? Record[4] : 0, getMDString(Record[5]))),
+                         getDITypeRefOrNull(Record[3]), Record[4],
+                         getMDString(Record[5]))),
         NextMetadataNo);
     NextMetadataNo++;
     break;
@@ -1733,7 +1611,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
 
 Error MetadataLoader::MetadataLoaderImpl::parseMetadataStrings(
     ArrayRef<uint64_t> Record, StringRef Blob,
-    function_ref<void(StringRef)> CallBack) {
+    std::function<void(StringRef)> CallBack) {
   // All the MDStrings in the block are emitted together in a single
   // record.  The strings are concatenated and stored in a blob along with
   // their sizes.
@@ -1930,8 +1808,8 @@ MetadataLoader::MetadataLoader(BitstreamCursor &Stream, Module &TheModule,
                                BitcodeReaderValueList &ValueList,
                                bool IsImporting,
                                std::function<Type *(unsigned)> getTypeByID)
-    : Pimpl(llvm::make_unique<MetadataLoaderImpl>(
-          Stream, TheModule, ValueList, std::move(getTypeByID), IsImporting)) {}
+    : Pimpl(llvm::make_unique<MetadataLoaderImpl>(Stream, TheModule, ValueList,
+                                                  getTypeByID, IsImporting)) {}
 
 Error MetadataLoader::parseMetadata(bool ModuleLevel) {
   return Pimpl->parseMetadata(ModuleLevel);
@@ -1970,7 +1848,3 @@ bool MetadataLoader::isStrippingTBAA() { return Pimpl->isStrippingTBAA(); }
 
 unsigned MetadataLoader::size() const { return Pimpl->size(); }
 void MetadataLoader::shrinkTo(unsigned N) { return Pimpl->shrinkTo(N); }
-
-void MetadataLoader::upgradeDebugIntrinsics(Function &F) {
-  return Pimpl->upgradeDebugIntrinsics(F);
-}

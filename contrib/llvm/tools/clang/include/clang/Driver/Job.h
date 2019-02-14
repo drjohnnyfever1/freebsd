@@ -11,7 +11,6 @@
 #define LLVM_CLANG_DRIVER_JOB_H
 
 #include "clang/Basic/LLVM.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Option/Option.h"
@@ -70,9 +69,6 @@ class Command {
   /// file
   std::string ResponseFileFlag;
 
-  /// See Command::setEnvironment
-  std::vector<const char *> Environment;
-
   /// When a response file is needed, we try to put most arguments in an
   /// exclusive file, while others remains as regular command line arguments.
   /// This functions fills a vector with the regular command line arguments,
@@ -114,12 +110,6 @@ public:
   void setInputFileList(llvm::opt::ArgStringList List) {
     InputFileList = std::move(List);
   }
-
-  /// \brief Sets the environment to be used by the new process.
-  /// \param NewEnvironment An array of environment variables.
-  /// \remark If the environment remains unset, then the environment
-  ///         from the parent process will be used.
-  void setEnvironment(llvm::ArrayRef<const char *> NewEnvironment);
 
   const char *getExecutable() const { return Executable; }
 

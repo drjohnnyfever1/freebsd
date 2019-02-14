@@ -30,7 +30,7 @@ namespace llvm {
 namespace lto {
 class LTO;
 }
-} // namespace llvm
+}
 
 namespace lld {
 namespace elf {
@@ -43,15 +43,14 @@ public:
   BitcodeCompiler();
   ~BitcodeCompiler();
 
-  void add(BitcodeFile &F);
+  template <class ELFT> void add(BitcodeFile &F);
   std::vector<InputFile *> compile();
 
 private:
   std::unique_ptr<llvm::lto::LTO> LTOObj;
   std::vector<SmallString<0>> Buff;
-  std::vector<std::unique_ptr<MemoryBuffer>> Files;
 };
-} // namespace elf
-} // namespace lld
+}
+}
 
 #endif

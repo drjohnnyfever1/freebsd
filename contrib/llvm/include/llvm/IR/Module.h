@@ -1,4 +1,4 @@
-//===- llvm/Module.h - C++ class to represent a VM module -------*- C++ -*-===//
+//===-- llvm/Module.h - C++ class to represent a VM module ------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,12 +15,7 @@
 #ifndef LLVM_IR_MODULE_H
 #define LLVM_IR_MODULE_H
 
-#include "llvm-c/Types.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/IR/Attributes.h"
 #include "llvm/IR/Comdat.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -28,26 +23,20 @@
 #include "llvm/IR/GlobalIFunc.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/IR/SymbolTableListTraits.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/CodeGen.h"
-#include <cstddef>
-#include <cstdint>
-#include <iterator>
-#include <memory>
-#include <string>
-#include <vector>
+#include "llvm/Support/DataTypes.h"
 
 namespace llvm {
-
+template <typename T> class Optional;
 class Error;
 class FunctionType;
 class GVMaterializer;
 class LLVMContext;
 class MemoryBuffer;
 class RandomNumberGenerator;
-template <class PtrType> class SmallPtrSetImpl;
 class StructType;
+template <class PtrType> class SmallPtrSetImpl;
 
 /// A Module instance is used to store all the information related to an
 /// LLVM module. Modules are the top level container of all other LLVM
@@ -65,47 +54,47 @@ class Module {
 /// @{
 public:
   /// The type for the list of global variables.
-  using GlobalListType = SymbolTableList<GlobalVariable>;
+  typedef SymbolTableList<GlobalVariable> GlobalListType;
   /// The type for the list of functions.
-  using FunctionListType = SymbolTableList<Function>;
+  typedef SymbolTableList<Function> FunctionListType;
   /// The type for the list of aliases.
-  using AliasListType = SymbolTableList<GlobalAlias>;
+  typedef SymbolTableList<GlobalAlias> AliasListType;
   /// The type for the list of ifuncs.
-  using IFuncListType = SymbolTableList<GlobalIFunc>;
+  typedef SymbolTableList<GlobalIFunc> IFuncListType;
   /// The type for the list of named metadata.
-  using NamedMDListType = ilist<NamedMDNode>;
+  typedef ilist<NamedMDNode> NamedMDListType;
   /// The type of the comdat "symbol" table.
-  using ComdatSymTabType = StringMap<Comdat>;
+  typedef StringMap<Comdat> ComdatSymTabType;
 
   /// The Global Variable iterator.
-  using global_iterator = GlobalListType::iterator;
+  typedef GlobalListType::iterator                      global_iterator;
   /// The Global Variable constant iterator.
-  using const_global_iterator = GlobalListType::const_iterator;
+  typedef GlobalListType::const_iterator          const_global_iterator;
 
   /// The Function iterators.
-  using iterator = FunctionListType::iterator;
+  typedef FunctionListType::iterator                           iterator;
   /// The Function constant iterator
-  using const_iterator = FunctionListType::const_iterator;
+  typedef FunctionListType::const_iterator               const_iterator;
 
   /// The Function reverse iterator.
-  using reverse_iterator = FunctionListType::reverse_iterator;
+  typedef FunctionListType::reverse_iterator             reverse_iterator;
   /// The Function constant reverse iterator.
-  using const_reverse_iterator = FunctionListType::const_reverse_iterator;
+  typedef FunctionListType::const_reverse_iterator const_reverse_iterator;
 
   /// The Global Alias iterators.
-  using alias_iterator = AliasListType::iterator;
+  typedef AliasListType::iterator                        alias_iterator;
   /// The Global Alias constant iterator
-  using const_alias_iterator = AliasListType::const_iterator;
+  typedef AliasListType::const_iterator            const_alias_iterator;
 
   /// The Global IFunc iterators.
-  using ifunc_iterator = IFuncListType::iterator;
+  typedef IFuncListType::iterator                        ifunc_iterator;
   /// The Global IFunc constant iterator
-  using const_ifunc_iterator = IFuncListType::const_iterator;
+  typedef IFuncListType::const_iterator            const_ifunc_iterator;
 
   /// The named metadata iterators.
-  using named_metadata_iterator = NamedMDListType::iterator;
+  typedef NamedMDListType::iterator             named_metadata_iterator;
   /// The named metadata constant iterators.
-  using const_named_metadata_iterator = NamedMDListType::const_iterator;
+  typedef NamedMDListType::const_iterator const_named_metadata_iterator;
 
   /// This enumeration defines the supported behaviors of module flags.
   enum ModFlagBehavior {
@@ -139,12 +128,9 @@ public:
     /// during the append operation.
     AppendUnique = 6,
 
-    /// Takes the max of the two values, which are required to be integers.
-    Max = 7,
-
     // Markers:
     ModFlagBehaviorFirstVal = Error,
-    ModFlagBehaviorLastVal = Max
+    ModFlagBehaviorLastVal = AppendUnique
   };
 
   /// Checks if Metadata represents a valid ModFlagBehavior, and stores the
@@ -155,7 +141,6 @@ public:
     ModFlagBehavior Behavior;
     MDString *Key;
     Metadata *Val;
-
     ModuleFlagEntry(ModFlagBehavior B, MDString *K, Metadata *V)
         : Behavior(B), Key(K), Val(V) {}
   };
@@ -249,7 +234,7 @@ public:
   /// when other randomness consuming passes are added or removed. In
   /// addition, the random stream will be reproducible across LLVM
   /// versions when the pass does not change.
-  std::unique_ptr<RandomNumberGenerator> createRNG(const Pass* P) const;
+  RandomNumberGenerator *createRNG(const Pass* P) const;
 
 /// @}
 /// @name Module Level Mutators
@@ -326,7 +311,7 @@ public:
   ///   4. Finally, the function exists but has the wrong prototype: return the
   ///      function with a constantexpr cast to the right prototype.
   Constant *getOrInsertFunction(StringRef Name, FunctionType *T,
-                                AttributeList AttributeList);
+                                AttributeSet AttributeList);
 
   Constant *getOrInsertFunction(StringRef Name, FunctionType *T);
 
@@ -334,24 +319,15 @@ public:
   /// exist, add a prototype for the function and return it. This function
   /// guarantees to return a constant of pointer to the specified function type
   /// or a ConstantExpr BitCast of that type if the named function has a
-  /// different type. This version of the method takes a list of
+  /// different type. This version of the method takes a null terminated list of
   /// function arguments, which makes it easier for clients to use.
-  template<typename... ArgsTy>
   Constant *getOrInsertFunction(StringRef Name,
-                                AttributeList AttributeList,
-                                Type *RetTy, ArgsTy... Args)
-  {
-    SmallVector<Type*, sizeof...(ArgsTy)> ArgTys{Args...};
-    return getOrInsertFunction(Name,
-                               FunctionType::get(RetTy, ArgTys, false),
-                               AttributeList);
-  }
+                                AttributeSet AttributeList,
+                                Type *RetTy, ...) LLVM_END_WITH_NULL;
 
   /// Same as above, but without the attributes.
-  template<typename... ArgsTy>
-  Constant *getOrInsertFunction(StringRef Name, Type *RetTy, ArgsTy... Args) {
-    return getOrInsertFunction(Name, AttributeList{}, RetTy, Args...);
-  }
+  Constant *getOrInsertFunction(StringRef Name, Type *RetTy, ...)
+    LLVM_END_WITH_NULL;
 
   /// Look up the specified function in the module symbol table. If it does not
   /// exist, return null.
@@ -369,23 +345,20 @@ public:
     return getGlobalVariable(Name, false);
   }
 
-  GlobalVariable *getGlobalVariable(StringRef Name, bool AllowInternal) const;
-
-  GlobalVariable *getGlobalVariable(StringRef Name,
-                                    bool AllowInternal = false) {
-    return static_cast<const Module *>(this)->getGlobalVariable(Name,
-                                                                AllowInternal);
+  GlobalVariable *getGlobalVariable(StringRef Name, bool AllowInternal) const {
+    return const_cast<Module *>(this)->getGlobalVariable(Name, AllowInternal);
   }
+
+  GlobalVariable *getGlobalVariable(StringRef Name, bool AllowInternal = false);
 
   /// Return the global variable in the module with the specified name, of
   /// arbitrary type. This method returns null if a global with the specified
   /// name is not found.
-  const GlobalVariable *getNamedGlobal(StringRef Name) const {
+  GlobalVariable *getNamedGlobal(StringRef Name) {
     return getGlobalVariable(Name, true);
   }
-  GlobalVariable *getNamedGlobal(StringRef Name) {
-    return const_cast<GlobalVariable *>(
-                       static_cast<const Module *>(this)->getNamedGlobal(Name));
+  const GlobalVariable *getNamedGlobal(StringRef Name) const {
+    return const_cast<Module *>(this)->getNamedGlobal(Name);
   }
 
   /// Look up the specified global in the module symbol table.
@@ -498,11 +471,9 @@ public:
   const GlobalListType   &getGlobalList() const       { return GlobalList; }
   /// Get the Module's list of global variables.
   GlobalListType         &getGlobalList()             { return GlobalList; }
-
   static GlobalListType Module::*getSublistAccess(GlobalVariable*) {
     return &Module::GlobalList;
   }
-
   /// Get the Module's list of functions (constant).
   const FunctionListType &getFunctionList() const     { return FunctionList; }
   /// Get the Module's list of functions.
@@ -510,39 +481,31 @@ public:
   static FunctionListType Module::*getSublistAccess(Function*) {
     return &Module::FunctionList;
   }
-
   /// Get the Module's list of aliases (constant).
   const AliasListType    &getAliasList() const        { return AliasList; }
   /// Get the Module's list of aliases.
   AliasListType          &getAliasList()              { return AliasList; }
-
   static AliasListType Module::*getSublistAccess(GlobalAlias*) {
     return &Module::AliasList;
   }
-
   /// Get the Module's list of ifuncs (constant).
   const IFuncListType    &getIFuncList() const        { return IFuncList; }
   /// Get the Module's list of ifuncs.
   IFuncListType          &getIFuncList()              { return IFuncList; }
-
   static IFuncListType Module::*getSublistAccess(GlobalIFunc*) {
     return &Module::IFuncList;
   }
-
   /// Get the Module's list of named metadata (constant).
   const NamedMDListType  &getNamedMDList() const      { return NamedMDList; }
   /// Get the Module's list of named metadata.
   NamedMDListType        &getNamedMDList()            { return NamedMDList; }
-
   static NamedMDListType Module::*getSublistAccess(NamedMDNode*) {
     return &Module::NamedMDList;
   }
-
   /// Get the symbol table of global variable and function identifiers
   const ValueSymbolTable &getValueSymbolTable() const { return *ValSymTab; }
   /// Get the Module's symbol table of global variable and function identifiers.
   ValueSymbolTable       &getValueSymbolTable()       { return *ValSymTab; }
-
   /// Get the Module's symbol table for COMDATs (constant).
   const ComdatSymTabType &getComdatSymbolTable() const { return ComdatSymTab; }
   /// Get the Module's symbol table for COMDATs.
@@ -627,11 +590,11 @@ public:
   /// @name Convenience iterators
   /// @{
 
-  using global_object_iterator =
-      concat_iterator<GlobalObject, iterator, global_iterator>;
-  using const_global_object_iterator =
-      concat_iterator<const GlobalObject, const_iterator,
-                      const_global_iterator>;
+  typedef concat_iterator<GlobalObject, iterator, global_iterator>
+      global_object_iterator;
+  typedef concat_iterator<const GlobalObject, const_iterator,
+                          const_global_iterator>
+      const_global_object_iterator;
 
   iterator_range<global_object_iterator> global_objects() {
     return concat<GlobalObject>(functions(), globals());
@@ -650,31 +613,6 @@ public:
   }
   const_global_object_iterator global_object_end() const {
     return global_objects().end();
-  }
-
-  using global_value_iterator =
-      concat_iterator<GlobalValue, iterator, global_iterator, alias_iterator,
-                      ifunc_iterator>;
-  using const_global_value_iterator =
-      concat_iterator<const GlobalValue, const_iterator, const_global_iterator,
-                      const_alias_iterator, const_ifunc_iterator>;
-
-  iterator_range<global_value_iterator> global_values() {
-    return concat<GlobalValue>(functions(), globals(), aliases(), ifuncs());
-  }
-  iterator_range<const_global_value_iterator> global_values() const {
-    return concat<const GlobalValue>(functions(), globals(), aliases(),
-                                     ifuncs());
-  }
-
-  global_value_iterator global_value_begin() { return global_values().begin(); }
-  global_value_iterator global_value_end() { return global_values().end(); }
-
-  const_global_value_iterator global_value_begin() const {
-    return global_values().begin();
-  }
-  const_global_value_iterator global_value_end() const {
-    return global_values().end();
   }
 
   /// @}
@@ -706,35 +644,28 @@ public:
       : public std::iterator<std::input_iterator_tag, DICompileUnit *> {
     NamedMDNode *CUs;
     unsigned Idx;
-
     void SkipNoDebugCUs();
-
   public:
     explicit debug_compile_units_iterator(NamedMDNode *CUs, unsigned Idx)
         : CUs(CUs), Idx(Idx) {
       SkipNoDebugCUs();
     }
-
     debug_compile_units_iterator &operator++() {
       ++Idx;
       SkipNoDebugCUs();
       return *this;
     }
-
     debug_compile_units_iterator operator++(int) {
       debug_compile_units_iterator T(*this);
       ++Idx;
       return T;
     }
-
     bool operator==(const debug_compile_units_iterator &I) const {
       return Idx == I.Idx;
     }
-
     bool operator!=(const debug_compile_units_iterator &I) const {
       return Idx != I.Idx;
     }
-
     DICompileUnit *operator*() const;
     DICompileUnit *operator->() const;
   };
@@ -794,10 +725,6 @@ public:
 /// @}
 /// @name Utility functions for querying Debug information.
 /// @{
-
-  /// \brief Returns the Number of Register ParametersDwarf Version by checking
-  /// module flags.
-  unsigned getNumberRegisterParameters() const;
 
   /// \brief Returns the Dwarf Version by checking module flags.
   unsigned getDwarfVersion() const;
@@ -864,6 +791,6 @@ inline Module *unwrap(LLVMModuleProviderRef MP) {
   return reinterpret_cast<Module*>(MP);
 }
 
-} // end namespace llvm
+} // End llvm namespace
 
-#endif // LLVM_IR_MODULE_H
+#endif

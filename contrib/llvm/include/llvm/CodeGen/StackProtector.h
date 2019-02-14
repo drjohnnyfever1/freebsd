@@ -1,4 +1,4 @@
-//===- StackProtector.h - Stack Protector Insertion -------------*- C++ -*-===//
+//===-- StackProtector.h - Stack Protector Insertion ----------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -19,20 +19,15 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/ValueMap.h"
 #include "llvm/Pass.h"
+#include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
-
-class BasicBlock;
-class DominatorTree;
 class Function;
-class Instruction;
 class Module;
-class TargetLoweringBase;
-class TargetMachine;
-class Type;
+class PHINode;
 
 class StackProtector : public FunctionPass {
 public:
@@ -50,15 +45,15 @@ public:
   };
 
   /// A mapping of AllocaInsts to their required SSP layout.
-  using SSPLayoutMap = ValueMap<const AllocaInst *, SSPLayoutKind>;
+  typedef ValueMap<const AllocaInst *, SSPLayoutKind> SSPLayoutMap;
 
 private:
-  const TargetMachine *TM = nullptr;
+  const TargetMachine *TM;
 
   /// TLI - Keep a pointer of a TargetLowering to consult for determining
   /// target type sizes.
-  const TargetLoweringBase *TLI = nullptr;
-  Triple Trip;
+  const TargetLoweringBase *TLI;
+  const Triple Trip;
 
   Function *F;
   Module *M;
@@ -72,7 +67,7 @@ private:
 
   /// \brief The minimum size of buffers that will receive stack smashing
   /// protection when -fstack-protection is used.
-  unsigned SSPBufferSize = 0;
+  unsigned SSPBufferSize;
 
   /// VisitedPHIs - The set of PHI nodes visited when determining
   /// if a variable's reference has been taken.  This set
@@ -116,12 +111,19 @@ private:
 
 public:
   static char ID; // Pass identification, replacement for typeid.
-
-  StackProtector() : FunctionPass(ID), SSPBufferSize(8) {
+  StackProtector()
+      : FunctionPass(ID), TM(nullptr), TLI(nullptr), SSPBufferSize(0) {
+    initializeStackProtectorPass(*PassRegistry::getPassRegistry());
+  }
+  StackProtector(const TargetMachine *TM)
+      : FunctionPass(ID), TM(TM), TLI(nullptr), Trip(TM->getTargetTriple()),
+        SSPBufferSize(8) {
     initializeStackProtectorPass(*PassRegistry::getPassRegistry());
   }
 
-  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addPreserved<DominatorTreeWrapperPass>();
+  }
 
   SSPLayoutKind getSSPLayout(const AllocaInst *AI) const;
 
@@ -132,7 +134,6 @@ public:
 
   bool runOnFunction(Function &Fn) override;
 };
-
 } // end namespace llvm
 
 #endif // LLVM_CODEGEN_STACKPROTECTOR_H

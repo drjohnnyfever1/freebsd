@@ -27,6 +27,13 @@
 #include <memory>
 #include <utility>
 
+// For chdir.
+#ifdef LLVM_ON_WIN32
+#  include <direct.h>
+#else
+#  include <unistd.h>
+#endif
+
 using namespace clang;
 using namespace clang::vfs;
 using namespace llvm;
@@ -228,7 +235,11 @@ std::error_code RealFileSystem::setCurrentWorkingDirectory(const Twine &Path) {
   // difference for example on network filesystems, where symlinks might be
   // switched during runtime of the tool. Fixing this depends on having a
   // file system abstraction that allows openat() style interactions.
-  return llvm::sys::fs::set_current_path(Path);
+  SmallString<256> Storage;
+  StringRef Dir = Path.toNullTerminatedStringRef(Storage);
+  if (int Err = ::chdir(Dir.data()))
+    return std::error_code(Err, std::generic_category());
+  return std::error_code();
 }
 
 IntrusiveRefCntPtr<FileSystem> vfs::getRealFileSystem() {
@@ -238,13 +249,16 @@ IntrusiveRefCntPtr<FileSystem> vfs::getRealFileSystem() {
 
 namespace {
 class RealFSDirIter : public clang::vfs::detail::DirIterImpl {
+  std::string Path;
   llvm::sys::fs::directory_iterator Iter;
 public:
-  RealFSDirIter(const Twine &Path, std::error_code &EC) : Iter(Path, EC) {
+  RealFSDirIter(const Twine &_Path, std::error_code &EC)
+      : Path(_Path.str()), Iter(Path, EC) {
     if (!EC && Iter != llvm::sys::fs::directory_iterator()) {
       llvm::sys::fs::file_status S;
       EC = Iter->status(S);
-      CurrentEntry = Status::copyWithNewName(S, Iter->path());
+      if (!EC)
+        CurrentEntry = Status::copyWithNewName(S, Iter->path());
     }
   }
 
@@ -1855,7 +1869,7 @@ vfs::recursive_directory_iterator::recursive_directory_iterator(FileSystem &FS_,
                                                            std::error_code &EC)
     : FS(&FS_) {
   directory_iterator I = FS->dir_begin(Path, EC);
-  if (I != directory_iterator()) {
+  if (!EC && I != directory_iterator()) {
     State = std::make_shared<IterState>();
     State->push(I);
   }
@@ -1868,6 +1882,8 @@ recursive_directory_iterator::increment(std::error_code &EC) {
   vfs::directory_iterator End;
   if (State->top()->isDirectory()) {
     vfs::directory_iterator I = FS->dir_begin(State->top()->getName(), EC);
+    if (EC)
+      return *this;
     if (I != End) {
       State->push(I);
       return *this;

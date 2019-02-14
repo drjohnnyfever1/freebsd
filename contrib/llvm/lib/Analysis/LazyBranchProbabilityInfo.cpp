@@ -16,7 +16,6 @@
 
 #include "llvm/Analysis/LazyBranchProbabilityInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 
 using namespace llvm;
 
@@ -25,7 +24,6 @@ using namespace llvm;
 INITIALIZE_PASS_BEGIN(LazyBranchProbabilityInfoPass, DEBUG_TYPE,
                       "Lazy Branch Probability Analysis", true, true)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(LazyBranchProbabilityInfoPass, DEBUG_TYPE,
                     "Lazy Branch Probability Analysis", true, true)
 
@@ -43,7 +41,6 @@ void LazyBranchProbabilityInfoPass::print(raw_ostream &OS,
 
 void LazyBranchProbabilityInfoPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<LoopInfoWrapperPass>();
-  AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
@@ -51,19 +48,16 @@ void LazyBranchProbabilityInfoPass::releaseMemory() { LBPI.reset(); }
 
 bool LazyBranchProbabilityInfoPass::runOnFunction(Function &F) {
   LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  TargetLibraryInfo &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
-  LBPI = llvm::make_unique<LazyBranchProbabilityInfo>(&F, &LI, &TLI);
+  LBPI = llvm::make_unique<LazyBranchProbabilityInfo>(&F, &LI);
   return false;
 }
 
 void LazyBranchProbabilityInfoPass::getLazyBPIAnalysisUsage(AnalysisUsage &AU) {
   AU.addRequired<LazyBranchProbabilityInfoPass>();
   AU.addRequired<LoopInfoWrapperPass>();
-  AU.addRequired<TargetLibraryInfoWrapperPass>();
 }
 
 void llvm::initializeLazyBPIPassPass(PassRegistry &Registry) {
   INITIALIZE_PASS_DEPENDENCY(LazyBranchProbabilityInfoPass);
   INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass);
-  INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass);
 }

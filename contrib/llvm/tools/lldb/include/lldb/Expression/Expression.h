@@ -99,16 +99,6 @@ public:
   //------------------------------------------------------------------
   lldb::addr_t StartAddress() { return m_jit_start_addr; }
 
-  //------------------------------------------------------------------
-  /// Called to notify the expression that it is about to be executed.
-  //------------------------------------------------------------------
-  virtual void WillStartExecuting() {}
-
-  //------------------------------------------------------------------
-  /// Called to notify the expression that its execution has finished.
-  //------------------------------------------------------------------
-  virtual void DidFinishExecuting() {}
-
   virtual ExpressionTypeSystemHelper *GetTypeSystemHelper() { return nullptr; }
 
 protected:

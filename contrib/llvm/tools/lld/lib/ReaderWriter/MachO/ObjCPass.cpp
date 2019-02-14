@@ -11,7 +11,6 @@
 
 #include "ArchHandler.h"
 #include "File.h"
-#include "MachONormalizedFileBinaryUtils.h"
 #include "MachOPasses.h"
 #include "lld/Core/DefinedAtom.h"
 #include "lld/Core/File.h"
@@ -30,7 +29,7 @@ namespace mach_o {
 ///
 class ObjCImageInfoAtom : public SimpleDefinedAtom {
 public:
-  ObjCImageInfoAtom(const File &file, bool isBig,
+  ObjCImageInfoAtom(const File &file,
                     MachOLinkingContext::ObjCConstraint objCConstraint,
                     uint32_t swiftVersion)
       : SimpleDefinedAtom(file) {
@@ -55,8 +54,6 @@ public:
     }
 
     Data.info.flags |= (swiftVersion << 8);
-
-    normalized::write32(Data.bytes + 4, Data.info.flags, isBig);
   }
 
   ~ObjCImageInfoAtom() override = default;
@@ -112,8 +109,7 @@ public:
 private:
 
   const DefinedAtom* getImageInfo() {
-    bool IsBig = MachOLinkingContext::isBigEndian(_ctx.arch());
-    return new (_file.allocator()) ObjCImageInfoAtom(_file, IsBig,
+    return new (_file.allocator()) ObjCImageInfoAtom(_file,
                                                      _ctx.objcConstraint(),
                                                      _ctx.swiftVersion());
   }

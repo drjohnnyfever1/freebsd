@@ -424,6 +424,7 @@ class InternalSymbolizer : public SymbolizerTool {
   InternalSymbolizer() { }
 
   static const int kBufferSize = 16 * 1024;
+  static const int kMaxDemangledNameSize = 1024;
   char buffer_[kBufferSize];
 };
 #else  // SANITIZER_SUPPORTS_WEAK_HOOKS
@@ -495,7 +496,7 @@ static void ChooseSymbolizerTools(IntrusiveList<SymbolizerTool> *list,
     VReport(2, "Symbolizer is disabled.\n");
     return;
   }
-  if (IsAllocatorOutOfMemory()) {
+  if (IsReportingOOM()) {
     VReport(2, "Cannot use internal symbolizer: out of memory\n");
   } else if (SymbolizerTool *tool = InternalSymbolizer::get(allocator)) {
     VReport(2, "Using internal symbolizer.\n");

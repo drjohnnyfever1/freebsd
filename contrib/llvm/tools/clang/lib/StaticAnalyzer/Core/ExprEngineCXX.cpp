@@ -317,7 +317,7 @@ void ExprEngine::VisitCXXConstructExpr(const CXXConstructExpr *CE,
         // actually make things worse. Placement new makes this tricky as well,
         // since it's then possible to be initializing one part of a multi-
         // dimensional array.
-        State = State->bindDefault(loc::MemRegionVal(Target), ZeroVal, LCtx);
+        State = State->bindDefault(loc::MemRegionVal(Target), ZeroVal);
         Bldr.generateNode(CE, *I, State, /*tag=*/nullptr,
                           ProgramPoint::PreStmtKind);
       }
@@ -512,8 +512,7 @@ void ExprEngine::VisitCXXNewExpr(const CXXNewExpr *CNE, ExplodedNode *Pred,
   if (CNE->isArray()) {
     // FIXME: allocating an array requires simulating the constructors.
     // For now, just return a symbolicated region.
-    const SubRegion *NewReg =
-        symVal.castAs<loc::MemRegionVal>().getRegionAs<SubRegion>();
+    const MemRegion *NewReg = symVal.castAs<loc::MemRegionVal>().getRegion();
     QualType ObjTy = CNE->getType()->getAs<PointerType>()->getPointeeType();
     const ElementRegion *EleReg =
       getStoreManager().GetElementZeroRegion(NewReg, ObjTy);
@@ -573,7 +572,7 @@ void ExprEngine::VisitCXXCatchStmt(const CXXCatchStmt *CS,
   SVal V = svalBuilder.conjureSymbolVal(CS, LCtx, VD->getType(),
                                         currBldrCtx->blockCount());
   ProgramStateRef state = Pred->getState();
-  state = state->bindLoc(state->getLValue(VD, LCtx), V, LCtx);
+  state = state->bindLoc(state->getLValue(VD, LCtx), V);
 
   StmtNodeBuilder Bldr(Pred, Dst, *currBldrCtx);
   Bldr.generateNode(CS, Pred, state);
@@ -628,7 +627,7 @@ void ExprEngine::VisitLambdaExpr(const LambdaExpr *LE, ExplodedNode *Pred,
       InitVal = State->getSVal(SizeExpr, LocCtxt);
     }
 
-    State = State->bindLoc(FieldLoc, InitVal, LocCtxt);
+    State = State->bindLoc(FieldLoc, InitVal);
   }
 
   // Decay the Loc into an RValue, because there might be a

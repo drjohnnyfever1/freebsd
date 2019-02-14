@@ -1,12 +1,4 @@
-add_lldb_library(lldbPluginOCamlLanguage PLUGIN
+add_lldb_library(lldbPluginOCamlLanguage
   OCamlLanguage.cpp
-
-  LINK_LIBS
-    lldbCore
-    lldbDataFormatters
-    lldbSymbol
-    lldbTarget
-  LINK_COMPONENTS
-    Support
 )
 

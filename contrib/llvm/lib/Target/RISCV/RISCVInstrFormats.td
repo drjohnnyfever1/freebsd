@@ -44,9 +44,8 @@ class RISCVInst<dag outs, dag ins, string asmstr, list<dag> pattern>
 
 // Pseudo instructions
 class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
-    : RISCVInst<outs, ins, "", pattern> {
+    : RISCVInst<outs, ins, asmstr, pattern> {
   let isPseudo = 1;
-  let isCodeGenOnly = 1;
 }
 
 class FR<bits<7> funct7, bits<3> funct3, bits<7> opcode, dag outs, dag ins,

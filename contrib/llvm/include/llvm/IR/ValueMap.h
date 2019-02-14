@@ -46,6 +46,7 @@ namespace llvm {
 
 template<typename KeyT, typename ValueT, typename Config>
 class ValueMapCallbackVH;
+
 template<typename DenseMapT, typename KeyT>
 class ValueMapIterator;
 template<typename DenseMapT, typename KeyT>
@@ -56,7 +57,7 @@ class ValueMapConstIterator;
 /// as possible with future versions of ValueMap.
 template<typename KeyT, typename MutexT = sys::Mutex>
 struct ValueMapConfig {
-  using mutex_type = MutexT;
+  typedef MutexT mutex_type;
 
   /// If FollowRAUW is true, the ValueMap will update mappings on RAUW. If it's
   /// false, the ValueMap will leave the original mapping in place.
@@ -86,21 +87,21 @@ template<typename KeyT, typename ValueT, typename Config =ValueMapConfig<KeyT>>
 class ValueMap {
   friend class ValueMapCallbackVH<KeyT, ValueT, Config>;
 
-  using ValueMapCVH = ValueMapCallbackVH<KeyT, ValueT, Config>;
-  using MapT = DenseMap<ValueMapCVH, ValueT, DenseMapInfo<ValueMapCVH>>;
-  using MDMapT = DenseMap<const Metadata *, TrackingMDRef>;
-  using ExtraData = typename Config::ExtraData;
-
+  typedef ValueMapCallbackVH<KeyT, ValueT, Config> ValueMapCVH;
+  typedef DenseMap<ValueMapCVH, ValueT, DenseMapInfo<ValueMapCVH>> MapT;
+  typedef DenseMap<const Metadata *, TrackingMDRef> MDMapT;
+  typedef typename Config::ExtraData ExtraData;
   MapT Map;
   Optional<MDMapT> MDMap;
   ExtraData Data;
+
   bool MayMapMetadata = true;
 
 public:
-  using key_type = KeyT;
-  using mapped_type = ValueT;
-  using value_type = std::pair<KeyT, ValueT>;
-  using size_type = unsigned;
+  typedef KeyT key_type;
+  typedef ValueT mapped_type;
+  typedef std::pair<KeyT, ValueT> value_type;
+  typedef unsigned size_type;
 
   explicit ValueMap(unsigned NumInitBuckets = 64)
       : Map(NumInitBuckets), Data() {}
@@ -131,9 +132,8 @@ public:
     return Where->second.get();
   }
 
-  using iterator = ValueMapIterator<MapT, KeyT>;
-  using const_iterator = ValueMapConstIterator<MapT, KeyT>;
-
+  typedef ValueMapIterator<MapT, KeyT> iterator;
+  typedef ValueMapConstIterator<MapT, KeyT> const_iterator;
   inline iterator begin() { return iterator(Map.begin()); }
   inline iterator end() { return iterator(Map.end()); }
   inline const_iterator begin() const { return const_iterator(Map.begin()); }
@@ -244,8 +244,8 @@ class ValueMapCallbackVH final : public CallbackVH {
   friend class ValueMap<KeyT, ValueT, Config>;
   friend struct DenseMapInfo<ValueMapCallbackVH>;
 
-  using ValueMapT = ValueMap<KeyT, ValueT, Config>;
-  using KeySansPointerT = typename std::remove_pointer<KeyT>::type;
+  typedef ValueMap<KeyT, ValueT, Config> ValueMapT;
+  typedef typename std::remove_pointer<KeyT>::type KeySansPointerT;
 
   ValueMapT *Map;
 
@@ -298,7 +298,7 @@ public:
 
 template<typename KeyT, typename ValueT, typename Config>
 struct DenseMapInfo<ValueMapCallbackVH<KeyT, ValueT, Config>> {
-  using VH = ValueMapCallbackVH<KeyT, ValueT, Config>;
+  typedef ValueMapCallbackVH<KeyT, ValueT, Config> VH;
 
   static inline VH getEmptyKey() {
     return VH(DenseMapInfo<Value *>::getEmptyKey());
@@ -330,8 +330,8 @@ class ValueMapIterator :
     public std::iterator<std::forward_iterator_tag,
                          std::pair<KeyT, typename DenseMapT::mapped_type>,
                          ptrdiff_t> {
-  using BaseT = typename DenseMapT::iterator;
-  using ValueT = typename DenseMapT::mapped_type;
+  typedef typename DenseMapT::iterator BaseT;
+  typedef typename DenseMapT::mapped_type ValueT;
 
   BaseT I;
 
@@ -344,9 +344,7 @@ public:
   struct ValueTypeProxy {
     const KeyT first;
     ValueT& second;
-
     ValueTypeProxy *operator->() { return this; }
-
     operator std::pair<KeyT, ValueT>() const {
       return std::make_pair(first, second);
     }
@@ -382,8 +380,8 @@ class ValueMapConstIterator :
     public std::iterator<std::forward_iterator_tag,
                          std::pair<KeyT, typename DenseMapT::mapped_type>,
                          ptrdiff_t> {
-  using BaseT = typename DenseMapT::const_iterator;
-  using ValueT = typename DenseMapT::mapped_type;
+  typedef typename DenseMapT::const_iterator BaseT;
+  typedef typename DenseMapT::mapped_type ValueT;
 
   BaseT I;
 

@@ -12,9 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SIMachineScheduler.h"
 #include "AMDGPU.h"
 #include "SIInstrInfo.h"
+#include "SIMachineScheduler.h"
 #include "SIRegisterInfo.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -38,7 +38,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "machine-scheduler"
+#define DEBUG_TYPE "misched"
 
 // This scheduler implements a different scheduling algorithm than
 // GenericScheduler.
@@ -539,30 +539,21 @@ void SIScheduleBlock::addPred(SIScheduleBlock *Pred) {
   Preds.push_back(Pred);
 
   assert(none_of(Succs,
-                 [=](std::pair<SIScheduleBlock*,
-                     SIScheduleBlockLinkKind> S) {
-                   return PredID == S.first->getID();
-                    }) &&
+                 [=](SIScheduleBlock *S) { return PredID == S->getID(); }) &&
          "Loop in the Block Graph!");
 }
 
-void SIScheduleBlock::addSucc(SIScheduleBlock *Succ,
-                              SIScheduleBlockLinkKind Kind) {
+void SIScheduleBlock::addSucc(SIScheduleBlock *Succ) {
   unsigned SuccID = Succ->getID();
 
   // Check if not already predecessor.
-  for (std::pair<SIScheduleBlock*, SIScheduleBlockLinkKind> &S : Succs) {
-    if (SuccID == S.first->getID()) {
-      if (S.second == SIScheduleBlockLinkKind::NoData &&
-          Kind == SIScheduleBlockLinkKind::Data)
-        S.second = Kind;
+  for (SIScheduleBlock* S : Succs) {
+    if (SuccID == S->getID())
       return;
-    }
   }
   if (Succ->isHighLatencyBlock())
     ++NumHighLatencySuccessors;
-  Succs.push_back(std::make_pair(Succ, Kind));
-
+  Succs.push_back(Succ);
   assert(none_of(Preds,
                  [=](SIScheduleBlock *P) { return SuccID == P->getID(); }) &&
          "Loop in the Block Graph!");
@@ -582,10 +573,8 @@ void SIScheduleBlock::printDebug(bool full) {
   }
 
   dbgs() << "\nSuccessors:\n";
-  for (std::pair<SIScheduleBlock*, SIScheduleBlockLinkKind> S : Succs) {
-    if (S.second == SIScheduleBlockLinkKind::Data)
-      dbgs() << "(Data Dep) ";
-    S.first->printDebug(false);
+  for (SIScheduleBlock* S : Succs) {
+    S->printDebug(false);
   }
 
   if (Scheduled) {
@@ -662,21 +651,11 @@ void SIScheduleBlockCreator::colorHighLatenciesAlone() {
   }
 }
 
-static bool
-hasDataDependencyPred(const SUnit &SU, const SUnit &FromSU) {
-  for (const auto &PredDep : SU.Preds) {
-    if (PredDep.getSUnit() == &FromSU &&
-        PredDep.getKind() == llvm::SDep::Data)
-      return true;
-  }
-  return false;
-}
-
 void SIScheduleBlockCreator::colorHighLatenciesGroups() {
   unsigned DAGSize = DAG->SUnits.size();
   unsigned NumHighLatencies = 0;
   unsigned GroupSize;
-  int Color = NextReservedID;
+  unsigned Color = NextReservedID;
   unsigned Count = 0;
   std::set<unsigned> FormingGroup;
 
@@ -696,102 +675,35 @@ void SIScheduleBlockCreator::colorHighLatenciesGroups() {
   else
     GroupSize = 4;
 
-  for (unsigned SUNum : DAG->TopDownIndex2SU) {
-    const SUnit &SU = DAG->SUnits[SUNum];
-    if (DAG->IsHighLatencySU[SU.NodeNum]) {
+  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
+    SUnit *SU = &DAG->SUnits[i];
+    if (DAG->IsHighLatencySU[SU->NodeNum]) {
       unsigned CompatibleGroup = true;
-      int ProposedColor = Color;
-      std::vector<int> AdditionalElements;
-
-      // We don't want to put in the same block
-      // two high latency instructions that depend
-      // on each other.
-      // One way would be to check canAddEdge
-      // in both directions, but that currently is not
-      // enough because there the high latency order is
-      // enforced (via links).
-      // Instead, look at the dependencies between the
-      // high latency instructions and deduce if it is
-      // a data dependency or not.
+      unsigned ProposedColor = Color;
       for (unsigned j : FormingGroup) {
-        bool HasSubGraph;
-        std::vector<int> SubGraph;
-        // By construction (topological order), if SU and
-        // DAG->SUnits[j] are linked, DAG->SUnits[j] is neccessary
-        // in the parent graph of SU.
-#ifndef NDEBUG
-        SubGraph = DAG->GetTopo()->GetSubGraph(SU, DAG->SUnits[j],
-                                               HasSubGraph);
-        assert(!HasSubGraph);
-#endif
-        SubGraph = DAG->GetTopo()->GetSubGraph(DAG->SUnits[j], SU,
-                                               HasSubGraph);
-        if (!HasSubGraph)
-          continue; // No dependencies between each other
-        else if (SubGraph.size() > 5) {
-          // Too many elements would be required to be added to the block.
+        // TODO: Currently CompatibleGroup will always be false,
+        // because the graph enforces the load order. This
+        // can be fixed, but as keeping the load order is often
+        // good for performance that causes a performance hit (both
+        // the default scheduler and this scheduler).
+        // When this scheduler determines a good load order,
+        // this can be fixed.
+        if (!DAG->canAddEdge(SU, &DAG->SUnits[j]) ||
+            !DAG->canAddEdge(&DAG->SUnits[j], SU))
           CompatibleGroup = false;
-          break;
-        }
-        else {
-          // Check the type of dependency
-          for (unsigned k : SubGraph) {
-            // If in the path to join the two instructions,
-            // there is another high latency instruction,
-            // or instructions colored for another block
-            // abort the merge.
-            if (DAG->IsHighLatencySU[k] ||
-                (CurrentColoring[k] != ProposedColor &&
-                 CurrentColoring[k] != 0)) {
-              CompatibleGroup = false;
-              break;
-            }
-            // If one of the SU in the subgraph depends on the result of SU j,
-            // there'll be a data dependency.
-            if (hasDataDependencyPred(DAG->SUnits[k], DAG->SUnits[j])) {
-              CompatibleGroup = false;
-              break;
-            }
-          }
-          if (!CompatibleGroup)
-            break;
-          // Same check for the SU
-          if (hasDataDependencyPred(SU, DAG->SUnits[j])) {
-            CompatibleGroup = false;
-            break;
-          }
-          // Add all the required instructions to the block
-          // These cannot live in another block (because they
-          // depend (order dependency) on one of the
-          // instruction in the block, and are required for the
-          // high latency instruction we add.
-          AdditionalElements.insert(AdditionalElements.end(),
-                                    SubGraph.begin(), SubGraph.end());
-        }
       }
-      if (CompatibleGroup) {
-        FormingGroup.insert(SU.NodeNum);
-        for (unsigned j : AdditionalElements)
-          CurrentColoring[j] = ProposedColor;
-        CurrentColoring[SU.NodeNum] = ProposedColor;
-        ++Count;
-      }
-      // Found one incompatible instruction,
-      // or has filled a big enough group.
-      // -> start a new one.
-      if (!CompatibleGroup) {
+      if (!CompatibleGroup || ++Count == GroupSize) {
         FormingGroup.clear();
         Color = ++NextReservedID;
-        ProposedColor = Color;
-        FormingGroup.insert(SU.NodeNum);
-        CurrentColoring[SU.NodeNum] = ProposedColor;
+        if (!CompatibleGroup) {
+          ProposedColor = Color;
+          FormingGroup.insert(SU->NodeNum);
+        }
         Count = 0;
-      } else if (Count == GroupSize) {
-        FormingGroup.clear();
-        Color = ++NextReservedID;
-        ProposedColor = Color;
-        Count = 0;
+      } else {
+        FormingGroup.insert(SU->NodeNum);
       }
+      CurrentColoring[SU->NodeNum] = ProposedColor;
     }
   }
 }
@@ -923,17 +835,6 @@ void SIScheduleBlockCreator::colorEndsAccordingToDependencies() {
   unsigned DAGSize = DAG->SUnits.size();
   std::vector<int> PendingColoring = CurrentColoring;
 
-  assert(DAGSize >= 1 &&
-         CurrentBottomUpReservedDependencyColoring.size() == DAGSize &&
-         CurrentTopDownReservedDependencyColoring.size() == DAGSize);
-  // If there is no reserved block at all, do nothing. We don't want
-  // everything in one block.
-  if (*std::max_element(CurrentBottomUpReservedDependencyColoring.begin(),
-                        CurrentBottomUpReservedDependencyColoring.end()) == 0 &&
-      *std::max_element(CurrentTopDownReservedDependencyColoring.begin(),
-                        CurrentTopDownReservedDependencyColoring.end()) == 0)
-    return;
-
   for (unsigned SUNum : DAG->BottomUpIndex2SU) {
     SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
@@ -955,9 +856,6 @@ void SIScheduleBlockCreator::colorEndsAccordingToDependencies() {
         SUColors.insert(CurrentColoring[Succ->NodeNum]);
       SUColorsPending.insert(PendingColoring[Succ->NodeNum]);
     }
-    // If there is only one child/parent block, and that block
-    // is not among the ones we are removing in this path, then
-    // merge the instruction to that block
     if (SUColors.size() == 1 && SUColorsPending.size() == 1)
       PendingColoring[SU->NodeNum] = *SUColors.begin();
     else // TODO: Attribute new colors depending on color
@@ -1076,7 +974,12 @@ void SIScheduleBlockCreator::colorMergeIfPossibleSmallGroupsToNextGroup() {
   for (unsigned SUNum : DAG->BottomUpIndex2SU) {
     SUnit *SU = &DAG->SUnits[SUNum];
     unsigned color = CurrentColoring[SU->NodeNum];
-     ++ColorCount[color];
+    std::map<unsigned, unsigned>::iterator Pos = ColorCount.find(color);
+      if (Pos != ColorCount.end()) {
+        ++ColorCount[color];
+      } else {
+        ColorCount[color] = 1;
+      }
   }
 
   for (unsigned SUNum : DAG->BottomUpIndex2SU) {
@@ -1184,8 +1087,7 @@ void SIScheduleBlockCreator::createBlocksForVariant(SISchedulerBlockCreatorVaria
       if (SuccDep.isWeak() || Succ->NodeNum >= DAGSize)
         continue;
       if (Node2CurrentBlock[Succ->NodeNum] != SUID)
-        CurrentBlocks[SUID]->addSucc(CurrentBlocks[Node2CurrentBlock[Succ->NodeNum]],
-                                     SuccDep.isCtrl() ? NoData : Data);
+        CurrentBlocks[SUID]->addSucc(CurrentBlocks[Node2CurrentBlock[Succ->NodeNum]]);
     }
     for (SDep& PredDep : SU->Preds) {
       SUnit *Pred = PredDep.getSUnit();
@@ -1379,8 +1281,10 @@ void SIScheduleBlockCreator::fillStats() {
       Block->Height = 0;
     else {
       unsigned Height = 0;
-      for (const auto &Succ : Block->getSuccs())
-        Height = std::min(Height, Succ.first->Height + 1);
+      for (SIScheduleBlock *Succ : Block->getSuccs()) {
+        if (Height < Succ->Height + 1)
+          Height = Succ->Height + 1;
+      }
       Block->Height = Height;
     }
   }
@@ -1427,7 +1331,13 @@ SIScheduleBlockScheduler::SIScheduleBlockScheduler(SIScheduleDAGMI *DAG,
         continue;
 
       int PredID = BlocksStruct.TopDownIndex2Block[topoInd];
-      ++LiveOutRegsNumUsages[PredID][Reg];
+      std::map<unsigned, unsigned>::iterator RegPos =
+        LiveOutRegsNumUsages[PredID].find(Reg);
+      if (RegPos != LiveOutRegsNumUsages[PredID].end()) {
+        ++LiveOutRegsNumUsages[PredID][Reg];
+      } else {
+        LiveOutRegsNumUsages[PredID][Reg] = 1;
+      }
     }
   }
 
@@ -1451,24 +1361,6 @@ SIScheduleBlockScheduler::SIScheduleBlockScheduler(SIScheduleDAGMI *DAG,
   std::set<unsigned> InRegs = DAG->getInRegs();
   addLiveRegs(InRegs);
 
-  // Increase LiveOutRegsNumUsages for blocks
-  // producing registers consumed in another
-  // scheduling region.
-  for (unsigned Reg : DAG->getOutRegs()) {
-    for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
-      // Do reverse traversal
-      int ID = BlocksStruct.TopDownIndex2Block[Blocks.size()-1-i];
-      SIScheduleBlock *Block = Blocks[ID];
-      const std::set<unsigned> &OutRegs = Block->getOutRegs();
-
-      if (OutRegs.find(Reg) == OutRegs.end())
-        continue;
-
-      ++LiveOutRegsNumUsages[ID][Reg];
-      break;
-    }
-  }
-
   // Fill LiveRegsConsumers for regs that were already
   // defined before scheduling.
   for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
@@ -1485,8 +1377,12 @@ SIScheduleBlockScheduler::SIScheduleBlockScheduler(SIScheduleDAGMI *DAG,
         }
       }
 
-      if (!Found)
-        ++LiveRegsConsumers[Reg];
+      if (!Found) {
+        if (LiveRegsConsumers.find(Reg) == LiveRegsConsumers.end())
+          LiveRegsConsumers[Reg] = 1;
+        else
+          ++LiveRegsConsumers[Reg];
+      }
     }
   }
 
@@ -1507,7 +1403,6 @@ SIScheduleBlockScheduler::SIScheduleBlockScheduler(SIScheduleDAGMI *DAG,
     for (SIScheduleBlock* Block : BlocksScheduled) {
       dbgs() << ' ' << Block->getID();
     }
-    dbgs() << '\n';
   );
 }
 
@@ -1569,8 +1464,8 @@ SIScheduleBlock *SIScheduleBlockScheduler::pickBlock() {
                         VregCurrentUsage, SregCurrentUsage);
   if (VregCurrentUsage > maxVregUsage)
     maxVregUsage = VregCurrentUsage;
-  if (SregCurrentUsage > maxSregUsage)
-    maxSregUsage = SregCurrentUsage;
+  if (VregCurrentUsage > maxSregUsage)
+    maxSregUsage = VregCurrentUsage;
   DEBUG(
     dbgs() << "Picking New Blocks\n";
     dbgs() << "Available: ";
@@ -1661,13 +1556,17 @@ void SIScheduleBlockScheduler::decreaseLiveRegs(SIScheduleBlock *Block,
 }
 
 void SIScheduleBlockScheduler::releaseBlockSuccs(SIScheduleBlock *Parent) {
-  for (const auto &Block : Parent->getSuccs()) {
-    if (--BlockNumPredsLeft[Block.first->getID()] == 0)
-      ReadyBlocks.push_back(Block.first);
-
-    if (Parent->isHighLatencyBlock() &&
-        Block.second == SIScheduleBlockLinkKind::Data)
-      LastPosHighLatencyParentScheduled[Block.first->getID()] = NumBlockScheduled;
+  for (SIScheduleBlock* Block : Parent->getSuccs()) {
+    --BlockNumPredsLeft[Block->getID()];
+    if (BlockNumPredsLeft[Block->getID()] == 0) {
+      ReadyBlocks.push_back(Block);
+    }
+    // TODO: Improve check. When the dependency between the high latency
+    // instructions and the instructions of the other blocks are WAR or WAW
+    // there will be no wait triggered. We would like these cases to not
+    // update LastPosHighLatencyParentScheduled.
+    if (Parent->isHighLatencyBlock())
+      LastPosHighLatencyParentScheduled[Block->getID()] = NumBlockScheduled;
   }
 }
 
@@ -1679,10 +1578,12 @@ void SIScheduleBlockScheduler::blockScheduled(SIScheduleBlock *Block) {
        LiveOutRegsNumUsages[Block->getID()].begin(),
        E = LiveOutRegsNumUsages[Block->getID()].end(); RegI != E; ++RegI) {
     std::pair<unsigned, unsigned> RegP = *RegI;
-    // We produce this register, thus it must not be previously alive.
-    assert(LiveRegsConsumers.find(RegP.first) == LiveRegsConsumers.end() ||
-           LiveRegsConsumers[RegP.first] == 0);
-    LiveRegsConsumers[RegP.first] += RegP.second;
+    if (LiveRegsConsumers.find(RegP.first) == LiveRegsConsumers.end())
+      LiveRegsConsumers[RegP.first] = RegP.second;
+    else {
+      assert(LiveRegsConsumers[RegP.first] == 0);
+      LiveRegsConsumers[RegP.first] += RegP.second;
+    }
   }
   if (LastPosHighLatencyParentScheduled[Block->getID()] >
         (unsigned)LastPosWaitedHighLatency)
@@ -1924,9 +1825,7 @@ void SIScheduleDAGMI::schedule()
   // if VGPR usage is extremely high, try other good performing variants
   // which could lead to lower VGPR usage
   if (Best.MaxVGPRUsage > 180) {
-    static const std::pair<SISchedulerBlockCreatorVariant,
-                           SISchedulerBlockSchedulerVariant>
-        Variants[] = {
+    std::vector<std::pair<SISchedulerBlockCreatorVariant, SISchedulerBlockSchedulerVariant>> Variants = {
       { LatenciesAlone, BlockRegUsageLatency },
 //      { LatenciesAlone, BlockRegUsage },
       { LatenciesGrouped, BlockLatencyRegUsage },
@@ -1945,9 +1844,7 @@ void SIScheduleDAGMI::schedule()
   // if VGPR usage is still extremely high, we may spill. Try other variants
   // which are less performing, but that could lead to lower VGPR usage.
   if (Best.MaxVGPRUsage > 200) {
-    static const std::pair<SISchedulerBlockCreatorVariant,
-                           SISchedulerBlockSchedulerVariant>
-        Variants[] = {
+    std::vector<std::pair<SISchedulerBlockCreatorVariant, SISchedulerBlockSchedulerVariant>> Variants = {
 //      { LatenciesAlone, BlockRegUsageLatency },
       { LatenciesAlone, BlockRegUsage },
 //      { LatenciesGrouped, BlockLatencyRegUsage },

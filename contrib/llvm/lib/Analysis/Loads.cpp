@@ -117,16 +117,6 @@ static bool isDereferenceableAndAlignedPointer(
 }
 
 bool llvm::isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
-                                              const APInt &Size,
-                                              const DataLayout &DL,
-                                              const Instruction *CtxI,
-                                              const DominatorTree *DT) {
-  SmallPtrSet<const Value *, 32> Visited;
-  return ::isDereferenceableAndAlignedPointer(V, Align, Size, DL, CtxI, DT,
-                                              Visited);
-}
-
-bool llvm::isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
                                               const DataLayout &DL,
                                               const Instruction *CtxI,
                                               const DominatorTree *DT) {
@@ -322,25 +312,20 @@ Value *llvm::FindAvailableLoadedValue(LoadInst *Load,
                                       BasicBlock *ScanBB,
                                       BasicBlock::iterator &ScanFrom,
                                       unsigned MaxInstsToScan,
-                                      AliasAnalysis *AA, bool *IsLoad,
-                                      unsigned *NumScanedInst) {
-  // Don't CSE load that is volatile or anything stronger than unordered.
-  if (!Load->isUnordered())
-    return nullptr;
-
-  return FindAvailablePtrLoadStore(
-      Load->getPointerOperand(), Load->getType(), Load->isAtomic(), ScanBB,
-      ScanFrom, MaxInstsToScan, AA, IsLoad, NumScanedInst);
-}
-
-Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
-                                       bool AtLeastAtomic, BasicBlock *ScanBB,
-                                       BasicBlock::iterator &ScanFrom,
-                                       unsigned MaxInstsToScan,
-                                       AliasAnalysis *AA, bool *IsLoadCSE,
-                                       unsigned *NumScanedInst) {
+                                      AliasAnalysis *AA, bool *IsLoadCSE) {
   if (MaxInstsToScan == 0)
     MaxInstsToScan = ~0U;
+
+  Value *Ptr = Load->getPointerOperand();
+  Type *AccessTy = Load->getType();
+
+  // We can never remove a volatile load
+  if (Load->isVolatile())
+    return nullptr;
+
+  // Anything stronger than unordered is currently unimplemented.
+  if (!Load->isUnordered())
+    return nullptr;
 
   const DataLayout &DL = ScanBB->getModule()->getDataLayout();
 
@@ -359,9 +344,6 @@ Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
     // Restore ScanFrom to expected value in case next test succeeds
     ScanFrom++;
 
-    if (NumScanedInst)
-      ++(*NumScanedInst);
-
     // Don't scan huge blocks.
     if (MaxInstsToScan-- == 0)
       return nullptr;
@@ -377,7 +359,7 @@ Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
 
         // We can value forward from an atomic to a non-atomic, but not the
         // other way around.
-        if (LI->isAtomic() < AtLeastAtomic)
+        if (LI->isAtomic() < Load->isAtomic())
           return nullptr;
 
         if (IsLoadCSE)
@@ -396,7 +378,7 @@ Value *llvm::FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy,
 
         // We can value forward from an atomic to a non-atomic, but not the
         // other way around.
-        if (SI->isAtomic() < AtLeastAtomic)
+        if (SI->isAtomic() < Load->isAtomic())
           return nullptr;
 
         if (IsLoadCSE)

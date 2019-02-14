@@ -24,21 +24,12 @@
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/ilist.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBundle.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Allocator.h"
-#include <algorithm>
-#include <cassert>
-#include <iterator>
-#include <utility>
 
 namespace llvm {
-
-class raw_ostream;
 
   /// This class represents an entry in the slot index list held in the
   /// SlotIndexes pass. It should not be used directly. See the
@@ -49,6 +40,7 @@ class raw_ostream;
     unsigned index;
 
   public:
+
     IndexListEntry(MachineInstr *mi, unsigned index) : mi(mi), index(index) {}
 
     MachineInstr* getInstr() const { return mi; }
@@ -309,7 +301,7 @@ class raw_ostream;
     return os;
   }
 
-  using IdxMBBPair = std::pair<SlotIndex, MachineBasicBlock *>;
+  typedef std::pair<SlotIndex, MachineBasicBlock*> IdxMBBPair;
 
   inline bool operator<(SlotIndex V, const IdxMBBPair &IM) {
     return V < IM.first;
@@ -333,7 +325,7 @@ class raw_ostream;
     // IndexListEntry allocator.
     BumpPtrAllocator ileAllocator;
 
-    using IndexList = ilist<IndexListEntry>;
+    typedef ilist<IndexListEntry> IndexList;
     IndexList indexList;
 
 #ifdef EXPENSIVE_CHECKS
@@ -342,7 +334,7 @@ class raw_ostream;
 
     MachineFunction *mf;
 
-    using Mi2IndexMap = DenseMap<const MachineInstr *, SlotIndex>;
+    typedef DenseMap<const MachineInstr*, SlotIndex> Mi2IndexMap;
     Mi2IndexMap mi2iMap;
 
     /// MBBRanges - Map MBB number to (start, stop) indexes.
@@ -444,7 +436,7 @@ class raw_ostream;
       const MachineBasicBlock *MBB = MI.getParent();
       assert(MBB && "MI must be inserted inna basic block");
       MachineBasicBlock::const_iterator I = MI, B = MBB->begin();
-      while (true) {
+      for (;;) {
         if (I == B)
           return getMBBStartIdx(MBB);
         --I;
@@ -461,7 +453,7 @@ class raw_ostream;
       const MachineBasicBlock *MBB = MI.getParent();
       assert(MBB && "MI must be inserted inna basic block");
       MachineBasicBlock::const_iterator I = MI, E = MBB->end();
-      while (true) {
+      for (;;) {
         ++I;
         if (I == E)
           return getMBBEndIdx(MBB);
@@ -505,25 +497,21 @@ class raw_ostream;
 
     /// Iterator over the idx2MBBMap (sorted pairs of slot index of basic block
     /// begin and basic block)
-    using MBBIndexIterator = SmallVectorImpl<IdxMBBPair>::const_iterator;
-
+    typedef SmallVectorImpl<IdxMBBPair>::const_iterator MBBIndexIterator;
     /// Move iterator to the next IdxMBBPair where the SlotIndex is greater or
     /// equal to \p To.
     MBBIndexIterator advanceMBBIndex(MBBIndexIterator I, SlotIndex To) const {
       return std::lower_bound(I, idx2MBBMap.end(), To);
     }
-
     /// Get an iterator pointing to the IdxMBBPair with the biggest SlotIndex
     /// that is greater or equal to \p Idx.
     MBBIndexIterator findMBBIndex(SlotIndex Idx) const {
       return advanceMBBIndex(idx2MBBMap.begin(), Idx);
     }
-
     /// Returns an iterator for the begin of the idx2MBBMap.
     MBBIndexIterator MBBIndexBegin() const {
       return idx2MBBMap.begin();
     }
-
     /// Return an iterator for the end of the idx2MBBMap.
     MBBIndexIterator MBBIndexEnd() const {
       return idx2MBBMap.end();
@@ -614,15 +602,19 @@ class raw_ostream;
       return newIndex;
     }
 
-    /// Removes machine instruction (bundle) \p MI from the mapping.
-    /// This should be called before MachineInstr::eraseFromParent() is used to
-    /// remove a whole bundle or an unbundled instruction.
-    void removeMachineInstrFromMaps(MachineInstr &MI);
-
-    /// Removes a single machine instruction \p MI from the mapping.
-    /// This should be called before MachineInstr::eraseFromBundle() is used to
-    /// remove a single instruction (out of a bundle).
-    void removeSingleMachineInstrFromMaps(MachineInstr &MI);
+    /// Remove the given machine instruction from the mapping.
+    void removeMachineInstrFromMaps(MachineInstr &MI) {
+      // remove index -> MachineInstr and
+      // MachineInstr -> index mappings
+      Mi2IndexMap::iterator mi2iItr = mi2iMap.find(&MI);
+      if (mi2iItr != mi2iMap.end()) {
+        IndexListEntry *miEntry(mi2iItr->second.listEntry());
+        assert(miEntry->getInstr() == &MI && "Instruction indexes broken.");
+        // FIXME: Eventually we want to actually delete these indexes.
+        miEntry->setInstr(nullptr);
+        mi2iMap.erase(mi2iItr);
+      }
+    }
 
     /// ReplaceMachineInstrInMaps - Replacing a machine instr with a new one in
     /// maps used by register allocator. \returns the index where the new

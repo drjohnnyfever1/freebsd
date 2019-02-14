@@ -1,4 +1,4 @@
-//===- DWARFAbbreviationDeclaration.h ---------------------------*- C++ -*-===//
+//===-- DWARFAbbreviationDeclaration.h --------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,22 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_DEBUGINFO_DWARFABBREVIATIONDECLARATION_H
-#define LLVM_DEBUGINFO_DWARFABBREVIATIONDECLARATION_H
+#ifndef LLVM_LIB_DEBUGINFO_DWARFABBREVIATIONDECLARATION_H
+#define LLVM_LIB_DEBUGINFO_DWARFABBREVIATIONDECLARATION_H
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/iterator_range.h"
-#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/DataExtractor.h"
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-
+#include "llvm/Support/Dwarf.h"
 namespace llvm {
 
-class DWARFFormValue;
 class DWARFUnit;
+class DWARFFormValue;
 class raw_ostream;
 
 class DWARFAbbreviationDeclaration {
@@ -30,10 +25,8 @@ public:
   struct AttributeSpec {
     AttributeSpec(dwarf::Attribute A, dwarf::Form F, Optional<int64_t> V)
         : Attr(A), Form(F), ByteSizeOrValue(V) {}
-
     dwarf::Attribute Attr;
     dwarf::Form Form;
-
     /// The following field is used for ByteSize for non-implicit_const
     /// attributes and as value for implicit_const ones, indicated by
     /// Form == DW_FORM_implicit_const.
@@ -48,45 +41,34 @@ public:
     /// * Form == DW_FORM_implicit_const:
     ///     ByteSizeOrValue contains value for the implicit_const attribute.
     Optional<int64_t> ByteSizeOrValue;
-
     bool isImplicitConst() const {
       return Form == dwarf::DW_FORM_implicit_const;
     }
-
     /// Get the fixed byte size of this Form if possible. This function might
     /// use the DWARFUnit to calculate the size of the Form, like for
     /// DW_AT_address and DW_AT_ref_addr, so this isn't just an accessor for
     /// the ByteSize member.
     Optional<int64_t> getByteSize(const DWARFUnit &U) const;
   };
-  using AttributeSpecVector = SmallVector<AttributeSpec, 8>;
+  typedef SmallVector<AttributeSpec, 8> AttributeSpecVector;
 
   DWARFAbbreviationDeclaration();
 
   uint32_t getCode() const { return Code; }
-  uint8_t getCodeByteSize() const { return CodeByteSize; }
   dwarf::Tag getTag() const { return Tag; }
   bool hasChildren() const { return HasChildren; }
 
-  using attr_iterator_range =
-      iterator_range<AttributeSpecVector::const_iterator>;
+  typedef iterator_range<AttributeSpecVector::const_iterator>
+  attr_iterator_range;
 
   attr_iterator_range attributes() const {
     return attr_iterator_range(AttributeSpecs.begin(), AttributeSpecs.end());
   }
 
   dwarf::Form getFormByIndex(uint32_t idx) const {
-    assert(idx < AttributeSpecs.size());
-    return AttributeSpecs[idx].Form;
-  }
-
-  size_t getNumAttributes() const {
-    return AttributeSpecs.size();
-  }
-
-  dwarf::Attribute getAttrByIndex(uint32_t idx) const {
-    assert(idx < AttributeSpecs.size());
-    return AttributeSpecs[idx].Attr;
+    if (idx < AttributeSpecs.size())
+      return AttributeSpecs[idx].Form;
+    return dwarf::Form(0);
   }
 
   /// Get the index of the specified attribute.
@@ -127,16 +109,16 @@ private:
   /// abbreviation declaration.
   struct FixedSizeInfo {
     /// The fixed byte size for fixed size forms.
-    uint16_t NumBytes = 0;
+    uint16_t NumBytes;
     /// Number of DW_FORM_address forms in this abbrevation declaration.
-    uint8_t NumAddrs = 0;
+    uint8_t NumAddrs;
     /// Number of DW_FORM_ref_addr forms in this abbrevation declaration.
-    uint8_t NumRefAddrs = 0;
+    uint8_t NumRefAddrs;
     /// Number of 4 byte in DWARF32 and 8 byte in DWARF64 forms.
-    uint8_t NumDwarfOffsets = 0;
-
-    FixedSizeInfo() = default;
-
+    uint8_t NumDwarfOffsets;
+    /// Constructor
+    FixedSizeInfo()
+        : NumBytes(0), NumAddrs(0), NumRefAddrs(0), NumDwarfOffsets(0) {}
     /// Calculate the fixed size in bytes given a DWARFUnit.
     ///
     /// \param U the DWARFUnit to use when determing the byte size.
@@ -156,6 +138,6 @@ private:
   Optional<FixedSizeInfo> FixedAttributeSize;
 };
 
-} // end namespace llvm
+}
 
-#endif // LLVM_DEBUGINFO_DWARFABBREVIATIONDECLARATION_H
+#endif

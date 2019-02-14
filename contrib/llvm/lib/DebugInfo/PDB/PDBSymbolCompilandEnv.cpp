@@ -10,8 +10,8 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolCompilandEnv.h"
 
 #include "llvm/DebugInfo/PDB/IPDBRawSymbol.h"
-#include "llvm/DebugInfo/PDB/PDBSymDumper.h"
 #include "llvm/DebugInfo/PDB/PDBSymbol.h"
+#include "llvm/DebugInfo/PDB/PDBSymDumper.h"
 
 #include <utility>
 
@@ -20,9 +20,7 @@ using namespace llvm::pdb;
 
 PDBSymbolCompilandEnv::PDBSymbolCompilandEnv(
     const IPDBSession &PDBSession, std::unique_ptr<IPDBRawSymbol> Symbol)
-    : PDBSymbol(PDBSession, std::move(Symbol)) {
-  assert(RawSymbol->getSymTag() == PDB_SymType::CompilandEnv);
-}
+    : PDBSymbol(PDBSession, std::move(Symbol)) {}
 
 std::string PDBSymbolCompilandEnv::getValue() const {
   Variant Value = RawSymbol->getValue();

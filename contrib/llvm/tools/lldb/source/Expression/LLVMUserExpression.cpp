@@ -12,8 +12,11 @@
 
 // Project includes
 #include "lldb/Expression/LLVMUserExpression.h"
+#include "lldb/Core/ConstString.h"
+#include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/StreamFile.h"
+#include "lldb/Core/StreamString.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/ExpressionSourceCode.h"
@@ -35,9 +38,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/ThreadPlan.h"
 #include "lldb/Target/ThreadPlanCallUserExpression.h"
-#include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/Log.h"
-#include "lldb/Utility/StreamString.h"
 
 using namespace lldb_private;
 
@@ -49,10 +49,7 @@ LLVMUserExpression::LLVMUserExpression(ExecutionContextScope &exe_scope,
                                        const EvaluateExpressionOptions &options)
     : UserExpression(exe_scope, expr, prefix, language, desired_type, options),
       m_stack_frame_bottom(LLDB_INVALID_ADDRESS),
-      m_stack_frame_top(LLDB_INVALID_ADDRESS),
-      m_allow_cxx(false),
-      m_allow_objc(false),
-      m_transformed_text(),
+      m_stack_frame_top(LLDB_INVALID_ADDRESS), m_transformed_text(),
       m_execution_unit_sp(), m_materializer_ap(), m_jit_module_wp(),
       m_enforce_valid_object(true), m_in_cplusplus_method(false),
       m_in_objectivec_method(false), m_in_static_method(false),
@@ -106,7 +103,7 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
         return lldb::eExpressionSetupError;
       }
 
-      Status interpreter_error;
+      Error interpreter_error;
 
       std::vector<lldb::addr_t> args;
 
@@ -270,7 +267,7 @@ bool LLVMUserExpression::FinalizeJITExecution(
     return false;
   }
 
-  Status dematerialize_error;
+  Error dematerialize_error;
 
   m_dematerializer_sp->Dematerialize(dematerialize_error, function_stack_bottom,
                                      function_stack_top);
@@ -309,7 +306,7 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
 
   if (m_jit_start_addr != LLDB_INVALID_ADDRESS || m_can_interpret) {
     if (m_materialized_address == LLDB_INVALID_ADDRESS) {
-      Status alloc_error;
+      Error alloc_error;
 
       IRMemoryMap::AllocationPolicy policy =
           m_can_interpret ? IRMemoryMap::eAllocationPolicyHostOnly
@@ -335,7 +332,7 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
     struct_address = m_materialized_address;
 
     if (m_can_interpret && m_stack_frame_bottom == LLDB_INVALID_ADDRESS) {
-      Status alloc_error;
+      Error alloc_error;
 
       const size_t stack_frame_size = 512 * 1024;
 
@@ -357,7 +354,7 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
       }
     }
 
-    Status materialize_error;
+    Error materialize_error;
 
     m_dematerializer_sp = m_materializer_ap->Materialize(
         frame, *m_execution_unit_sp, struct_address, materialize_error);

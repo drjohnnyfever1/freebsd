@@ -41,8 +41,7 @@ private:
   mutable std::unique_ptr<BuiltinBug> BT;
 
   // Is there loss of precision
-  bool isLossOfPrecision(const ImplicitCastExpr *Cast, QualType DestType,
-                         CheckerContext &C) const;
+  bool isLossOfPrecision(const ImplicitCastExpr *Cast, CheckerContext &C) const;
 
   // Is there loss of sign
   bool isLossOfSign(const ImplicitCastExpr *Cast, CheckerContext &C) const;
@@ -74,30 +73,16 @@ void ConversionChecker::checkPreStmt(const ImplicitCastExpr *Cast,
   // Loss of sign/precision in binary operation.
   if (const auto *B = dyn_cast<BinaryOperator>(Parent)) {
     BinaryOperator::Opcode Opc = B->getOpcode();
-    if (Opc == BO_Assign) {
+    if (Opc == BO_Assign || Opc == BO_AddAssign || Opc == BO_SubAssign ||
+        Opc == BO_MulAssign) {
       LossOfSign = isLossOfSign(Cast, C);
-      LossOfPrecision = isLossOfPrecision(Cast, Cast->getType(), C);
-    } else if (Opc == BO_AddAssign || Opc == BO_SubAssign) {
-      // No loss of sign.
-      LossOfPrecision = isLossOfPrecision(Cast, B->getLHS()->getType(), C);
-    } else if (Opc == BO_MulAssign) {
-      LossOfSign = isLossOfSign(Cast, C);
-      LossOfPrecision = isLossOfPrecision(Cast, B->getLHS()->getType(), C);
-    } else if (Opc == BO_DivAssign || Opc == BO_RemAssign) {
-      LossOfSign = isLossOfSign(Cast, C);
-      // No loss of precision.
-    } else if (Opc == BO_AndAssign) {
-      LossOfSign = isLossOfSign(Cast, C);
-      // No loss of precision.
-    } else if (Opc == BO_OrAssign || Opc == BO_XorAssign) {
-      LossOfSign = isLossOfSign(Cast, C);
-      LossOfPrecision = isLossOfPrecision(Cast, B->getLHS()->getType(), C);
+      LossOfPrecision = isLossOfPrecision(Cast, C);
     } else if (B->isRelationalOp() || B->isMultiplicativeOp()) {
       LossOfSign = isLossOfSign(Cast, C);
     }
   } else if (isa<DeclStmt>(Parent)) {
     LossOfSign = isLossOfSign(Cast, C);
-    LossOfPrecision = isLossOfPrecision(Cast, Cast->getType(), C);
+    LossOfPrecision = isLossOfPrecision(Cast, C);
   }
 
   if (LossOfSign || LossOfPrecision) {
@@ -128,13 +113,6 @@ static bool isGreaterEqual(CheckerContext &C, const Expr *E,
                            unsigned long long Val) {
   ProgramStateRef State = C.getState();
   SVal EVal = C.getSVal(E);
-  if (EVal.isUnknownOrUndef())
-    return false;
-  if (!EVal.getAs<NonLoc>() && EVal.getAs<Loc>()) {
-    ProgramStateManager &Mgr = C.getStateManager();
-    EVal =
-        Mgr.getStoreManager().getBinding(State->getStore(), EVal.castAs<Loc>());
-  }
   if (EVal.isUnknownOrUndef() || !EVal.getAs<NonLoc>())
     return false;
 
@@ -175,22 +153,22 @@ static bool isNegative(CheckerContext &C, const Expr *E) {
 }
 
 bool ConversionChecker::isLossOfPrecision(const ImplicitCastExpr *Cast,
-                                          QualType DestType,
-                                          CheckerContext &C) const {
+                                        CheckerContext &C) const {
   // Don't warn about explicit loss of precision.
   if (Cast->isEvaluatable(C.getASTContext()))
     return false;
 
+  QualType CastType = Cast->getType();
   QualType SubType = Cast->IgnoreParenImpCasts()->getType();
 
-  if (!DestType->isIntegerType() || !SubType->isIntegerType())
+  if (!CastType->isIntegerType() || !SubType->isIntegerType())
     return false;
 
-  if (C.getASTContext().getIntWidth(DestType) >=
+  if (C.getASTContext().getIntWidth(CastType) >=
       C.getASTContext().getIntWidth(SubType))
     return false;
 
-  unsigned W = C.getASTContext().getIntWidth(DestType);
+  unsigned W = C.getASTContext().getIntWidth(CastType);
   if (W == 1 || W >= 64U)
     return false;
 

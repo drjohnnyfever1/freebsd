@@ -46,7 +46,7 @@ namespace llvm {
     Type *getType() const { return V->getType(); }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scConstant;
     }
   };
@@ -65,7 +65,7 @@ namespace llvm {
     Type *getType() const { return Ty; }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scTruncate ||
              S->getSCEVType() == scZeroExtend ||
              S->getSCEVType() == scSignExtend;
@@ -82,7 +82,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scTruncate;
     }
   };
@@ -97,7 +97,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scZeroExtend;
     }
   };
@@ -112,7 +112,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scSignExtend;
     }
   };
@@ -167,7 +167,7 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr ||
              S->getSCEVType() == scMulExpr ||
              S->getSCEVType() == scSMaxExpr ||
@@ -185,7 +185,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr ||
              S->getSCEVType() == scMulExpr ||
              S->getSCEVType() == scSMaxExpr ||
@@ -217,7 +217,7 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr;
     }
   };
@@ -234,7 +234,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scMulExpr;
     }
   };
@@ -263,7 +263,7 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scUDivExpr;
     }
   };
@@ -345,7 +345,7 @@ namespace llvm {
     }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddRecExpr;
     }
   };
@@ -363,7 +363,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scSMaxExpr;
     }
   };
@@ -382,7 +382,7 @@ namespace llvm {
 
   public:
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scUMaxExpr;
     }
   };
@@ -428,7 +428,7 @@ namespace llvm {
     Type *getType() const { return getValPtr()->getType(); }
 
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
-    static bool classof(const SCEV *S) {
+    static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scUnknown;
     }
   };
@@ -595,82 +595,58 @@ namespace llvm {
 
     const SCEV *visitTruncateExpr(const SCEVTruncateExpr *Expr) {
       const SCEV *Operand = ((SC*)this)->visit(Expr->getOperand());
-      return Operand == Expr->getOperand()
-                 ? Expr
-                 : SE.getTruncateExpr(Operand, Expr->getType());
+      return SE.getTruncateExpr(Operand, Expr->getType());
     }
 
     const SCEV *visitZeroExtendExpr(const SCEVZeroExtendExpr *Expr) {
       const SCEV *Operand = ((SC*)this)->visit(Expr->getOperand());
-      return Operand == Expr->getOperand()
-                 ? Expr
-                 : SE.getZeroExtendExpr(Operand, Expr->getType());
+      return SE.getZeroExtendExpr(Operand, Expr->getType());
     }
 
     const SCEV *visitSignExtendExpr(const SCEVSignExtendExpr *Expr) {
       const SCEV *Operand = ((SC*)this)->visit(Expr->getOperand());
-      return Operand == Expr->getOperand()
-                 ? Expr
-                 : SE.getSignExtendExpr(Operand, Expr->getType());
+      return SE.getSignExtendExpr(Operand, Expr->getType());
     }
 
     const SCEV *visitAddExpr(const SCEVAddExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      bool Changed = false;
-      for (auto *Op : Expr->operands()) {
-        Operands.push_back(((SC*)this)->visit(Op));
-        Changed |= Op != Operands.back();
-      }
-      return !Changed ? Expr : SE.getAddExpr(Operands);
+      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
+        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
+      return SE.getAddExpr(Operands);
     }
 
     const SCEV *visitMulExpr(const SCEVMulExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      bool Changed = false;
-      for (auto *Op : Expr->operands()) {
-        Operands.push_back(((SC*)this)->visit(Op));
-        Changed |= Op != Operands.back();
-      }
-      return !Changed ? Expr : SE.getMulExpr(Operands);
+      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
+        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
+      return SE.getMulExpr(Operands);
     }
 
     const SCEV *visitUDivExpr(const SCEVUDivExpr *Expr) {
-      auto *LHS = ((SC *)this)->visit(Expr->getLHS());
-      auto *RHS = ((SC *)this)->visit(Expr->getRHS());
-      bool Changed = LHS != Expr->getLHS() || RHS != Expr->getRHS();
-      return !Changed ? Expr : SE.getUDivExpr(LHS, RHS);
+      return SE.getUDivExpr(((SC*)this)->visit(Expr->getLHS()),
+                            ((SC*)this)->visit(Expr->getRHS()));
     }
 
     const SCEV *visitAddRecExpr(const SCEVAddRecExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      bool Changed = false;
-      for (auto *Op : Expr->operands()) {
-        Operands.push_back(((SC*)this)->visit(Op));
-        Changed |= Op != Operands.back();
-      }
-      return !Changed ? Expr
-                      : SE.getAddRecExpr(Operands, Expr->getLoop(),
-                                         Expr->getNoWrapFlags());
+      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
+        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
+      return SE.getAddRecExpr(Operands, Expr->getLoop(),
+                              Expr->getNoWrapFlags());
     }
 
     const SCEV *visitSMaxExpr(const SCEVSMaxExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      bool Changed = false;
-      for (auto *Op : Expr->operands()) {
-        Operands.push_back(((SC *)this)->visit(Op));
-        Changed |= Op != Operands.back();
-      }
-      return !Changed ? Expr : SE.getSMaxExpr(Operands);
+      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
+        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
+      return SE.getSMaxExpr(Operands);
     }
 
     const SCEV *visitUMaxExpr(const SCEVUMaxExpr *Expr) {
       SmallVector<const SCEV *, 2> Operands;
-      bool Changed = false;
-      for (auto *Op : Expr->operands()) {
-        Operands.push_back(((SC*)this)->visit(Op));
-        Changed |= Op != Operands.back();
-      }
-      return !Changed ? Expr : SE.getUMaxExpr(Operands);
+      for (int i = 0, e = Expr->getNumOperands(); i < e; ++i)
+        Operands.push_back(((SC*)this)->visit(Expr->getOperand(i)));
+      return SE.getUMaxExpr(Operands);
     }
 
     const SCEV *visitUnknown(const SCEVUnknown *Expr) {

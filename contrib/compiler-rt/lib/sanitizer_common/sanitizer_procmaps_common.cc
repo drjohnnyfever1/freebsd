@@ -119,10 +119,12 @@ void MemoryMappingLayout::LoadFromCache() {
 void MemoryMappingLayout::DumpListOfModules(
     InternalMmapVector<LoadedModule> *modules) {
   Reset();
+  uptr cur_beg, cur_end, cur_offset, prot;
   InternalScopedString module_name(kMaxPathLength);
-  MemoryMappedSegment segment(module_name.data(), module_name.size());
-  for (uptr i = 0; Next(&segment); i++) {
-    const char *cur_name = segment.filename;
+  for (uptr i = 0; Next(&cur_beg, &cur_end, &cur_offset, module_name.data(),
+                        module_name.size(), &prot);
+       i++) {
+    const char *cur_name = module_name.data();
     if (cur_name[0] == '\0')
       continue;
     // Don't subtract 'cur_beg' from the first entry:
@@ -136,11 +138,10 @@ void MemoryMappingLayout::DumpListOfModules(
     //   mapped high at address space (in particular, higher than
     //   shadow memory of the tool), so the module can't be the
     //   first entry.
-    uptr base_address = (i ? segment.start : 0) - segment.offset;
+    uptr base_address = (i ? cur_beg : 0) - cur_offset;
     LoadedModule cur_module;
     cur_module.set(cur_name, base_address);
-    cur_module.addAddressRange(segment.start, segment.end,
-                               segment.IsExecutable(), segment.IsWritable());
+    cur_module.addAddressRange(cur_beg, cur_end, prot & kProtectionExecute);
     modules->push_back(cur_module);
   }
 }

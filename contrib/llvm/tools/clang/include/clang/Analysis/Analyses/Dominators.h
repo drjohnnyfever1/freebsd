@@ -38,15 +38,15 @@ typedef llvm::DomTreeNodeBase<CFGBlock> DomTreeNode;
 class DominatorTree : public ManagedAnalysis {
   virtual void anchor();
 public:
-  llvm::DomTreeBase<CFGBlock>* DT;
+  llvm::DominatorTreeBase<CFGBlock>* DT;
 
   DominatorTree() {
-    DT = new llvm::DomTreeBase<CFGBlock>();
+    DT = new llvm::DominatorTreeBase<CFGBlock>(false);
   }
 
   ~DominatorTree() override { delete DT; }
 
-  llvm::DomTreeBase<CFGBlock>& getBase() { return *DT; }
+  llvm::DominatorTreeBase<CFGBlock>& getBase() { return *DT; }
 
   /// \brief This method returns the root CFGBlock of the dominators tree.
   ///

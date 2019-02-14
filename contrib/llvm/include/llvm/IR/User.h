@@ -1,4 +1,4 @@
-//===- llvm/User.h - User class definition ----------------------*- C++ -*-===//
+//===-- llvm/User.h - User class definition ---------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -46,6 +46,8 @@ class User : public Value {
   template <unsigned>
   friend struct HungoffOperandTraits;
 
+  virtual void anchor();
+
   LLVM_ATTRIBUTE_ALWAYS_INLINE inline static void *
   allocateFixedOperandUser(size_t, unsigned, unsigned);
 
@@ -91,11 +93,9 @@ protected:
   /// should be called if there are no uses.
   void growHungoffUses(unsigned N, bool IsPhi = false);
 
-protected:
-  ~User() = default; // Use deleteValue() to delete a generic Instruction.
-
 public:
   User(const User &) = delete;
+  ~User() override = default;
 
   /// \brief Free memory allocated for User and Use objects.
   void operator delete(void *Usr);
@@ -114,7 +114,6 @@ protected:
       ? OperandTraits<U>::op_end(const_cast<U*>(that))[Idx]
       : OperandTraits<U>::op_begin(const_cast<U*>(that))[Idx];
   }
-
   template <int Idx> Use &Op() {
     return OpFrom<Idx>(this);
   }
@@ -123,15 +122,7 @@ protected:
   }
 
 private:
-  const Use *getHungOffOperands() const {
-    return *(reinterpret_cast<const Use *const *>(this) - 1);
-  }
-
   Use *&getHungOffOperands() { return *(reinterpret_cast<Use **>(this) - 1); }
-
-  const Use *getIntrusiveOperands() const {
-    return reinterpret_cast<const Use *>(this) - NumUserOperands;
-  }
 
   Use *getIntrusiveOperands() {
     return reinterpret_cast<Use *>(this) - NumUserOperands;
@@ -144,11 +135,11 @@ private:
   }
 
 public:
-  const Use *getOperandList() const {
+  Use *getOperandList() {
     return HasHungOffUses ? getHungOffOperands() : getIntrusiveOperands();
   }
-  Use *getOperandList() {
-    return const_cast<Use *>(static_cast<const User *>(this)->getOperandList());
+  const Use *getOperandList() const {
+    return const_cast<User *>(this)->getOperandList();
   }
 
   Value *getOperand(unsigned i) const {
@@ -206,10 +197,10 @@ public:
   // ---------------------------------------------------------------------------
   // Operand Iterator interface...
   //
-  using op_iterator = Use*;
-  using const_op_iterator = const Use*;
-  using op_range = iterator_range<op_iterator>;
-  using const_op_range = iterator_range<const_op_iterator>;
+  typedef Use*       op_iterator;
+  typedef const Use* const_op_iterator;
+  typedef iterator_range<op_iterator> op_range;
+  typedef iterator_range<const_op_iterator> const_op_range;
 
   op_iterator       op_begin()       { return getOperandList(); }
   const_op_iterator op_begin() const { return getOperandList(); }
@@ -253,7 +244,6 @@ public:
                               ptrdiff_t, const Value *, const Value *> {
     explicit const_value_op_iterator(const Use *U = nullptr) :
       iterator_adaptor_base(U) {}
-
     const Value *operator*() const { return *I; }
     const Value *operator->() const { return operator*(); }
   };
@@ -288,11 +278,10 @@ public:
   void replaceUsesOfWith(Value *From, Value *To);
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
-  static bool classof(const Value *V) {
+  static inline bool classof(const Value *V) {
     return isa<Instruction>(V) || isa<Constant>(V);
   }
 };
-
 // Either Use objects, or a Use pointer can be prepended to User.
 static_assert(alignof(Use) >= alignof(User),
               "Alignment is insufficient after objects prepended to User");
@@ -300,15 +289,13 @@ static_assert(alignof(Use *) >= alignof(User),
               "Alignment is insufficient after objects prepended to User");
 
 template<> struct simplify_type<User::op_iterator> {
-  using SimpleType = Value*;
-
+  typedef Value* SimpleType;
   static SimpleType getSimplifiedValue(User::op_iterator &Val) {
     return Val->get();
   }
 };
 template<> struct simplify_type<User::const_op_iterator> {
-  using SimpleType = /*const*/ Value*;
-
+  typedef /*const*/ Value* SimpleType;
   static SimpleType getSimplifiedValue(User::const_op_iterator &Val) {
     return Val->get();
   }

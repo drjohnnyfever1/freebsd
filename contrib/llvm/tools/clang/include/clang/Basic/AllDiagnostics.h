@@ -28,7 +28,7 @@
 namespace clang {
 template <size_t SizeOfStr, typename FieldType>
 class StringSizerHelper {
-  static_assert(SizeOfStr <= FieldType(~0U), "Field too small!");
+  char FIELD_TOO_SMALL[SizeOfStr <= FieldType(~0U) ? 1 : -1];
 public:
   enum { Size = SizeOfStr };
 };

@@ -207,10 +207,13 @@ std::error_code Process::FixupStandardFileDescriptors() {
   for (int StandardFD : StandardFDs) {
     struct stat st;
     errno = 0;
-    if (RetryAfterSignal(-1, fstat, StandardFD, &st) < 0) {
+    while (fstat(StandardFD, &st) < 0) {
       assert(errno && "expected errno to be set if fstat failed!");
       // fstat should return EBADF if the file descriptor is closed.
-      if (errno != EBADF)
+      if (errno == EBADF)
+        break;
+      // retry fstat if we got EINTR, otherwise bubble up the failure.
+      if (errno != EINTR)
         return std::error_code(errno, std::generic_category());
     }
     // if fstat succeeds, move on to the next FD.
@@ -219,8 +222,11 @@ std::error_code Process::FixupStandardFileDescriptors() {
     assert(errno == EBADF && "expected errno to have EBADF at this point!");
 
     if (NullFD < 0) {
-      if ((NullFD = RetryAfterSignal(-1, open, "/dev/null", O_RDWR)) < 0)
+      while ((NullFD = open("/dev/null", O_RDWR)) < 0) {
+        if (errno == EINTR)
+          continue;
         return std::error_code(errno, std::generic_category());
+      }
     }
 
     if (NullFD == StandardFD)
@@ -341,7 +347,7 @@ static bool terminalHasColors(int fd) {
   MutexGuard G(*TermColorMutex);
 
   int errret = 0;
-  if (setupterm(nullptr, fd, &errret) != 0)
+  if (setupterm((char *)nullptr, fd, &errret) != 0)
     // Regardless of why, if we can't get terminfo, we shouldn't try to print
     // colors.
     return false;
@@ -363,7 +369,7 @@ static bool terminalHasColors(int fd) {
 
   // Now extract the structure allocated by setupterm and free its memory
   // through a really silly dance.
-  struct term *termp = set_curterm(nullptr);
+  struct term *termp = set_curterm((struct term *)nullptr);
   (void)del_curterm(termp); // Drop any errors here.
 
   // Return true if we found a color capabilities for the current terminal.

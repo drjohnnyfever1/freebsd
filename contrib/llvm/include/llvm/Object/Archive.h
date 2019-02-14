@@ -20,14 +20,9 @@
 #include "llvm/Object/Binary.h"
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include <algorithm>
-#include <cassert>
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
 
 namespace llvm {
 namespace object {
@@ -37,28 +32,25 @@ class Archive;
 class ArchiveMemberHeader {
 public:
   friend class Archive;
-
   ArchiveMemberHeader(Archive const *Parent, const char *RawHeaderPtr,
                       uint64_t Size, Error *Err);
   // ArchiveMemberHeader() = default;
 
   /// Get the name without looking up long names.
-  Expected<StringRef> getRawName() const;
+  Expected<llvm::StringRef> getRawName() const;
 
   /// Get the name looking up long names.
-  Expected<StringRef> getName(uint64_t Size) const;
+  Expected<llvm::StringRef> getName(uint64_t Size) const;
 
   /// Members are not larger than 4GB.
   Expected<uint32_t> getSize() const;
 
   Expected<sys::fs::perms> getAccessMode() const;
   Expected<sys::TimePoint<std::chrono::seconds>> getLastModified() const;
-
-  StringRef getRawLastModified() const {
+  llvm::StringRef getRawLastModified() const {
     return StringRef(ArMemHdr->LastModified,
                      sizeof(ArMemHdr->LastModified)).rtrim(' ');
   }
-
   Expected<unsigned> getUID() const;
   Expected<unsigned> getGID() const;
 
@@ -83,13 +75,11 @@ private:
 
 class Archive : public Binary {
   virtual void anchor();
-
 public:
   class Child {
     friend Archive;
-    friend ArchiveMemberHeader;
-
     const Archive *Parent;
+    friend ArchiveMemberHeader;
     ArchiveMemberHeader Header;
     /// \brief Includes header but not padding byte.
     StringRef Data;
@@ -113,22 +103,17 @@ public:
     Expected<StringRef> getName() const;
     Expected<std::string> getFullName() const;
     Expected<StringRef> getRawName() const { return Header.getRawName(); }
-
     Expected<sys::TimePoint<std::chrono::seconds>> getLastModified() const {
       return Header.getLastModified();
     }
-
     StringRef getRawLastModified() const {
       return Header.getRawLastModified();
     }
-
     Expected<unsigned> getUID() const { return Header.getUID(); }
     Expected<unsigned> getGID() const { return Header.getGID(); }
-
     Expected<sys::fs::perms> getAccessMode() const {
       return Header.getAccessMode();
     }
-
     /// \return the size of the archive member without the header or padding.
     Expected<uint64_t> getSize() const;
     /// \return the size in the archive header for this member.
@@ -145,12 +130,11 @@ public:
 
   class child_iterator {
     Child C;
-    Error *E = nullptr;
+    Error *E;
 
   public:
-    child_iterator() : C(Child(nullptr, nullptr, nullptr)) {}
+    child_iterator() : C(Child(nullptr, nullptr, nullptr)), E(nullptr) {}
     child_iterator(const Child &C, Error *E) : C(C), E(E) {}
-
     const Child *operator->() const { return &C; }
     const Child &operator*() const { return C; }
 
@@ -187,15 +171,14 @@ public:
     uint32_t StringIndex; // Extra index to the string.
 
   public:
-    Symbol(const Archive *p, uint32_t symi, uint32_t stri)
-      : Parent(p)
-      , SymbolIndex(symi)
-      , StringIndex(stri) {}
-
     bool operator ==(const Symbol &other) const {
       return (Parent == other.Parent) && (SymbolIndex == other.SymbolIndex);
     }
 
+    Symbol(const Archive *p, uint32_t symi, uint32_t stri)
+      : Parent(p)
+      , SymbolIndex(symi)
+      , StringIndex(stri) {}
     StringRef getName() const;
     Expected<Child> getMember() const;
     Symbol getNext() const;
@@ -203,10 +186,8 @@ public:
 
   class symbol_iterator {
     Symbol symbol;
-
   public:
     symbol_iterator(const Symbol &s) : symbol(s) {}
-
     const Symbol *operator->() const { return &symbol; }
     const Symbol &operator*() const { return symbol; }
 
@@ -231,7 +212,6 @@ public:
     K_GNU,
     K_MIPS64,
     K_BSD,
-    K_DARWIN,
     K_DARWIN64,
     K_COFF
   };
@@ -253,7 +233,7 @@ public:
   }
 
   // Cast methods.
-  static bool classof(Binary const *v) {
+  static inline bool classof(Binary const *v) {
     return v->isArchive();
   }
 
@@ -283,7 +263,7 @@ private:
   mutable std::vector<std::unique_ptr<MemoryBuffer>> ThinBuffers;
 };
 
-} // end namespace object
-} // end namespace llvm
+}
+}
 
-#endif // LLVM_OBJECT_ARCHIVE_H
+#endif

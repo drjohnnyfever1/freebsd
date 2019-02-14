@@ -1,4 +1,4 @@
-//===- MIParser.h - Machine Instructions Parser -----------------*- C++ -*-===//
+//===- MIParser.h - Machine Instructions Parser ---------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,19 +15,21 @@
 #define LLVM_LIB_CODEGEN_MIRPARSER_MIPARSER_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/StringMap.h"
-#include "llvm/Support/Allocator.h"
+#include "llvm/ADT/SmallSet.h"
 
 namespace llvm {
 
+class StringRef;
+class BasicBlock;
 class MachineBasicBlock;
 class MachineFunction;
+class MachineInstr;
+class MachineRegisterInfo;
 class MDNode;
 class RegisterBank;
 struct SlotMapping;
 class SMDiagnostic;
 class SourceMgr;
-class StringRef;
 class TargetRegisterClass;
 
 struct VRegInfo {
@@ -43,16 +45,11 @@ struct VRegInfo {
   unsigned PreferredReg = 0;
 };
 
-using Name2RegClassMap = StringMap<const TargetRegisterClass *>;
-using Name2RegBankMap = StringMap<const RegisterBank *>;
-
 struct PerFunctionMIParsingState {
   BumpPtrAllocator Allocator;
   MachineFunction &MF;
   SourceMgr *SM;
   const SlotMapping &IRSlots;
-  const Name2RegClassMap &Names2RegClasses;
-  const Name2RegBankMap &Names2RegBanks;
 
   DenseMap<unsigned, MachineBasicBlock *> MBBSlots;
   DenseMap<unsigned, VRegInfo*> VRegInfos;
@@ -62,9 +59,7 @@ struct PerFunctionMIParsingState {
   DenseMap<unsigned, unsigned> JumpTableSlots;
 
   PerFunctionMIParsingState(MachineFunction &MF, SourceMgr &SM,
-                            const SlotMapping &IRSlots,
-                            const Name2RegClassMap &Names2RegClasses,
-                            const Name2RegBankMap &Names2RegBanks);
+                            const SlotMapping &IRSlots);
 
   VRegInfo &getVRegInfo(unsigned VReg);
 };
@@ -120,4 +115,4 @@ bool parseMDNode(PerFunctionMIParsingState &PFS, MDNode *&Node, StringRef Src,
 
 } // end namespace llvm
 
-#endif // LLVM_LIB_CODEGEN_MIRPARSER_MIPARSER_H
+#endif

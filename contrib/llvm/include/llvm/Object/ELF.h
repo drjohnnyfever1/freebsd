@@ -14,25 +14,14 @@
 #ifndef LLVM_OBJECT_ELF_H
 #define LLVM_OBJECT_ELF_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Object/ELFTypes.h"
-#include "llvm/Object/Error.h"
-#include "llvm/Support/Endian.h"
-#include "llvm/Support/Error.h"
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
-#include <limits>
-#include <utility>
+#include "llvm/Support/MemoryBuffer.h"
 
 namespace llvm {
 namespace object {
 
 StringRef getELFRelocationTypeName(uint32_t Machine, uint32_t Type);
-StringRef getELFSectionTypeName(uint32_t Machine, uint32_t Type);
 
 // Subclasses of ELFFile may need this for template instantiation
 inline std::pair<unsigned char, unsigned char>
@@ -52,27 +41,27 @@ template <class ELFT>
 class ELFFile {
 public:
   LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
-  using uintX_t = typename ELFT::uint;
-  using Elf_Ehdr = typename ELFT::Ehdr;
-  using Elf_Shdr = typename ELFT::Shdr;
-  using Elf_Sym = typename ELFT::Sym;
-  using Elf_Dyn = typename ELFT::Dyn;
-  using Elf_Phdr = typename ELFT::Phdr;
-  using Elf_Rel = typename ELFT::Rel;
-  using Elf_Rela = typename ELFT::Rela;
-  using Elf_Verdef = typename ELFT::Verdef;
-  using Elf_Verdaux = typename ELFT::Verdaux;
-  using Elf_Verneed = typename ELFT::Verneed;
-  using Elf_Vernaux = typename ELFT::Vernaux;
-  using Elf_Versym = typename ELFT::Versym;
-  using Elf_Hash = typename ELFT::Hash;
-  using Elf_GnuHash = typename ELFT::GnuHash;
-  using Elf_Dyn_Range = typename ELFT::DynRange;
-  using Elf_Shdr_Range = typename ELFT::ShdrRange;
-  using Elf_Sym_Range = typename ELFT::SymRange;
-  using Elf_Rel_Range = typename ELFT::RelRange;
-  using Elf_Rela_Range = typename ELFT::RelaRange;
-  using Elf_Phdr_Range = typename ELFT::PhdrRange;
+  typedef typename ELFT::uint uintX_t;
+  typedef typename ELFT::Ehdr Elf_Ehdr;
+  typedef typename ELFT::Shdr Elf_Shdr;
+  typedef typename ELFT::Sym Elf_Sym;
+  typedef typename ELFT::Dyn Elf_Dyn;
+  typedef typename ELFT::Phdr Elf_Phdr;
+  typedef typename ELFT::Rel Elf_Rel;
+  typedef typename ELFT::Rela Elf_Rela;
+  typedef typename ELFT::Verdef Elf_Verdef;
+  typedef typename ELFT::Verdaux Elf_Verdaux;
+  typedef typename ELFT::Verneed Elf_Verneed;
+  typedef typename ELFT::Vernaux Elf_Vernaux;
+  typedef typename ELFT::Versym Elf_Versym;
+  typedef typename ELFT::Hash Elf_Hash;
+  typedef typename ELFT::GnuHash Elf_GnuHash;
+  typedef typename ELFT::DynRange Elf_Dyn_Range;
+  typedef typename ELFT::ShdrRange Elf_Shdr_Range;
+  typedef typename ELFT::SymRange Elf_Sym_Range;
+  typedef typename ELFT::RelRange Elf_Rel_Range;
+  typedef typename ELFT::RelaRange Elf_Rela_Range;
+  typedef typename ELFT::PhdrRange Elf_Phdr_Range;
 
   const uint8_t *base() const {
     return reinterpret_cast<const uint8_t *>(Buf.data());
@@ -81,6 +70,7 @@ public:
   size_t getBufSize() const { return Buf.size(); }
 
 private:
+
   StringRef Buf;
 
 public:
@@ -171,10 +161,10 @@ public:
   Expected<ArrayRef<uint8_t>> getSectionContents(const Elf_Shdr *Sec) const;
 };
 
-using ELF32LEFile = ELFFile<ELFType<support::little, false>>;
-using ELF64LEFile = ELFFile<ELFType<support::little, true>>;
-using ELF32BEFile = ELFFile<ELFType<support::big, false>>;
-using ELF64BEFile = ELFFile<ELFType<support::big, true>>;
+typedef ELFFile<ELFType<support::little, false>> ELF32LEFile;
+typedef ELFFile<ELFType<support::little, true>> ELF64LEFile;
+typedef ELFFile<ELFType<support::big, false>> ELF32BEFile;
+typedef ELFFile<ELFType<support::big, true>> ELF64BEFile;
 
 template <class ELFT>
 inline Expected<const typename ELFT::Shdr *>
@@ -204,7 +194,7 @@ ELFFile<ELFT>::getSectionIndex(const Elf_Sym *Sym, Elf_Sym_Range Syms,
                                ArrayRef<Elf_Word> ShndxTable) const {
   uint32_t Index = Sym->st_shndx;
   if (Index == ELF::SHN_XINDEX) {
-    auto ErrorOrIndex = getExtendedSymbolTableIndex<ELFT>(
+    auto ErrorOrIndex = object::getExtendedSymbolTableIndex<ELFT>(
         Sym, Syms.begin(), ShndxTable);
     if (!ErrorOrIndex)
       return ErrorOrIndex.takeError();
@@ -235,7 +225,10 @@ ELFFile<ELFT>::getSection(const Elf_Sym *Sym, Elf_Sym_Range Symbols,
   uint32_t Index = *IndexOrErr;
   if (Index == 0)
     return nullptr;
-  return getSection(Index);
+  auto SectionsOrErr = sections();
+  if (!SectionsOrErr)
+    return SectionsOrErr.takeError();
+  return object::getSection<ELFT>(*SectionsOrErr, Index);
 }
 
 template <class ELFT>
@@ -347,7 +340,7 @@ ELFFile<ELFT>::ELFFile(StringRef Object) : Buf(Object) {
 }
 
 template <class ELFT>
-bool compareAddr(uint64_t VAddr, const Elf_Phdr_Impl<ELFT> *Phdr) {
+static bool compareAddr(uint64_t VAddr, const Elf_Phdr_Impl<ELFT> *Phdr) {
   return VAddr < Phdr->p_vaddr;
 }
 
@@ -526,8 +519,7 @@ inline unsigned hashSysV(StringRef SymbolName) {
   }
   return h;
 }
-
 } // end namespace object
 } // end namespace llvm
 
-#endif // LLVM_OBJECT_ELF_H
+#endif

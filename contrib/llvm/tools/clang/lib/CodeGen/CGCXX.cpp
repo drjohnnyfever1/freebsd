@@ -256,7 +256,7 @@ llvm::Constant *CodeGenModule::getAddrOfCXXStructor(
 
   return GetOrCreateLLVMFunction(
       getMangledName(GD), FnType, GD, /*ForVTable=*/false, DontDefer,
-      /*isThunk=*/false, /*ExtraAttrs=*/llvm::AttributeList(), IsForDefinition);
+      /*isThunk=*/false, /*ExtraAttrs=*/llvm::AttributeSet(), IsForDefinition);
 }
 
 static CGCallee BuildAppleKextVirtualCall(CodeGenFunction &CGF,

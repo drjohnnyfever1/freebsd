@@ -23,7 +23,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Scalar.h"
 
 using namespace llvm;
@@ -99,6 +98,11 @@ static cl::opt<bool> EnableVectorPrint("enable-hexagon-vector-print",
 extern "C" int HexagonTargetMachineModule;
 int HexagonTargetMachineModule = 0;
 
+extern "C" void LLVMInitializeHexagonTarget() {
+  // Register the target.
+  RegisterTargetMachine<HexagonTargetMachine> X(getTheHexagonTarget());
+}
+
 static ScheduleDAGInstrs *createVLIWMachineSched(MachineSchedContext *C) {
   return new VLIWMachineScheduler(C, make_unique<ConvergingVLIWScheduler>());
 }
@@ -110,12 +114,6 @@ SchedCustomRegistry("hexagon", "Run Hexagon's custom scheduler",
 namespace llvm {
   extern char &HexagonExpandCondsetsID;
   void initializeHexagonExpandCondsetsPass(PassRegistry&);
-  void initializeHexagonGenMuxPass(PassRegistry&);
-  void initializeHexagonLoopIdiomRecognizePass(PassRegistry&);
-  void initializeHexagonNewValueJumpPass(PassRegistry&);
-  void initializeHexagonOptAddrModePass(PassRegistry&);
-  void initializeHexagonPacketizerPass(PassRegistry&);
-  Pass *createHexagonLoopIdiomPass();
 
   FunctionPass *createHexagonBitSimplify();
   FunctionPass *createHexagonBranchRelaxation();
@@ -152,18 +150,6 @@ static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
   return *RM;
 }
 
-extern "C" void LLVMInitializeHexagonTarget() {
-  // Register the target.
-  RegisterTargetMachine<HexagonTargetMachine> X(getTheHexagonTarget());
-
-  PassRegistry &PR = *PassRegistry::getPassRegistry();
-  initializeHexagonGenMuxPass(PR);
-  initializeHexagonLoopIdiomRecognizePass(PR);
-  initializeHexagonNewValueJumpPass(PR);
-  initializeHexagonOptAddrModePass(PR);
-  initializeHexagonPacketizerPass(PR);
-}
-
 HexagonTargetMachine::HexagonTargetMachine(const Target &T, const Triple &TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
@@ -186,11 +172,11 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, const Triple &TT,
 
 const HexagonSubtarget *
 HexagonTargetMachine::getSubtargetImpl(const Function &F) const {
-  AttributeList FnAttrs = F.getAttributes();
+  AttributeSet FnAttrs = F.getAttributes();
   Attribute CPUAttr =
-      FnAttrs.getAttribute(AttributeList::FunctionIndex, "target-cpu");
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-cpu");
   Attribute FSAttr =
-      FnAttrs.getAttribute(AttributeList::FunctionIndex, "target-features");
+      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-features");
 
   std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
                         ? CPUAttr.getValueAsString().str()
@@ -210,14 +196,6 @@ HexagonTargetMachine::getSubtargetImpl(const Function &F) const {
   return I.get();
 }
 
-void HexagonTargetMachine::adjustPassManager(PassManagerBuilder &PMB) {
-  PMB.addExtension(
-    PassManagerBuilder::EP_LateLoopOptimizations,
-    [&](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
-      PM.add(createHexagonLoopIdiomPass());
-    });
-}
-
 TargetIRAnalysis HexagonTargetMachine::getTargetIRAnalysis() {
   return TargetIRAnalysis([this](const Function &F) {
     return TargetTransformInfo(HexagonTTIImpl(this, F));
@@ -231,7 +209,7 @@ namespace {
 /// Hexagon Code Generator Pass Configuration Options.
 class HexagonPassConfig : public TargetPassConfig {
 public:
-  HexagonPassConfig(HexagonTargetMachine &TM, PassManagerBase &PM)
+  HexagonPassConfig(HexagonTargetMachine *TM, PassManagerBase &PM)
     : TargetPassConfig(TM, PM) {}
 
   HexagonTargetMachine &getHexagonTargetMachine() const {
@@ -253,14 +231,14 @@ public:
 } // namespace
 
 TargetPassConfig *HexagonTargetMachine::createPassConfig(PassManagerBase &PM) {
-  return new HexagonPassConfig(*this, PM);
+  return new HexagonPassConfig(this, PM);
 }
 
 void HexagonPassConfig::addIRPasses() {
   TargetPassConfig::addIRPasses();
   bool NoOpt = (getOptLevel() == CodeGenOpt::None);
 
-  addPass(createAtomicExpandPass());
+  addPass(createAtomicExpandPass(TM));
   if (!NoOpt) {
     if (EnableLoopPrefetch)
       addPass(createLoopDataPrefetchPass());
@@ -284,26 +262,27 @@ bool HexagonPassConfig::addInstSelector() {
   if (!NoOpt) {
     // Create logical operations on predicate registers.
     if (EnableGenPred)
-      addPass(createHexagonGenPredicate());
+      addPass(createHexagonGenPredicate(), false);
     // Rotate loops to expose bit-simplification opportunities.
     if (EnableLoopResched)
-      addPass(createHexagonLoopRescheduling());
+      addPass(createHexagonLoopRescheduling(), false);
     // Split double registers.
     if (!DisableHSDR)
       addPass(createHexagonSplitDoubleRegs());
     // Bit simplification.
     if (EnableBitSimplify)
-      addPass(createHexagonBitSimplify());
+      addPass(createHexagonBitSimplify(), false);
     addPass(createHexagonPeephole());
+    printAndVerify("After hexagon peephole pass");
     // Constant propagation.
     if (!DisableHCP) {
-      addPass(createHexagonConstPropagationPass());
-      addPass(&UnreachableMachineBlockElimID);
+      addPass(createHexagonConstPropagationPass(), false);
+      addPass(&UnreachableMachineBlockElimID, false);
     }
     if (EnableGenInsert)
-      addPass(createHexagonGenInsert());
+      addPass(createHexagonGenInsert(), false);
     if (EnableEarlyIf)
-      addPass(createHexagonEarlyIfConversion());
+      addPass(createHexagonEarlyIfConversion(), false);
   }
 
   return false;
@@ -314,9 +293,9 @@ void HexagonPassConfig::addPreRegAlloc() {
     if (EnableExpandCondsets)
       insertPass(&RegisterCoalescerID, &HexagonExpandCondsetsID);
     if (!DisableStoreWidening)
-      addPass(createHexagonStoreWidening());
+      addPass(createHexagonStoreWidening(), false);
     if (!DisableHardwareLoops)
-      addPass(createHexagonHardwareLoops());
+      addPass(createHexagonHardwareLoops(), false);
   }
   if (TM->getOptLevel() >= CodeGenOpt::Default)
     addPass(&MachinePipelinerID);
@@ -327,16 +306,16 @@ void HexagonPassConfig::addPostRegAlloc() {
     if (EnableRDFOpt)
       addPass(createHexagonRDFOpt());
     if (!DisableHexagonCFGOpt)
-      addPass(createHexagonCFGOptimizer());
+      addPass(createHexagonCFGOptimizer(), false);
     if (!DisableAModeOpt)
-      addPass(createHexagonOptAddrMode());
+      addPass(createHexagonOptAddrMode(), false);
   }
 }
 
 void HexagonPassConfig::addPreSched2() {
-  addPass(createHexagonCopyToCombine());
+  addPass(createHexagonCopyToCombine(), false);
   if (getOptLevel() != CodeGenOpt::None)
-    addPass(&IfConverterID);
+    addPass(&IfConverterID, false);
   addPass(createHexagonSplitConst32AndConst64());
 }
 
@@ -344,17 +323,17 @@ void HexagonPassConfig::addPreEmitPass() {
   bool NoOpt = (getOptLevel() == CodeGenOpt::None);
 
   if (!NoOpt)
-    addPass(createHexagonNewValueJump());
+    addPass(createHexagonNewValueJump(), false);
 
-  addPass(createHexagonBranchRelaxation());
+  addPass(createHexagonBranchRelaxation(), false);
 
   // Create Packets.
   if (!NoOpt) {
     if (!DisableHardwareLoops)
-      addPass(createHexagonFixupHwLoops());
+      addPass(createHexagonFixupHwLoops(), false);
     // Generate MUX from pairs of conditional transfers.
     if (EnableGenMux)
-      addPass(createHexagonGenMux());
+      addPass(createHexagonGenMux(), false);
 
     addPass(createHexagonPacketizer(), false);
   }

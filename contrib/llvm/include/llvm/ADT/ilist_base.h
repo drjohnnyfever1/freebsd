@@ -1,4 +1,4 @@
-//===- llvm/ADT/ilist_base.h - Intrusive List Base --------------*- C++ -*-===//
+//===- llvm/ADT/ilist_base.h - Intrusive List Base ---------------*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,13 +12,15 @@
 
 #include "llvm/ADT/ilist_node_base.h"
 #include <cassert>
+#include <cstddef>
+#include <type_traits>
 
 namespace llvm {
 
 /// Implementations of list algorithms using ilist_node_base.
 template <bool EnableSentinelTracking> class ilist_base {
 public:
-  using node_base_type = ilist_node_base<EnableSentinelTracking>;
+  typedef ilist_node_base<EnableSentinelTracking> node_base_type;
 
   static void insertBeforeImpl(node_base_type &Next, node_base_type &N) {
     node_base_type &Prev = *Next.getPrev();

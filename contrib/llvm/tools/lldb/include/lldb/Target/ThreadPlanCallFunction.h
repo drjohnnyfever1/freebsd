@@ -117,7 +117,7 @@ protected:
                         lldb::addr_t &start_load_addr,
                         lldb::addr_t &function_load_addr);
 
-  virtual void DoTakedown(bool success);
+  void DoTakedown(bool success);
 
   void SetBreakpoints();
 

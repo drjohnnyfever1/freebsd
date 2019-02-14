@@ -91,6 +91,4 @@ bool FunctionAnalysisManagerModuleProxy::Result::invalidate(
 }
 }
 
-AnalysisSetKey CFGAnalyses::SetKey;
-
 AnalysisSetKey PreservedAnalyses::AllAnalysesKey;

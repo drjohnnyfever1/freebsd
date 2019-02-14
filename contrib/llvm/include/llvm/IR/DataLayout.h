@@ -1,4 +1,4 @@
-//===- llvm/DataLayout.h - Data size & alignment info -----------*- C++ -*-===//
+//===--------- llvm/DataLayout.h - Data size & alignment info ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,32 +20,27 @@
 #ifndef LLVM_IR_DATALAYOUT_H
 #define LLVM_IR_DATALAYOUT_H
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
-#include <cassert>
-#include <cstdint>
-#include <string>
+#include "llvm/Support/DataTypes.h"
 
 // This needs to be outside of the namespace, to avoid conflict with llvm-c
 // decl.
-using LLVMTargetDataRef = struct LLVMOpaqueTargetData *;
+typedef struct LLVMOpaqueTargetData *LLVMTargetDataRef;
 
 namespace llvm {
 
-class GlobalVariable;
-class LLVMContext;
-class Module;
+class Value;
+class StructType;
 class StructLayout;
 class Triple;
-class Value;
+class GlobalVariable;
+class LLVMContext;
+template<typename T>
+class ArrayRef;
 
 /// Enum used to categorize the alignment types stored by LayoutAlignElem
 enum AlignTypeEnum {
@@ -77,7 +72,6 @@ struct LayoutAlignElem {
 
   static LayoutAlignElem get(AlignTypeEnum align_type, unsigned abi_align,
                              unsigned pref_align, uint32_t bit_width);
-
   bool operator==(const LayoutAlignElem &rhs) const;
 };
 
@@ -96,7 +90,6 @@ struct PointerAlignElem {
   /// Initializer
   static PointerAlignElem get(uint32_t AddressSpace, unsigned ABIAlign,
                               unsigned PrefAlign, uint32_t TypeByteWidth);
-
   bool operator==(const PointerAlignElem &rhs) const;
 };
 
@@ -111,7 +104,6 @@ private:
   /// Defaults to false.
   bool BigEndian;
 
-  unsigned AllocaAddrSpace;
   unsigned StackNaturalAlign;
 
   enum ManglingModeT {
@@ -126,24 +118,13 @@ private:
 
   SmallVector<unsigned char, 8> LegalIntWidths;
 
-  /// \brief Primitive type alignment data. This is sorted by type and bit
-  /// width during construction.
-  using AlignmentsTy = SmallVector<LayoutAlignElem, 16>;
-  AlignmentsTy Alignments;
-
-  AlignmentsTy::const_iterator
-  findAlignmentLowerBound(AlignTypeEnum AlignType, uint32_t BitWidth) const {
-    return const_cast<DataLayout *>(this)->findAlignmentLowerBound(AlignType,
-                                                                   BitWidth);
-  }
-
-  AlignmentsTy::iterator
-  findAlignmentLowerBound(AlignTypeEnum AlignType, uint32_t BitWidth);
+  /// \brief Primitive type alignment data.
+  SmallVector<LayoutAlignElem, 16> Alignments;
 
   /// \brief The string representation used to create this DataLayout
   std::string StringRepresentation;
 
-  using PointersTy = SmallVector<PointerAlignElem, 8>;
+  typedef SmallVector<PointerAlignElem, 8> PointersTy;
   PointersTy Pointers;
 
   PointersTy::const_iterator
@@ -153,8 +134,16 @@ private:
 
   PointersTy::iterator findPointerLowerBound(uint32_t AddressSpace);
 
+  /// This member is a signal that a requested alignment type and bit width were
+  /// not found in the SmallVector.
+  static const LayoutAlignElem InvalidAlignmentElem;
+
+  /// This member is a signal that a requested pointer type and bit width were
+  /// not found in the DenseSet.
+  static const PointerAlignElem InvalidPointerElem;
+
   // The StructType -> StructLayout map.
-  mutable void *LayoutMap = nullptr;
+  mutable void *LayoutMap;
 
   /// Pointers in these address spaces are non-integral, and don't have a
   /// well-defined bitwise representation.
@@ -170,6 +159,22 @@ private:
   /// Internal helper method that returns requested alignment for type.
   unsigned getAlignment(Type *Ty, bool abi_or_pref) const;
 
+  /// \brief Valid alignment predicate.
+  ///
+  /// Predicate that tests a LayoutAlignElem reference returned by get() against
+  /// InvalidAlignmentElem.
+  bool validAlignment(const LayoutAlignElem &align) const {
+    return &align != &InvalidAlignmentElem;
+  }
+
+  /// \brief Valid pointer predicate.
+  ///
+  /// Predicate that tests a PointerAlignElem reference returned by get()
+  /// against \c InvalidPointerElem.
+  bool validPointer(const PointerAlignElem &align) const {
+    return &align != &InvalidPointerElem;
+  }
+
   /// Parses a target data specification string. Assert if the string is
   /// malformed.
   void parseSpecifier(StringRef LayoutDescription);
@@ -179,22 +184,21 @@ private:
 
 public:
   /// Constructs a DataLayout from a specification string. See reset().
-  explicit DataLayout(StringRef LayoutDescription) {
+  explicit DataLayout(StringRef LayoutDescription) : LayoutMap(nullptr) {
     reset(LayoutDescription);
   }
 
   /// Initialize target data from properties stored in the module.
   explicit DataLayout(const Module *M);
 
-  DataLayout(const DataLayout &DL) { *this = DL; }
+  void init(const Module *M);
 
-  ~DataLayout(); // Not virtual, do not subclass this class
+  DataLayout(const DataLayout &DL) : LayoutMap(nullptr) { *this = DL; }
 
   DataLayout &operator=(const DataLayout &DL) {
     clear();
     StringRepresentation = DL.StringRepresentation;
     BigEndian = DL.isBigEndian();
-    AllocaAddrSpace = DL.AllocaAddrSpace;
     StackNaturalAlign = DL.StackNaturalAlign;
     ManglingMode = DL.ManglingMode;
     LegalIntWidths = DL.LegalIntWidths;
@@ -207,7 +211,7 @@ public:
   bool operator==(const DataLayout &Other) const;
   bool operator!=(const DataLayout &Other) const { return !(*this == Other); }
 
-  void init(const Module *M);
+  ~DataLayout(); // Not virtual, do not subclass this class
 
   /// Parse a data layout string (with fallback to default values).
   void reset(StringRef LayoutDescription);
@@ -250,7 +254,6 @@ public:
   }
 
   unsigned getStackAlignment() const { return StackNaturalAlign; }
-  unsigned getAllocaAddrSpace() const { return AllocaAddrSpace; }
 
   bool hasMicrosoftFastStdCallMangling() const {
     return ManglingMode == MM_WinCOFFX86;
@@ -496,7 +499,6 @@ class StructLayout {
   unsigned IsPadded : 1;
   unsigned NumElements : 31;
   uint64_t MemberOffsets[1]; // variable sized array!
-
 public:
   uint64_t getSizeInBytes() const { return StructSize; }
 
@@ -523,7 +525,6 @@ public:
 
 private:
   friend class DataLayout; // Only DataLayout can create this class
-
   StructLayout(StructType *ST, const DataLayout &DL);
 };
 
@@ -569,6 +570,6 @@ inline uint64_t DataLayout::getTypeSizeInBits(Type *Ty) const {
   }
 }
 
-} // end namespace llvm
+} // End llvm namespace
 
-#endif // LLVM_IR_DATALAYOUT_H
+#endif

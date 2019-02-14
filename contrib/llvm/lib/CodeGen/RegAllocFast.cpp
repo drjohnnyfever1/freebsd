@@ -203,8 +203,6 @@ namespace {
   char RAFast::ID = 0;
 }
 
-INITIALIZE_PASS(RAFast, "regallocfast", "Fast Register Allocator", false, false)
-
 /// getStackSpaceFor - This allocates space for the specified virtual register
 /// to be held on the stack.
 int RAFast::getStackSpaceFor(unsigned VirtReg, const TargetRegisterClass *RC) {
@@ -214,9 +212,8 @@ int RAFast::getStackSpaceFor(unsigned VirtReg, const TargetRegisterClass *RC) {
     return SS;          // Already has space allocated?
 
   // Allocate a new stack object for this spill location...
-  unsigned Size = TRI->getSpillSize(*RC);
-  unsigned Align = TRI->getSpillAlignment(*RC);
-  int FrameIdx = MF->getFrameInfo().CreateSpillStackObject(Size, Align);
+  int FrameIdx = MF->getFrameInfo().CreateSpillStackObject(RC->getSize(),
+                                                           RC->getAlignment());
 
   // Assign the slot.
   StackSlotForVirtReg[VirtReg] = FrameIdx;
@@ -246,15 +243,8 @@ void RAFast::addKillFlag(const LiveReg &LR) {
   if (MO.isUse() && !LR.LastUse->isRegTiedToDefOperand(LR.LastOpNum)) {
     if (MO.getReg() == LR.PhysReg)
       MO.setIsKill();
-    // else, don't do anything we are problably redefining a
-    // subreg of this register and given we don't track which
-    // lanes are actually dead, we cannot insert a kill flag here.
-    // Otherwise we may end up in a situation like this:
-    // ... = (MO) physreg:sub1, physreg <implicit-use, kill>
-    // ... <== Here we would allow later pass to reuse physreg:sub1
-    //         which is potentially wrong.
-    // LR:sub0 = ...
-    // ... = LR.sub1 <== This is going to use physreg:sub1
+    else
+      LR.LastUse->addRegisterKilled(LR.PhysReg, TRI, true);
   }
 }
 
@@ -314,7 +304,19 @@ void RAFast::spillVirtReg(MachineBasicBlock::iterator MI,
       LiveDbgValueMap[LRI->VirtReg];
     for (unsigned li = 0, le = LRIDbgValues.size(); li != le; ++li) {
       MachineInstr *DBG = LRIDbgValues[li];
-      MachineInstr *NewDV = buildDbgValueForSpill(*MBB, MI, *DBG, FI);
+      const MDNode *Var = DBG->getDebugVariable();
+      const MDNode *Expr = DBG->getDebugExpression();
+      bool IsIndirect = DBG->isIndirectDebugValue();
+      uint64_t Offset = IsIndirect ? DBG->getOperand(1).getImm() : 0;
+      DebugLoc DL = DBG->getDebugLoc();
+      assert(cast<DILocalVariable>(Var)->isValidLocationForIntrinsic(DL) &&
+             "Expected inlined-at fields to agree");
+      MachineInstr *NewDV =
+          BuildMI(*MBB, MI, DL, TII->get(TargetOpcode::DBG_VALUE))
+              .addFrameIndex(FI)
+              .addImm(Offset)
+              .addMetadata(Var)
+              .addMetadata(Expr);
       assert(NewDV->getParent() == MBB && "dangling parent pointer");
       (void)NewDV;
       DEBUG(dbgs() << "Inserting debug info due to spill:" << "\n" << *NewDV);

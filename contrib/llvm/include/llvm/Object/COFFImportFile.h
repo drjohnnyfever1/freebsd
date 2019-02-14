@@ -9,15 +9,13 @@
 //
 // COFF short import file is a special kind of file which contains
 // only symbol names for DLL-exported symbols. This class implements
-// exporting of Symbols to create libraries and a SymbolicFile
-// interface for the file type.
+// SymbolicFile interface for the file.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_OBJECT_COFF_IMPORT_FILE_H
 #define LLVM_OBJECT_COFF_IMPORT_FILE_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/IRObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
@@ -33,7 +31,7 @@ public:
   COFFImportFile(MemoryBufferRef Source)
       : SymbolicFile(ID_COFFImportFile, Source) {}
 
-  static bool classof(Binary const *V) { return V->isCOFFImportFile(); }
+  static inline bool classof(Binary const *V) { return V->isCOFFImportFile(); }
 
   void moveSymbolNext(DataRefImpl &Symb) const override { ++Symb.p; }
 
@@ -55,7 +53,7 @@ public:
 
   basic_symbol_iterator symbol_end() const override {
     DataRefImpl Symb;
-    Symb.p = isData() ? 1 : 2;
+    Symb.p = isCode() ? 2 : 1;
     return BasicSymbolRef(Symb, this);
   }
 
@@ -65,42 +63,10 @@ public:
   }
 
 private:
-  bool isData() const {
-    return getCOFFImportHeader()->getType() == COFF::IMPORT_DATA;
+  bool isCode() const {
+    return getCOFFImportHeader()->getType() == COFF::IMPORT_CODE;
   }
 };
-
-struct COFFShortExport {
-  std::string Name;
-  std::string ExtName;
-  std::string SymbolName;
-
-  uint16_t Ordinal = 0;
-  bool Noname = false;
-  bool Data = false;
-  bool Private = false;
-  bool Constant = false;
-
-  bool isWeak() {
-    return ExtName.size() && ExtName != Name;
-  }
-
-  friend bool operator==(const COFFShortExport &L, const COFFShortExport &R) {
-    return L.Name == R.Name && L.ExtName == R.ExtName &&
-            L.Ordinal == R.Ordinal && L.Noname == R.Noname &&
-            L.Data == R.Data && L.Private == R.Private;
-  }
-
-  friend bool operator!=(const COFFShortExport &L, const COFFShortExport &R) {
-    return !(L == R);
-  }
-};
-
-std::error_code writeImportLibrary(StringRef ImportName,
-                                   StringRef Path,
-                                   ArrayRef<COFFShortExport> Exports,
-                                   COFF::MachineTypes Machine,
-                                   bool MakeWeakAliases);
 
 } // namespace object
 } // namespace llvm

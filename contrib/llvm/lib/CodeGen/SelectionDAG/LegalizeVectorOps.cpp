@@ -105,7 +105,6 @@ class VectorLegalizer {
   SDValue ExpandLoad(SDValue Op);
   SDValue ExpandStore(SDValue Op);
   SDValue ExpandFNEG(SDValue Op);
-  SDValue ExpandFSUB(SDValue Op);
   SDValue ExpandBITREVERSE(SDValue Op);
   SDValue ExpandCTLZ(SDValue Op);
   SDValue ExpandCTTZ_ZERO_UNDEF(SDValue Op);
@@ -225,7 +224,6 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
           }
           return TranslateLegalizeResults(Op, Lowered);
         }
-        LLVM_FALLTHROUGH;
       case TargetLowering::Expand:
         Changed = true;
         return LegalizeOp(ExpandLoad(Op));
@@ -623,7 +621,8 @@ SDValue VectorLegalizer::ExpandLoad(SDValue Op) {
     }
 
     NewChain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, LoadChains);
-    Value = DAG.getBuildVector(Op.getNode()->getValueType(0), dl, Vals);
+    Value = DAG.getNode(ISD::BUILD_VECTOR, dl,
+                        Op.getNode()->getValueType(0), Vals);
   } else {
     SDValue Scalarized = TLI.scalarizeVectorLoad(LD, DAG);
 
@@ -693,8 +692,6 @@ SDValue VectorLegalizer::Expand(SDValue Op) {
     return ExpandUINT_TO_FLOAT(Op);
   case ISD::FNEG:
     return ExpandFNEG(Op);
-  case ISD::FSUB:
-    return ExpandFSUB(Op);
   case ISD::SETCC:
     return UnrollVSETCC(Op);
   case ISD::BITREVERSE:
@@ -723,6 +720,8 @@ SDValue VectorLegalizer::ExpandSELECT(SDValue Op) {
   assert(VT.isVector() && !Mask.getValueType().isVector()
          && Op1.getValueType() == Op2.getValueType() && "Invalid type");
 
+  unsigned NumElem = VT.getVectorNumElements();
+
   // If we can't even use the basic vector operations of
   // AND,OR,XOR, we will have to scalarize the op.
   // Notice that the operation may be 'promoted' which means that it is
@@ -746,7 +745,8 @@ SDValue VectorLegalizer::ExpandSELECT(SDValue Op) {
           DAG.getConstant(0, DL, BitTy));
 
   // Broadcast the mask so that the entire vector is all-one or all zero.
-  Mask = DAG.getSplatBuildVector(MaskTy, DL, Mask);
+  SmallVector<SDValue, 8> Ops(NumElem, Mask);
+  Mask = DAG.getNode(ISD::BUILD_VECTOR, DL, MaskTy, Ops);
 
   // Bitcast the operands to be the same type as the mask.
   // This is needed when we select between FP types because
@@ -1025,18 +1025,6 @@ SDValue VectorLegalizer::ExpandFNEG(SDValue Op) {
   return DAG.UnrollVectorOp(Op.getNode());
 }
 
-SDValue VectorLegalizer::ExpandFSUB(SDValue Op) {
-  // For floating-point values, (a-b) is the same as a+(-b). If FNEG is legal,
-  // we can defer this to operation legalization where it will be lowered as
-  // a+(-b).
-  EVT VT = Op.getValueType();
-  if (TLI.isOperationLegalOrCustom(ISD::FNEG, VT) &&
-      TLI.isOperationLegalOrCustom(ISD::FADD, VT))
-    return Op; // Defer to LegalizeDAG
-
-  return DAG.UnrollVectorOp(Op.getNode());
-}
-
 SDValue VectorLegalizer::ExpandCTLZ(SDValue Op) {
   EVT VT = Op.getValueType();
   unsigned NumBitsPerElt = VT.getScalarSizeInBits();
@@ -1114,7 +1102,7 @@ SDValue VectorLegalizer::UnrollVSETCC(SDValue Op) {
                                            (EltVT.getSizeInBits()), dl, EltVT),
                            DAG.getConstant(0, dl, EltVT));
   }
-  return DAG.getBuildVector(VT, dl, Ops);
+  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
 }
 
 }

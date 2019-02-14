@@ -11,10 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MipsSubtarget.h"
-#include "Mips.h"
 #include "MipsMachineFunction.h"
+#include "Mips.h"
 #include "MipsRegisterInfo.h"
+#include "MipsSubtarget.h"
 #include "MipsTargetMachine.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
@@ -59,8 +59,9 @@ static cl::opt<bool>
 
 void MipsSubtarget::anchor() { }
 
-MipsSubtarget::MipsSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
-                             bool little, const MipsTargetMachine &TM)
+MipsSubtarget::MipsSubtarget(const Triple &TT, const std::string &CPU,
+                             const std::string &FS, bool little,
+                             const MipsTargetMachine &TM)
     : MipsGenSubtargetInfo(TT, CPU, FS), MipsArchVersion(MipsDefault),
       IsLittle(little), IsSoftFloat(false), IsSingleFloat(false), IsFPXX(false),
       NoABICalls(false), IsFP64bit(false), UseOddSPReg(true),
@@ -69,13 +70,14 @@ MipsSubtarget::MipsSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
       HasMips4_32r2(false), HasMips5_32r2(false), InMips16Mode(false),
       InMips16HardFloat(Mips16HardFloat), InMicroMipsMode(false), HasDSP(false),
       HasDSPR2(false), HasDSPR3(false), AllowMixed16_32(Mixed16_32 | Mips_Os16),
-      Os16(Mips_Os16), HasMSA(false), UseTCCInDIV(false), HasSym32(false),
-      HasEVA(false), DisableMadd4(false), HasMT(false), TM(TM),
+      Os16(Mips_Os16), HasMSA(false), UseTCCInDIV(false), HasEVA(false), TM(TM),
       TargetTriple(TT), TSInfo(),
       InstrInfo(
           MipsInstrInfo::create(initializeSubtargetDependencies(CPU, FS, TM))),
       FrameLowering(MipsFrameLowering::create(*this)),
       TLInfo(MipsTargetLowering::create(TM, *this)) {
+
+  PreviousInMips16Mode = InMips16Mode;
 
   if (MipsArchVersion == MipsDefault)
     MipsArchVersion = Mips32;
@@ -114,9 +116,6 @@ MipsSubtarget::MipsSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
 
   if (NoABICalls && TM.isPositionIndependent())
     report_fatal_error("position-independent code requires '-mabicalls'");
-
-  if (isABI_N64() && !TM.isPositionIndependent() && !hasSym32())
-    NoABICalls = true;
 
   // Set UseSmallSection.
   UseSmallSection = GPOpt;

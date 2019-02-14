@@ -1,4 +1,4 @@
-//===- llvm/Transforms/Utils/LoopUtils.h - Loop utilities -------*- C++ -*-===//
+//===- llvm/Transforms/Utils/LoopUtils.h - Loop utilities -*- C++ -*-=========//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,47 +14,38 @@
 #ifndef LLVM_TRANSFORMS_UTILS_LOOPUTILS_H
 #define LLVM_TRANSFORMS_UTILS_LOOPUTILS_H
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/EHPersonalities.h"
-#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/InstrTypes.h"
-#include "llvm/IR/Operator.h"
-#include "llvm/IR/ValueHandle.h"
-#include "llvm/Support/Casting.h"
 
 namespace llvm {
-
 class AliasSet;
 class AliasSetTracker;
+class AssumptionCache;
 class BasicBlock;
 class DataLayout;
+class DominatorTree;
 class Loop;
 class LoopInfo;
 class OptimizationRemarkEmitter;
+class Pass;
 class PredicatedScalarEvolution;
 class PredIteratorCache;
 class ScalarEvolution;
 class SCEV;
 class TargetLibraryInfo;
-class TargetTransformInfo;
 
 /// \brief Captures loop safety information.
 /// It keep information for loop & its header may throw exception.
 struct LoopSafetyInfo {
-  bool MayThrow = false;       // The current loop contains an instruction which
-                               // may throw.
-  bool HeaderMayThrow = false; // Same as previous, but specific to loop header
+  bool MayThrow;       // The current loop contains an instruction which
+                       // may throw.
+  bool HeaderMayThrow; // Same as previous, but specific to loop header
   // Used to update funclet bundle operands.
   DenseMap<BasicBlock *, ColorVector> BlockColors;
-
-  LoopSafetyInfo() = default;
+  LoopSafetyInfo() : MayThrow(false), HeaderMayThrow(false) {}
 };
 
 /// The RecurrenceDescriptor is used to identify recurrences variables in a
@@ -70,6 +61,7 @@ struct LoopSafetyInfo {
 
 /// This struct holds information about recurrence variables.
 class RecurrenceDescriptor {
+
 public:
   /// This enum represents the kinds of recurrences that we support.
   enum RecurrenceKind {
@@ -96,7 +88,10 @@ public:
     MRK_FloatMax
   };
 
-  RecurrenceDescriptor() = default;
+  RecurrenceDescriptor()
+      : StartValue(nullptr), LoopExitInstr(nullptr), Kind(RK_NoRecurrence),
+        MinMaxKind(MRK_Invalid), UnsafeAlgebraInst(nullptr),
+        RecurrenceType(nullptr), IsSigned(false) {}
 
   RecurrenceDescriptor(Value *Start, Instruction *Exit, RecurrenceKind K,
                        MinMaxRecurrenceKind MK, Instruction *UAI, Type *RT,
@@ -108,6 +103,7 @@ public:
 
   /// This POD struct holds information about a potential recurrence operation.
   class InstDesc {
+
   public:
     InstDesc(bool IsRecur, Instruction *I, Instruction *UAI = nullptr)
         : IsRecurrence(IsRecur), PatternLastInst(I), MinMaxKind(MRK_Invalid),
@@ -184,14 +180,9 @@ public:
   /// Returns true if Phi is a first-order recurrence. A first-order recurrence
   /// is a non-reduction recurrence relation in which the value of the
   /// recurrence in the current loop iteration equals a value defined in the
-  /// previous iteration. \p SinkAfter includes pairs of instructions where the
-  /// first will be rescheduled to appear after the second if/when the loop is
-  /// vectorized. It may be augmented with additional pairs if needed in order
-  /// to handle Phi as a first-order recurrence.
-  static bool
-  isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
-                         DenseMap<Instruction *, Instruction *> &SinkAfter,
-                         DominatorTree *DT);
+  /// previous iteration.
+  static bool isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
+                                     DominatorTree *DT);
 
   RecurrenceKind getRecurrenceKind() { return Kind; }
 
@@ -251,17 +242,17 @@ private:
   // It does not have to be zero!
   TrackingVH<Value> StartValue;
   // The instruction who's value is used outside the loop.
-  Instruction *LoopExitInstr = nullptr;
+  Instruction *LoopExitInstr;
   // The kind of the recurrence.
-  RecurrenceKind Kind = RK_NoRecurrence;
+  RecurrenceKind Kind;
   // If this a min/max recurrence the kind of recurrence.
-  MinMaxRecurrenceKind MinMaxKind = MRK_Invalid;
+  MinMaxRecurrenceKind MinMaxKind;
   // First occurrence of unasfe algebra in the PHI's use-chain.
-  Instruction *UnsafeAlgebraInst = nullptr;
+  Instruction *UnsafeAlgebraInst;
   // The type of the recurrence.
-  Type *RecurrenceType = nullptr;
+  Type *RecurrenceType;
   // True if all source operands of the recurrence are SExtInsts.
-  bool IsSigned = false;
+  bool IsSigned;
   // Instructions used for type-promoting the recurrence.
   SmallPtrSet<Instruction *, 8> CastInsts;
 };
@@ -279,7 +270,9 @@ public:
 
 public:
   /// Default constructor - creates an invalid induction.
-  InductionDescriptor() = default;
+  InductionDescriptor()
+    : StartValue(nullptr), IK(IK_NoInduction), Step(nullptr),
+    InductionBinOp(nullptr) {}
 
   /// Get the consecutive direction. Returns:
   ///   0 - unknown or non-consecutive.
@@ -357,23 +350,15 @@ private:
   /// Start value.
   TrackingVH<Value> StartValue;
   /// Induction kind.
-  InductionKind IK = IK_NoInduction;
+  InductionKind IK;
   /// Step value.
-  const SCEV *Step = nullptr;
+  const SCEV *Step;
   // Instruction that advances induction variable.
-  BinaryOperator *InductionBinOp = nullptr;
+  BinaryOperator *InductionBinOp;
 };
 
 BasicBlock *InsertPreheaderForLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
                                    bool PreserveLCSSA);
-
-/// Ensure that all exit blocks of the loop are dedicated exits.
-///
-/// For any loop exit block with non-loop predecessors, we split the loop
-/// predecessors to use a dedicated loop exit block. We update the dominator
-/// tree and loop info if provided, and will preserve LCSSA if requested.
-bool formDedicatedExitBlocks(Loop *L, DominatorTree *DT, LoopInfo *LI,
-                             bool PreserveLCSSA);
 
 /// Ensures LCSSA form for every instruction from the Worklist in the scope of
 /// innermost containing loop.
@@ -503,39 +488,6 @@ bool canSinkOrHoistInst(Instruction &I, AAResults *AA, DominatorTree *DT,
                         Loop *CurLoop, AliasSetTracker *CurAST,
                         LoopSafetyInfo *SafetyInfo,
                         OptimizationRemarkEmitter *ORE = nullptr);
+}
 
-/// Generates a vector reduction using shufflevectors to reduce the value.
-Value *getShuffleReduction(IRBuilder<> &Builder, Value *Src, unsigned Op,
-                           RecurrenceDescriptor::MinMaxRecurrenceKind
-                               MinMaxKind = RecurrenceDescriptor::MRK_Invalid,
-                           ArrayRef<Value *> RedOps = ArrayRef<Value *>());
-
-/// Create a target reduction of the given vector. The reduction operation
-/// is described by the \p Opcode parameter. min/max reductions require
-/// additional information supplied in \p Flags.
-/// The target is queried to determine if intrinsics or shuffle sequences are
-/// required to implement the reduction.
-Value *
-createSimpleTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
-                            unsigned Opcode, Value *Src,
-                            TargetTransformInfo::ReductionFlags Flags =
-                                TargetTransformInfo::ReductionFlags(),
-                            ArrayRef<Value *> RedOps = ArrayRef<Value *>());
-
-/// Create a generic target reduction using a recurrence descriptor \p Desc
-/// The target is queried to determine if intrinsics or shuffle sequences are
-/// required to implement the reduction.
-Value *createTargetReduction(IRBuilder<> &B, const TargetTransformInfo *TTI,
-                             RecurrenceDescriptor &Desc, Value *Src,
-                             bool NoNaN = false);
-
-/// Get the intersection (logical and) of all of the potential IR flags
-/// of each scalar operation (VL) that will be converted into a vector (I).
-/// If OpValue is non-null, we only consider operations similar to OpValue
-/// when intersecting.
-/// Flag set: NSW, NUW, exact, and all of fast-math.
-void propagateIRFlags(Value *I, ArrayRef<Value *> VL, Value *OpValue = nullptr);
-
-} // end namespace llvm
-
-#endif // LLVM_TRANSFORMS_UTILS_LOOPUTILS_H
+#endif

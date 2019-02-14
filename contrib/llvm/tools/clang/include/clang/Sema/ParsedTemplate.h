@@ -145,15 +145,12 @@ namespace clang {
   /// expressions, or template names, and the source locations for important 
   /// tokens. All of the information about template arguments is allocated 
   /// directly after this structure.
-  struct TemplateIdAnnotation final
-      : private llvm::TrailingObjects<TemplateIdAnnotation,
-                                      ParsedTemplateArgument> {
-    friend TrailingObjects;
+  struct TemplateIdAnnotation {
     /// \brief The nested-name-specifier that precedes the template name.
     CXXScopeSpec SS;
 
-    /// TemplateKWLoc - The location of the template keyword.
-    /// For e.g. typename T::template Y<U>
+    /// TemplateKWLoc - The location of the template keyword within the
+    /// source.
     SourceLocation TemplateKWLoc;
 
     /// TemplateNameLoc - The location of the template name within the
@@ -186,56 +183,34 @@ namespace clang {
     
     /// \brief Retrieves a pointer to the template arguments
     ParsedTemplateArgument *getTemplateArgs() { 
-      return getTrailingObjects<ParsedTemplateArgument>(); 
+      return reinterpret_cast<ParsedTemplateArgument *>(this + 1); 
     }
 
     /// \brief Creates a new TemplateIdAnnotation with NumArgs arguments and
     /// appends it to List.
     static TemplateIdAnnotation *
-    Create(CXXScopeSpec SS, SourceLocation TemplateKWLoc,
-           SourceLocation TemplateNameLoc, IdentifierInfo *Name,
-           OverloadedOperatorKind OperatorKind,
-           ParsedTemplateTy OpaqueTemplateName, TemplateNameKind TemplateKind,
-           SourceLocation LAngleLoc, SourceLocation RAngleLoc,
-           ArrayRef<ParsedTemplateArgument> TemplateArgs,
-           SmallVectorImpl<TemplateIdAnnotation *> &CleanupList) {
-
-      TemplateIdAnnotation *TemplateId = new (std::malloc(
-          totalSizeToAlloc<ParsedTemplateArgument>(TemplateArgs.size())))
-          TemplateIdAnnotation(SS, TemplateKWLoc, TemplateNameLoc, Name,
-                               OperatorKind, OpaqueTemplateName, TemplateKind,
-                               LAngleLoc, RAngleLoc, TemplateArgs);
-      CleanupList.push_back(TemplateId);
+    Allocate(unsigned NumArgs, SmallVectorImpl<TemplateIdAnnotation*> &List) {
+      TemplateIdAnnotation *TemplateId
+        = (TemplateIdAnnotation *)std::malloc(sizeof(TemplateIdAnnotation) +
+                                      sizeof(ParsedTemplateArgument) * NumArgs);
+      TemplateId->NumArgs = NumArgs;
+      
+      // Default-construct nested-name-specifier.
+      new (&TemplateId->SS) CXXScopeSpec();
+      
+      // Default-construct parsed template arguments.
+      ParsedTemplateArgument *TemplateArgs = TemplateId->getTemplateArgs();
+      for (unsigned I = 0; I != NumArgs; ++I)
+        new (TemplateArgs + I) ParsedTemplateArgument();
+      
+      List.push_back(TemplateId);
       return TemplateId;
     }
-
-    void Destroy() {
-      std::for_each(
-          getTemplateArgs(), getTemplateArgs() + NumArgs,
-          [](ParsedTemplateArgument &A) { A.~ParsedTemplateArgument(); });
-      this->~TemplateIdAnnotation();
+    
+    void Destroy() { 
+      SS.~CXXScopeSpec();
       free(this); 
     }
-  private:
-    TemplateIdAnnotation(const TemplateIdAnnotation &) = delete;
-
-    TemplateIdAnnotation(CXXScopeSpec SS, SourceLocation TemplateKWLoc,
-                         SourceLocation TemplateNameLoc, IdentifierInfo *Name,
-                         OverloadedOperatorKind OperatorKind,
-                         ParsedTemplateTy OpaqueTemplateName,
-                         TemplateNameKind TemplateKind,
-                         SourceLocation LAngleLoc, SourceLocation RAngleLoc,
-                         ArrayRef<ParsedTemplateArgument> TemplateArgs) noexcept
-        : SS(SS), TemplateKWLoc(TemplateKWLoc),
-          TemplateNameLoc(TemplateNameLoc), Name(Name), Operator(OperatorKind),
-          Template(OpaqueTemplateName), Kind(TemplateKind),
-          LAngleLoc(LAngleLoc), RAngleLoc(RAngleLoc),
-          NumArgs(TemplateArgs.size()) {
-
-      std::uninitialized_copy(TemplateArgs.begin(), TemplateArgs.end(),
-                              getTemplateArgs());
-    }
-    ~TemplateIdAnnotation() = default;
   };
 
   /// Retrieves the range of the given template parameter lists.

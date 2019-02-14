@@ -192,7 +192,10 @@ namespace {
 } // end anonymous namespace
 
 char GlobalMerge::ID = 0;
-INITIALIZE_PASS(GlobalMerge, DEBUG_TYPE, "Merge global variables", false, false)
+INITIALIZE_PASS_BEGIN(GlobalMerge, "global-merge", "Merge global variables",
+                      false, false)
+INITIALIZE_PASS_END(GlobalMerge, "global-merge", "Merge global variables",
+                    false, false)
 
 bool GlobalMerge::doMerge(SmallVectorImpl<GlobalVariable*> &Globals,
                           Module &M, bool isConst, unsigned AddrSpace) const {
@@ -553,12 +556,7 @@ bool GlobalMerge::doInitialization(Module &M) {
   // Grab all non-const globals.
   for (auto &GV : M.globals()) {
     // Merge is safe for "normal" internal or external globals only
-    if (GV.isDeclaration() || GV.isThreadLocal() ||
-        GV.hasSection() || GV.hasImplicitSection())
-      continue;
-
-    // It's not safe to merge globals that may be preempted
-    if (TM && !TM->shouldAssumeDSOLocal(M, &GV))
+    if (GV.isDeclaration() || GV.isThreadLocal() || GV.hasSection())
       continue;
 
     if (!(MergeExternalGlobals && GV.hasExternalLinkage()) &&

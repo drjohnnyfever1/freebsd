@@ -9,7 +9,6 @@
 
 #include "Driver.h"
 
-#include <csignal>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>

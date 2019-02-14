@@ -1,4 +1,4 @@
-//===- llvm/MC/MCAsmParser.h - Abstract Asm Parser Interface ----*- C++ -*-===//
+//===-- llvm/MC/MCAsmParser.h - Abstract Asm Parser Interface ---*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,21 +10,16 @@
 #ifndef LLVM_MC_MCPARSER_MCASMPARSER_H
 #define LLVM_MC_MCPARSER_MCASMPARSER_H
 
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/MC/MCParser/MCAsmLexer.h"
-#include "llvm/Support/SMLoc.h"
-#include <cstdint>
-#include <string>
-#include <utility>
+#include "llvm/MC/MCParser/AsmLexer.h"
+#include "llvm/Support/DataTypes.h"
 
 namespace llvm {
-
 class MCAsmInfo;
+class MCAsmLexer;
 class MCAsmParserExtension;
 class MCContext;
 class MCExpr;
@@ -32,7 +27,10 @@ class MCInstPrinter;
 class MCInstrInfo;
 class MCStreamer;
 class MCTargetAsmParser;
+class SMLoc;
+class SMRange;
 class SourceMgr;
+class Twine;
 
 class InlineAsmIdentifierInfo {
 public:
@@ -53,12 +51,12 @@ public:
 class MCAsmParserSemaCallback {
 public:
   virtual ~MCAsmParserSemaCallback();
-
   virtual void *LookupInlineAsmIdentifier(StringRef &LineBuf,
                                           InlineAsmIdentifierInfo &Info,
                                           bool IsUnevaluatedContext) = 0;
   virtual StringRef LookupInlineAsmLabel(StringRef Identifier, SourceMgr &SM,
                                          SMLoc Location, bool Create) = 0;
+
   virtual bool LookupInlineAsmField(StringRef Base, StringRef Member,
                                     unsigned &Offset) = 0;
 };
@@ -67,9 +65,9 @@ public:
 /// assembly parsers.
 class MCAsmParser {
 public:
-  using DirectiveHandler = bool (*)(MCAsmParserExtension*, StringRef, SMLoc);
-  using ExtensionDirectiveHandler =
-      std::pair<MCAsmParserExtension*, DirectiveHandler>;
+  typedef bool (*DirectiveHandler)(MCAsmParserExtension*, StringRef, SMLoc);
+  typedef std::pair<MCAsmParserExtension*, DirectiveHandler>
+    ExtensionDirectiveHandler;
 
   struct MCPendingError {
     SMLoc Loc;
@@ -78,21 +76,22 @@ public:
   };
 
 private:
-  MCTargetAsmParser *TargetParser = nullptr;
+  MCAsmParser(const MCAsmParser &) = delete;
+  void operator=(const MCAsmParser &) = delete;
+
+  MCTargetAsmParser *TargetParser;
 
   unsigned ShowParsedOperands : 1;
 
 protected: // Can only create subclasses.
   MCAsmParser();
 
-  bool HadError = false;
+  bool HadError;
 
   SmallVector<MCPendingError, 1> PendingErrors;
   /// Flag tracking whether any errors have been encountered.
 
 public:
-  MCAsmParser(const MCAsmParser &) = delete;
-  MCAsmParser &operator=(const MCAsmParser &) = delete;
   virtual ~MCAsmParser();
 
   virtual void addDirectiveHandler(StringRef Directive,
@@ -187,12 +186,12 @@ public:
 
   bool parseEOL(const Twine &ErrMsg);
 
-  bool parseMany(function_ref<bool()> parseOne, bool hasComma = true);
+  bool parseMany(std::function<bool()> parseOne, bool hasComma = true);
 
   bool parseIntToken(int64_t &V, const Twine &ErrMsg);
 
-  bool check(bool P, const Twine &Msg);
-  bool check(bool P, SMLoc Loc, const Twine &Msg);
+  bool check(bool P, const llvm::Twine &Msg);
+  bool check(bool P, SMLoc Loc, const llvm::Twine &Msg);
 
   /// \brief Parse an identifier or string (as a quoted identifier) and set \p
   /// Res to the identifier contents.
@@ -261,6 +260,6 @@ public:
 MCAsmParser *createMCAsmParser(SourceMgr &, MCContext &, MCStreamer &,
                                const MCAsmInfo &, unsigned CB = 0);
 
-} // end namespace llvm
+} // End llvm namespace
 
-#endif // LLVM_MC_MCPARSER_MCASMPARSER_H
+#endif

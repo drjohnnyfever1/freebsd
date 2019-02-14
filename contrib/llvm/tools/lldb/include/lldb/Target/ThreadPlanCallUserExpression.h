@@ -35,8 +35,6 @@ public:
 
   void GetDescription(Stream *s, lldb::DescriptionLevel level) override;
 
-  void DidPush() override;
-
   void WillPop() override;
 
   lldb::StopInfoSP GetRealStopInfo() override;
@@ -50,7 +48,6 @@ public:
   }
 
 protected:
-  void DoTakedown(bool success) override;
 private:
   lldb::UserExpressionSP
       m_user_expression_sp; // This is currently just used to ensure the

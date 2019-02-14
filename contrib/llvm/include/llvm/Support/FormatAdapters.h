@@ -22,22 +22,23 @@ protected:
   explicit FormatAdapter(T &&Item) : Item(Item) {}
 
   T Item;
+
+  static_assert(!detail::uses_missing_provider<T>::value,
+                "Item does not have a format provider!");
 };
 
 namespace detail {
 template <typename T> class AlignAdapter final : public FormatAdapter<T> {
   AlignStyle Where;
   size_t Amount;
-  char Fill;
 
 public:
-  AlignAdapter(T &&Item, AlignStyle Where, size_t Amount, char Fill)
-      : FormatAdapter<T>(std::forward<T>(Item)), Where(Where), Amount(Amount),
-        Fill(Fill) {}
+  AlignAdapter(T &&Item, AlignStyle Where, size_t Amount)
+      : FormatAdapter<T>(std::forward<T>(Item)), Where(Where), Amount(Amount) {}
 
   void format(llvm::raw_ostream &Stream, StringRef Style) {
     auto Adapter = detail::build_format_adapter(std::forward<T>(this->Item));
-    FmtAlign(Adapter, Where, Amount, Fill).format(Stream, Style);
+    FmtAlign(Adapter, Where, Amount).format(Stream, Style);
   }
 };
 
@@ -74,9 +75,8 @@ public:
 }
 
 template <typename T>
-detail::AlignAdapter<T> fmt_align(T &&Item, AlignStyle Where, size_t Amount,
-                                  char Fill = ' ') {
-  return detail::AlignAdapter<T>(std::forward<T>(Item), Where, Amount, Fill);
+detail::AlignAdapter<T> fmt_align(T &&Item, AlignStyle Where, size_t Amount) {
+  return detail::AlignAdapter<T>(std::forward<T>(Item), Where, Amount);
 }
 
 template <typename T>

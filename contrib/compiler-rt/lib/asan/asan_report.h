@@ -23,7 +23,6 @@ struct StackVarDescr {
   uptr size;
   const char *name_pos;
   uptr name_len;
-  uptr line;
 };
 
 // Returns the number of globals close to the provided address and copies

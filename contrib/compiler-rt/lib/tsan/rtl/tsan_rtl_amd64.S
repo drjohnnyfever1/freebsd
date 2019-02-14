@@ -1,8 +1,4 @@
-// The content of this file is x86_64-only:
-#if defined(__x86_64__)
-
 #include "sanitizer_common/sanitizer_asm.h"
-
 #if !defined(__APPLE__)
 .section .text
 #else
@@ -360,6 +356,4 @@ ASM_SIZE(ASM_TSAN_SYMBOL_INTERCEPTOR(__sigsetjmp))
 #if defined(__FreeBSD__) || defined(__linux__)
 /* We do not need executable stack.  */
 .section        .note.GNU-stack,"",@progbits
-#endif
-
 #endif

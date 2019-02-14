@@ -221,7 +221,6 @@ void InitHeaderSearch::AddDefaultCIncludePaths(const llvm::Triple &triple,
     case llvm::Triple::Win32:
       if (triple.getEnvironment() != llvm::Triple::Cygnus)
         break;
-      LLVM_FALLTHROUGH;
     default:
       // FIXME: temporary hack: hard-coded paths.
       AddPath("/usr/local/include", System, false);
@@ -344,7 +343,6 @@ void InitHeaderSearch::AddDefaultCIncludePaths(const llvm::Triple &triple,
     AddPath(BaseSDKPath + "/target/include", System, false);
     if (triple.isPS4CPU())
       AddPath(BaseSDKPath + "/target/include_common", System, false);
-    LLVM_FALLTHROUGH;
   }
   default:
     AddPath("/usr/include", ExternCSystem, false);

@@ -109,9 +109,6 @@ protected:
   MCSection *DwarfLineDWOSection;
   MCSection *DwarfLocDWOSection;
   MCSection *DwarfStrOffDWOSection;
-
-  /// The DWARF v5 string offset and address table sections.
-  MCSection *DwarfStrOffSection;
   MCSection *DwarfAddrSection;
 
   // These are for Fission DWP files.
@@ -132,7 +129,7 @@ protected:
   /// it'll go here.
   MCSection *TLSExtraDataSection;
 
-  /// Section directive for Thread Local data. ELF, MachO, COFF, and Wasm.
+  /// Section directive for Thread Local data. ELF, MachO and COFF.
   MCSection *TLSDataSection; // Defaults to ".tdata".
 
   /// Section directive for Thread Local uninitialized data.
@@ -263,7 +260,6 @@ public:
   MCSection *getDwarfLineDWOSection() const { return DwarfLineDWOSection; }
   MCSection *getDwarfLocDWOSection() const { return DwarfLocDWOSection; }
   MCSection *getDwarfStrOffDWOSection() const { return DwarfStrOffDWOSection; }
-  MCSection *getDwarfStrOffSection() const { return DwarfStrOffSection; }
   MCSection *getDwarfAddrSection() const { return DwarfAddrSection; }
   MCSection *getDwarfCUIndexSection() const { return DwarfCUIndexSection; }
   MCSection *getDwarfTUIndexSection() const { return DwarfTUIndexSection; }
@@ -342,7 +338,7 @@ public:
     return EHFrameSection;
   }
 
-  enum Environment { IsMachO, IsELF, IsCOFF, IsWasm };
+  enum Environment { IsMachO, IsELF, IsCOFF };
   Environment getObjectFileType() const { return Env; }
 
   bool isPositionIndependent() const { return PositionIndependent; }
@@ -357,7 +353,6 @@ private:
   void initMachOMCObjectFileInfo(const Triple &T);
   void initELFMCObjectFileInfo(const Triple &T);
   void initCOFFMCObjectFileInfo(const Triple &T);
-  void initWasmMCObjectFileInfo(const Triple &T);
 
 public:
   const Triple &getTargetTriple() const { return TT; }

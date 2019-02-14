@@ -1,4 +1,4 @@
-//==- RegisterUsageInfo.h - Register Usage Informartion Storage --*- C++ -*-==//
+//==- RegisterUsageInfo.h - Register Usage Informartion Storage -*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -20,14 +20,14 @@
 #define LLVM_CODEGEN_PHYSICALREGISTERUSAGEINFO_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
-#include <cstdint>
-#include <vector>
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
-
-class Function;
-class TargetMachine;
 
 class PhysicalRegisterUsageInfo : public ImmutablePass {
   virtual void anchor();
@@ -70,7 +70,6 @@ private:
 
   const TargetMachine *TM;
 };
+}
 
-} // end namespace llvm
-
-#endif // LLVM_CODEGEN_PHYSICALREGISTERUSAGEINFO_H
+#endif

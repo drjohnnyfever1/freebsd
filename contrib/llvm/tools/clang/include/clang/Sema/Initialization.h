@@ -70,9 +70,6 @@ public:
     /// \brief The entity being initialized is a field of block descriptor for
     /// the copied-in c++ object.
     EK_BlockElement,
-    /// The entity being initialized is a field of block descriptor for the
-    /// copied-in lambda object that's used in the lambda to block conversion.
-    EK_LambdaToBlockConversionBlockElement,
     /// \brief The entity being initialized is the real or imaginary part of a
     /// complex number.
     EK_ComplexElement,
@@ -263,13 +260,7 @@ public:
                                            QualType Type, bool NRVO) {
     return InitializedEntity(EK_BlockElement, BlockVarLoc, Type, NRVO);
   }
-
-  static InitializedEntity InitializeLambdaToBlock(SourceLocation BlockVarLoc,
-                                                   QualType Type, bool NRVO) {
-    return InitializedEntity(EK_LambdaToBlockConversionBlockElement,
-                             BlockVarLoc, Type, NRVO);
-  }
-
+  
   /// \brief Create the initialization entity for an exception object.
   static InitializedEntity InitializeException(SourceLocation ThrowLoc,
                                                QualType Type, bool NRVO) {
@@ -283,18 +274,15 @@ public:
   
   /// \brief Create the initialization entity for a temporary.
   static InitializedEntity InitializeTemporary(QualType Type) {
-    return InitializeTemporary(nullptr, Type);
+    InitializedEntity Result(EK_Temporary, SourceLocation(), Type);
+    Result.TypeInfo = nullptr;
+    return Result;
   }
 
   /// \brief Create the initialization entity for a temporary.
   static InitializedEntity InitializeTemporary(TypeSourceInfo *TypeInfo) {
-    return InitializeTemporary(TypeInfo, TypeInfo->getType());
-  }
-  
-  /// \brief Create the initialization entity for a temporary.
-  static InitializedEntity InitializeTemporary(TypeSourceInfo *TypeInfo,
-                                               QualType Type) {
-    InitializedEntity Result(EK_Temporary, SourceLocation(), Type);
+    InitializedEntity Result(EK_Temporary, SourceLocation(), 
+                             TypeInfo->getType());
     Result.TypeInfo = TypeInfo;
     return Result;
   }
@@ -591,16 +579,6 @@ public:
     return InitializationKind(IK_Value, isImplicit ? IC_Implicit : IC_Normal,
                               InitLoc, LParenLoc, RParenLoc);
   }
-
-  /// \brief Create an initialization from an initializer (which, for direct
-  /// initialization from a parenthesized list, will be a ParenListExpr).
-  static InitializationKind CreateForInit(SourceLocation Loc, bool DirectInit,
-                                          Expr *Init) {
-    if (!Init) return CreateDefault(Loc);
-    if (!DirectInit) return CreateCopy(Loc, Init->getLocStart());
-    if (isa<InitListExpr>(Init)) return CreateDirectList(Loc);
-    return CreateDirect(Loc, Init->getLocStart(), Init->getLocEnd());
-  }
   
   /// \brief Determine the initialization kind.
   InitKind getKind() const {
@@ -831,8 +809,6 @@ public:
   enum FailureKind {
     /// \brief Too many initializers provided for a reference.
     FK_TooManyInitsForReference,
-    /// \brief Reference initialized from a parenthesized initializer list.
-    FK_ParenthesizedListInitForReference,
     /// \brief Array must be initialized with an initializer list.
     FK_ArrayNeedsInitList,
     /// \brief Array must be initialized with an initializer list or a 
@@ -877,8 +853,6 @@ public:
     FK_ConversionFromPropertyFailed,
     /// \brief Too many initializers for scalar
     FK_TooManyInitsForScalar,
-    /// \brief Scalar initialized from a parenthesized initializer list.
-    FK_ParenthesizedListInitForScalar,
     /// \brief Reference initialization from an initializer list
     FK_ReferenceBindingToInitList,
     /// \brief Initialization of some unused destination type with an
@@ -905,7 +879,7 @@ public:
     /// having its address taken.
     FK_AddressOfUnaddressableFunction,
     /// \brief List-copy-initialization chose an explicit constructor.
-    FK_ExplicitConstructor,
+    FK_ExplicitConstructor
   };
   
 private:

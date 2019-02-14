@@ -31,7 +31,7 @@ public:
 
   /// Override this as NVPTX has its own way of printing switching
   /// to a section.
-  void PrintSwitchToSection(const MCAsmInfo &MAI, const Triple &T,
+  void PrintSwitchToSection(const MCAsmInfo &MAI,
                             raw_ostream &OS,
                             const MCExpr *Subsection) const override {}
 

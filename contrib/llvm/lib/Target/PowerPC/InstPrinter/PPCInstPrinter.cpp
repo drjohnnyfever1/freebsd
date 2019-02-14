@@ -12,9 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "PPCInstPrinter.h"
+#include "PPCInstrInfo.h"
 #include "MCTargetDesc/PPCMCTargetDesc.h"
 #include "MCTargetDesc/PPCPredicates.h"
-#include "PPCInstrInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -95,8 +95,7 @@ void PPCInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     return;
   }
   
-  if (MI->getOpcode() == PPC::RLDICR ||
-      MI->getOpcode() == PPC::RLDICR_32) {
+  if (MI->getOpcode() == PPC::RLDICR) {
     unsigned char SH = MI->getOperand(2).getImm();
     unsigned char ME = MI->getOperand(3).getImm();
     // rldicr RA, RS, SH, 63-SH == sldi RA, RS, SH

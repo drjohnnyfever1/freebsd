@@ -52,7 +52,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "twoaddressinstruction"
+#define DEBUG_TYPE "twoaddrinstr"
 
 STATISTIC(NumTwoAddressInstrs, "Number of two-address instructions");
 STATISTIC(NumCommuted        , "Number of instructions commuted to coalesce");
@@ -67,13 +67,6 @@ static cl::opt<bool>
 EnableRescheduling("twoaddr-reschedule",
                    cl::desc("Coalesce copies by rescheduling (default=true)"),
                    cl::init(true), cl::Hidden);
-
-// Limit the number of dataflow edges to traverse when evaluating the benefit
-// of commuting operands.
-static cl::opt<unsigned> MaxDataFlowEdge(
-    "dataflow-edge-limit", cl::Hidden, cl::init(3),
-    cl::desc("Maximum number of dataflow edges to traverse when evaluating "
-             "the benefit of commuting operands"));
 
 namespace {
 class TwoAddressInstructionPass : public MachineFunctionPass {
@@ -162,7 +155,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
-    AU.addUsedIfAvailable<AAResultsWrapperPass>();
+    AU.addRequired<AAResultsWrapperPass>();
     AU.addUsedIfAvailable<LiveVariables>();
     AU.addPreserved<LiveVariables>();
     AU.addPreserved<SlotIndexes>();
@@ -178,10 +171,10 @@ public:
 } // end anonymous namespace
 
 char TwoAddressInstructionPass::ID = 0;
-INITIALIZE_PASS_BEGIN(TwoAddressInstructionPass, DEBUG_TYPE,
+INITIALIZE_PASS_BEGIN(TwoAddressInstructionPass, "twoaddressinstruction",
                 "Two-Address instruction pass", false, false)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
-INITIALIZE_PASS_END(TwoAddressInstructionPass, DEBUG_TYPE,
+INITIALIZE_PASS_END(TwoAddressInstructionPass, "twoaddressinstruction",
                 "Two-Address instruction pass", false, false)
 
 char &llvm::TwoAddressInstructionPassID = TwoAddressInstructionPass::ID;
@@ -644,10 +637,10 @@ isProfitableToCommute(unsigned regA, unsigned regB, unsigned regC,
   // To more generally minimize register copies, ideally the logic of two addr
   // instruction pass should be integrated with register allocation pass where
   // interference graph is available.
-  if (isRevCopyChain(regC, regA, MaxDataFlowEdge))
+  if (isRevCopyChain(regC, regA, 3))
     return true;
 
-  if (isRevCopyChain(regB, regA, MaxDataFlowEdge))
+  if (isRevCopyChain(regB, regA, 3))
     return false;
 
   // Since there are no intervening uses for both registers, then commute
@@ -912,7 +905,7 @@ rescheduleMIBelowKill(MachineBasicBlock::iterator &mi,
     ++End;
   }
 
-  // Check if the reschedule will not break dependencies.
+  // Check if the reschedule will not break depedencies.
   unsigned NumVisited = 0;
   MachineBasicBlock::iterator KillPos = KillMI;
   ++KillPos;
@@ -1634,10 +1627,7 @@ bool TwoAddressInstructionPass::runOnMachineFunction(MachineFunction &Func) {
   InstrItins = MF->getSubtarget().getInstrItineraryData();
   LV = getAnalysisIfAvailable<LiveVariables>();
   LIS = getAnalysisIfAvailable<LiveIntervals>();
-  if (auto *AAPass = getAnalysisIfAvailable<AAResultsWrapperPass>())
-    AA = &AAPass->getAAResults();
-  else
-    AA = nullptr;
+  AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
   OptLevel = TM.getOptLevel();
 
   bool MadeChange = false;
@@ -1795,7 +1785,7 @@ eliminateRegSequence(MachineBasicBlock::iterator &MBBI) {
     MachineInstr *CopyMI = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
                                    TII->get(TargetOpcode::COPY))
                                .addReg(DstReg, RegState::Define, SubIdx)
-                               .add(UseMO);
+                               .addOperand(UseMO);
 
     // The first def needs an <undef> flag because there is no live register
     // before it.

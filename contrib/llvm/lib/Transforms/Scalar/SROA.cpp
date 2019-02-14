@@ -25,7 +25,6 @@
 
 #include "llvm/Transforms/Scalar/SROA.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AssumptionCache.h"
@@ -326,7 +325,7 @@ private:
   /// partition.
   uint64_t BeginOffset, EndOffset;
 
-  /// \brief The start and end iterators of this partition.
+  /// \brief The start end end iterators of this partition.
   iterator SI, SJ;
 
   /// \brief A collection of split slice tails overlapping the partition.
@@ -1252,7 +1251,7 @@ static bool isSafeSelectToSpeculate(SelectInst &SI) {
     if (!LI || !LI->isSimple())
       return false;
 
-    // Both operands to the select need to be dereferenceable, either
+    // Both operands to the select need to be dereferencable, either
     // absolutely (e.g. allocas) or at this point because we can see other
     // accesses to it.
     if (!isSafeToLoadUnconditionally(TValue, LI->getAlignment(), DL, LI))
@@ -1637,17 +1636,8 @@ static bool canConvertValue(const DataLayout &DL, Type *OldTy, Type *NewTy) {
       return cast<PointerType>(NewTy)->getPointerAddressSpace() ==
         cast<PointerType>(OldTy)->getPointerAddressSpace();
     }
-
-    // We can convert integers to integral pointers, but not to non-integral
-    // pointers.
-    if (OldTy->isIntegerTy())
-      return !DL.isNonIntegralPointerType(NewTy);
-
-    // We can convert integral pointers to integers, but non-integral pointers
-    // need to remain pointers.
-    if (!DL.isNonIntegralPointerType(OldTy))
-      return NewTy->isIntegerTy();
-
+    if (NewTy->isIntegerTy() || OldTy->isIntegerTy())
+      return true;
     return false;
   }
 
@@ -1673,7 +1663,8 @@ static Value *convertValue(const DataLayout &DL, IRBuilderTy &IRB, Value *V,
 
   // See if we need inttoptr for this type pair. A cast involving both scalars
   // and vectors requires and additional bitcast.
-  if (OldTy->isIntOrIntVectorTy() && NewTy->isPtrOrPtrVectorTy()) {
+  if (OldTy->getScalarType()->isIntegerTy() &&
+      NewTy->getScalarType()->isPointerTy()) {
     // Expand <2 x i32> to i8* --> <2 x i32> to i64 to i8*
     if (OldTy->isVectorTy() && !NewTy->isVectorTy())
       return IRB.CreateIntToPtr(IRB.CreateBitCast(V, DL.getIntPtrType(NewTy)),
@@ -1689,7 +1680,8 @@ static Value *convertValue(const DataLayout &DL, IRBuilderTy &IRB, Value *V,
 
   // See if we need ptrtoint for this type pair. A cast involving both scalars
   // and vectors requires and additional bitcast.
-  if (OldTy->isPtrOrPtrVectorTy() && NewTy->isIntOrIntVectorTy()) {
+  if (OldTy->getScalarType()->isPointerTy() &&
+      NewTy->getScalarType()->isIntegerTy()) {
     // Expand <2 x i8*> to i128 --> <2 x i8*> to <2 x i64> to i128
     if (OldTy->isVectorTy() && !NewTy->isVectorTy())
       return IRB.CreateBitCast(IRB.CreatePtrToInt(V, DL.getIntPtrType(OldTy)),
@@ -1833,7 +1825,6 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
     // Rank the remaining candidate vector types. This is easy because we know
     // they're all integer vectors. We sort by ascending number of elements.
     auto RankVectorTypes = [&DL](VectorType *RHSTy, VectorType *LHSTy) {
-      (void)DL;
       assert(DL.getTypeSizeInBits(RHSTy) == DL.getTypeSizeInBits(LHSTy) &&
              "Cannot have vector types of different sizes!");
       assert(RHSTy->getElementType()->isIntegerTy() &&
@@ -2194,8 +2185,8 @@ class llvm::sroa::AllocaSliceRewriter
   Instruction *OldPtr;
 
   // Track post-rewrite users which are PHI nodes and Selects.
-  SmallSetVector<PHINode *, 8> &PHIUsers;
-  SmallSetVector<SelectInst *, 8> &SelectUsers;
+  SmallPtrSetImpl<PHINode *> &PHIUsers;
+  SmallPtrSetImpl<SelectInst *> &SelectUsers;
 
   // Utility IR builder, whose name prefix is setup for each visited use, and
   // the insertion point is set to point to the user.
@@ -2207,8 +2198,8 @@ public:
                       uint64_t NewAllocaBeginOffset,
                       uint64_t NewAllocaEndOffset, bool IsIntegerPromotable,
                       VectorType *PromotableVecTy,
-                      SmallSetVector<PHINode *, 8> &PHIUsers,
-                      SmallSetVector<SelectInst *, 8> &SelectUsers)
+                      SmallPtrSetImpl<PHINode *> &PHIUsers,
+                      SmallPtrSetImpl<SelectInst *> &SelectUsers)
       : DL(DL), AS(AS), Pass(Pass), OldAI(OldAI), NewAI(NewAI),
         NewAllocaBeginOffset(NewAllocaBeginOffset),
         NewAllocaEndOffset(NewAllocaEndOffset),
@@ -2303,8 +2294,7 @@ private:
 #endif
 
     return getAdjustedPtr(IRB, DL, &NewAI,
-                          APInt(DL.getPointerTypeSizeInBits(PointerTy), Offset),
-                          PointerTy,
+                          APInt(DL.getPointerSizeInBits(), Offset), PointerTy,
 #ifndef NDEBUG
                           Twine(OldName) + "."
 #else
@@ -2379,8 +2369,6 @@ private:
     Value *OldOp = LI.getOperand(0);
     assert(OldOp == OldPtr);
 
-    unsigned AS = LI.getPointerAddressSpace();
-
     Type *TargetTy = IsSplit ? Type::getIntNTy(LI.getContext(), SliceSize * 8)
                              : LI.getType();
     const bool IsLoadPastEnd = DL.getTypeStoreSize(TargetTy) > SliceSize;
@@ -2398,22 +2386,7 @@ private:
       LoadInst *NewLI = IRB.CreateAlignedLoad(&NewAI, NewAI.getAlignment(),
                                               LI.isVolatile(), LI.getName());
       if (LI.isVolatile())
-        NewLI->setAtomic(LI.getOrdering(), LI.getSyncScopeID());
-
-      // Any !nonnull metadata or !range metadata on the old load is also valid
-      // on the new load. This is even true in some cases even when the loads
-      // are different types, for example by mapping !nonnull metadata to
-      // !range metadata by modeling the null pointer constant converted to the
-      // integer type.
-      // FIXME: Add support for range metadata here. Currently the utilities
-      // for this don't propagate range metadata in trivial cases from one
-      // integer load to another, don't handle non-addrspace-0 null pointers
-      // correctly, and don't have any support for mapping ranges as the
-      // integer type becomes winder or narrower.
-      if (MDNode *N = LI.getMetadata(LLVMContext::MD_nonnull))
-        copyNonnullMetadata(LI, N, *NewLI);
-
-      // Try to preserve nonnull metadata
+        NewLI->setAtomic(LI.getOrdering(), LI.getSynchScope());
       V = NewLI;
 
       // If this is an integer load past the end of the slice (which means the
@@ -2428,12 +2401,12 @@ private:
                                 "endian_shift");
           }
     } else {
-      Type *LTy = TargetTy->getPointerTo(AS);
+      Type *LTy = TargetTy->getPointerTo();
       LoadInst *NewLI = IRB.CreateAlignedLoad(getNewAllocaSlicePtr(IRB, LTy),
                                               getSliceAlign(TargetTy),
                                               LI.isVolatile(), LI.getName());
       if (LI.isVolatile())
-        NewLI->setAtomic(LI.getOrdering(), LI.getSyncScopeID());
+        NewLI->setAtomic(LI.getOrdering(), LI.getSynchScope());
 
       V = NewLI;
       IsPtrAdjusted = true;
@@ -2456,12 +2429,12 @@ private:
       // the computed value, and then replace the placeholder with LI, leaving
       // LI only used for this computation.
       Value *Placeholder =
-          new LoadInst(UndefValue::get(LI.getType()->getPointerTo(AS)));
+          new LoadInst(UndefValue::get(LI.getType()->getPointerTo()));
       V = insertInteger(DL, IRB, Placeholder, V, NewBeginOffset - BeginOffset,
                         "insert");
       LI.replaceAllUsesWith(V);
       Placeholder->replaceAllUsesWith(&LI);
-      Placeholder->deleteValue();
+      delete Placeholder;
     } else {
       LI.replaceAllUsesWith(V);
     }
@@ -2569,14 +2542,13 @@ private:
       NewSI = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment(),
                                      SI.isVolatile());
     } else {
-      unsigned AS = SI.getPointerAddressSpace();
-      Value *NewPtr = getNewAllocaSlicePtr(IRB, V->getType()->getPointerTo(AS));
+      Value *NewPtr = getNewAllocaSlicePtr(IRB, V->getType()->getPointerTo());
       NewSI = IRB.CreateAlignedStore(V, NewPtr, getSliceAlign(V->getType()),
                                      SI.isVolatile());
     }
     NewSI->copyMetadata(SI, LLVMContext::MD_mem_parallel_loop_access);
     if (SI.isVolatile())
-      NewSI->setAtomic(SI.getOrdering(), SI.getSyncScopeID());
+      NewSI->setAtomic(SI.getOrdering(), SI.getSynchScope());
     Pass.DeadInsts.insert(&SI);
     deleteIfTriviallyDead(OldOp);
 
@@ -3589,11 +3561,10 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
     int Idx = 0, Size = Offsets.Splits.size();
     for (;;) {
       auto *PartTy = Type::getIntNTy(Ty->getContext(), PartSize * 8);
-      auto AS = LI->getPointerAddressSpace();
-      auto *PartPtrTy = PartTy->getPointerTo(AS);
+      auto *PartPtrTy = PartTy->getPointerTo(LI->getPointerAddressSpace());
       LoadInst *PLoad = IRB.CreateAlignedLoad(
           getAdjustedPtr(IRB, DL, BasePtr,
-                         APInt(DL.getPointerSizeInBits(AS), PartOffset),
+                         APInt(DL.getPointerSizeInBits(), PartOffset),
                          PartPtrTy, BasePtr->getName() + "."),
           getAdjustedAlignment(LI, PartOffset, DL), /*IsVolatile*/ false,
           LI->getName());
@@ -3645,12 +3616,10 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
         auto *PartPtrTy =
             PLoad->getType()->getPointerTo(SI->getPointerAddressSpace());
 
-        auto AS = SI->getPointerAddressSpace();
         StoreInst *PStore = IRB.CreateAlignedStore(
-            PLoad,
-            getAdjustedPtr(IRB, DL, StoreBasePtr,
-                           APInt(DL.getPointerSizeInBits(AS), PartOffset),
-                           PartPtrTy, StoreBasePtr->getName() + "."),
+            PLoad, getAdjustedPtr(IRB, DL, StoreBasePtr,
+                                  APInt(DL.getPointerSizeInBits(), PartOffset),
+                                  PartPtrTy, StoreBasePtr->getName() + "."),
             getAdjustedAlignment(SI, PartOffset, DL), /*IsVolatile*/ false);
         PStore->copyMetadata(*LI, LLVMContext::MD_mem_parallel_loop_access);
         DEBUG(dbgs() << "      +" << PartOffset << ":" << *PStore << "\n");
@@ -3719,8 +3688,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
     int Idx = 0, Size = Offsets.Splits.size();
     for (;;) {
       auto *PartTy = Type::getIntNTy(Ty->getContext(), PartSize * 8);
-      auto *LoadPartPtrTy = PartTy->getPointerTo(LI->getPointerAddressSpace());
-      auto *StorePartPtrTy = PartTy->getPointerTo(SI->getPointerAddressSpace());
+      auto *PartPtrTy = PartTy->getPointerTo(SI->getPointerAddressSpace());
 
       // Either lookup a split load or create one.
       LoadInst *PLoad;
@@ -3728,23 +3696,20 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
         PLoad = (*SplitLoads)[Idx];
       } else {
         IRB.SetInsertPoint(LI);
-        auto AS = LI->getPointerAddressSpace();
         PLoad = IRB.CreateAlignedLoad(
             getAdjustedPtr(IRB, DL, LoadBasePtr,
-                           APInt(DL.getPointerSizeInBits(AS), PartOffset),
-                           LoadPartPtrTy, LoadBasePtr->getName() + "."),
+                           APInt(DL.getPointerSizeInBits(), PartOffset),
+                           PartPtrTy, LoadBasePtr->getName() + "."),
             getAdjustedAlignment(LI, PartOffset, DL), /*IsVolatile*/ false,
             LI->getName());
       }
 
       // And store this partition.
       IRB.SetInsertPoint(SI);
-      auto AS = SI->getPointerAddressSpace();
       StoreInst *PStore = IRB.CreateAlignedStore(
-          PLoad,
-          getAdjustedPtr(IRB, DL, StoreBasePtr,
-                         APInt(DL.getPointerSizeInBits(AS), PartOffset),
-                         StorePartPtrTy, StoreBasePtr->getName() + "."),
+          PLoad, getAdjustedPtr(IRB, DL, StoreBasePtr,
+                                APInt(DL.getPointerSizeInBits(), PartOffset),
+                                PartPtrTy, StoreBasePtr->getName() + "."),
           getAdjustedAlignment(SI, PartOffset, DL), /*IsVolatile*/ false);
 
       // Now build a new slice for the alloca.
@@ -3892,7 +3857,7 @@ AllocaInst *SROA::rewritePartition(AllocaInst &AI, AllocaSlices &AS,
     if (Alignment <= DL.getABITypeAlignment(SliceTy))
       Alignment = 0;
     NewAI = new AllocaInst(
-      SliceTy, AI.getType()->getAddressSpace(), nullptr, Alignment,
+        SliceTy, nullptr, Alignment,
         AI.getName() + ".sroa." + Twine(P.begin() - AS.begin()), &AI);
     ++NumNewAllocas;
   }
@@ -3906,8 +3871,8 @@ AllocaInst *SROA::rewritePartition(AllocaInst &AI, AllocaSlices &AS,
   // fact scheduled for promotion.
   unsigned PPWOldSize = PostPromotionWorklist.size();
   unsigned NumUses = 0;
-  SmallSetVector<PHINode *, 8> PHIUsers;
-  SmallSetVector<SelectInst *, 8> SelectUsers;
+  SmallPtrSet<PHINode *, 8> PHIUsers;
+  SmallPtrSet<SelectInst *, 8> SelectUsers;
 
   AllocaSliceRewriter Rewriter(DL, AS, *this, AI, *NewAI, P.beginOffset(),
                                P.endOffset(), IsIntegerPromotable, VecTy,
@@ -3923,20 +3888,24 @@ AllocaInst *SROA::rewritePartition(AllocaInst &AI, AllocaSlices &AS,
   }
 
   NumAllocaPartitionUses += NumUses;
-  MaxUsesPerAllocaPartition.updateMax(NumUses);
+  MaxUsesPerAllocaPartition =
+      std::max<unsigned>(NumUses, MaxUsesPerAllocaPartition);
 
   // Now that we've processed all the slices in the new partition, check if any
   // PHIs or Selects would block promotion.
-  for (PHINode *PHI : PHIUsers)
-    if (!isSafePHIToSpeculate(*PHI)) {
+  for (SmallPtrSetImpl<PHINode *>::iterator I = PHIUsers.begin(),
+                                            E = PHIUsers.end();
+       I != E; ++I)
+    if (!isSafePHIToSpeculate(**I)) {
       Promotable = false;
       PHIUsers.clear();
       SelectUsers.clear();
       break;
     }
-
-  for (SelectInst *Sel : SelectUsers)
-    if (!isSafeSelectToSpeculate(*Sel)) {
+  for (SmallPtrSetImpl<SelectInst *>::iterator I = SelectUsers.begin(),
+                                               E = SelectUsers.end();
+       I != E; ++I)
+    if (!isSafeSelectToSpeculate(**I)) {
       Promotable = false;
       PHIUsers.clear();
       SelectUsers.clear();
@@ -4040,7 +4009,8 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   }
 
   NumAllocaPartitions += NumPartitions;
-  MaxPartitionsPerAlloca.updateMax(NumPartitions);
+  MaxPartitionsPerAlloca =
+      std::max<unsigned>(NumPartitions, MaxPartitionsPerAlloca);
 
   // Migrate debug information from the old alloca to the new alloca(s)
   // and the individual partitions.
@@ -4214,7 +4184,7 @@ bool SROA::promoteAllocas(Function &F) {
   NumPromoted += PromotableAllocas.size();
 
   DEBUG(dbgs() << "Promoting allocas with mem2reg...\n");
-  PromoteMemToReg(PromotableAllocas, *DT, AC);
+  PromoteMemToReg(PromotableAllocas, *DT, nullptr, AC);
   PromotableAllocas.clear();
   return true;
 }
@@ -4264,8 +4234,9 @@ PreservedAnalyses SROA::runImpl(Function &F, DominatorTree &RunDT,
   if (!Changed)
     return PreservedAnalyses::all();
 
+  // FIXME: Even when promoting allocas we should preserve some abstract set of
+  // CFG-specific analyses.
   PreservedAnalyses PA;
-  PA.preserveSet<CFGAnalyses>();
   PA.preserve<GlobalsAA>();
   return PA;
 }

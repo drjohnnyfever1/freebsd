@@ -34,11 +34,10 @@ namespace {
     typedef RecursiveASTVisitor<ASTPrinter> base;
 
   public:
-    enum Kind { DumpFull, Dump, Print, None };
-    ASTPrinter(std::unique_ptr<raw_ostream> Out, Kind K, StringRef FilterString,
-               bool DumpLookups = false)
-        : Out(Out ? *Out : llvm::outs()), OwnedOut(std::move(Out)),
-          OutputKind(K), FilterString(FilterString), DumpLookups(DumpLookups) {}
+    ASTPrinter(std::unique_ptr<raw_ostream> Out = nullptr, bool Dump = false,
+               StringRef FilterString = "", bool DumpLookups = false)
+        : Out(Out ? *Out : llvm::outs()), OwnedOut(std::move(Out)), Dump(Dump),
+          FilterString(FilterString), DumpLookups(DumpLookups) {}
 
     void HandleTranslationUnit(ASTContext &Context) override {
       TranslationUnitDecl *D = Context.getTranslationUnitDecl();
@@ -56,7 +55,7 @@ namespace {
         bool ShowColors = Out.has_colors();
         if (ShowColors)
           Out.changeColor(raw_ostream::BLUE);
-        Out << (OutputKind != Print ? "Dumping " : "Printing ") << getName(D)
+        Out << ((Dump || DumpLookups) ? "Dumping " : "Printing ") << getName(D)
             << ":\n";
         if (ShowColors)
           Out.resetColor();
@@ -81,30 +80,22 @@ namespace {
       if (DumpLookups) {
         if (DeclContext *DC = dyn_cast<DeclContext>(D)) {
           if (DC == DC->getPrimaryContext())
-            DC->dumpLookups(Out, OutputKind != None, OutputKind == DumpFull);
+            DC->dumpLookups(Out, Dump);
           else
             Out << "Lookup map is in primary DeclContext "
                 << DC->getPrimaryContext() << "\n";
         } else
           Out << "Not a DeclContext\n";
-      } else if (OutputKind == Print)
+      } else if (Dump)
+        D->dump(Out);
+      else
         D->print(Out, /*Indentation=*/0, /*PrintInstantiation=*/true);
-      else if (OutputKind != None)
-        D->dump(Out, OutputKind == DumpFull);
     }
 
     raw_ostream &Out;
     std::unique_ptr<raw_ostream> OwnedOut;
-
-    /// How to output individual declarations.
-    Kind OutputKind;
-
-    /// Which declarations or DeclContexts to display.
+    bool Dump;
     std::string FilterString;
-
-    /// Whether the primary output is lookup results or declarations. Individual
-    /// results will be output with a format determined by OutputKind. This is
-    /// incompatible with OutputKind == Print.
     bool DumpLookups;
   };
 
@@ -134,20 +125,16 @@ namespace {
 std::unique_ptr<ASTConsumer>
 clang::CreateASTPrinter(std::unique_ptr<raw_ostream> Out,
                         StringRef FilterString) {
-  return llvm::make_unique<ASTPrinter>(std::move(Out), ASTPrinter::Print,
+  return llvm::make_unique<ASTPrinter>(std::move(Out), /*Dump=*/false,
                                        FilterString);
 }
 
 std::unique_ptr<ASTConsumer> clang::CreateASTDumper(StringRef FilterString,
                                                     bool DumpDecls,
-                                                    bool Deserialize,
                                                     bool DumpLookups) {
-  assert((DumpDecls || Deserialize || DumpLookups) && "nothing to dump");
-  return llvm::make_unique<ASTPrinter>(nullptr,
-                                       Deserialize ? ASTPrinter::DumpFull :
-                                       DumpDecls ? ASTPrinter::Dump :
-                                       ASTPrinter::None,
-                                       FilterString, DumpLookups);
+  assert((DumpDecls || DumpLookups) && "nothing to dump");
+  return llvm::make_unique<ASTPrinter>(nullptr, DumpDecls, FilterString,
+                                       DumpLookups);
 }
 
 std::unique_ptr<ASTConsumer> clang::CreateASTDeclNodeLister() {

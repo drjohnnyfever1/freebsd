@@ -26,7 +26,6 @@
 
 namespace llvm {
 class LoopInfo;
-class TargetLibraryInfo;
 class raw_ostream;
 
 /// \brief Analysis providing branch probability information.
@@ -44,9 +43,8 @@ class raw_ostream;
 class BranchProbabilityInfo {
 public:
   BranchProbabilityInfo() {}
-  BranchProbabilityInfo(const Function &F, const LoopInfo &LI,
-                        const TargetLibraryInfo *TLI = nullptr) {
-    calculate(F, LI, TLI);
+  BranchProbabilityInfo(const Function &F, const LoopInfo &LI) {
+    calculate(F, LI);
   }
 
   BranchProbabilityInfo(BranchProbabilityInfo &&Arg)
@@ -118,8 +116,7 @@ public:
     return IsLikely ? LikelyProb : LikelyProb.getCompl();
   }
 
-  void calculate(const Function &F, const LoopInfo &LI,
-                 const TargetLibraryInfo *TLI = nullptr);
+  void calculate(const Function &F, const LoopInfo &LI);
 
   /// Forget analysis results for the given basic block.
   void eraseBlock(const BasicBlock *BB);
@@ -167,14 +164,12 @@ private:
   /// \brief Track the set of blocks that always lead to a cold call.
   SmallPtrSet<const BasicBlock *, 16> PostDominatedByColdCall;
 
-  void updatePostDominatedByUnreachable(const BasicBlock *BB);
-  void updatePostDominatedByColdCall(const BasicBlock *BB);
   bool calcUnreachableHeuristics(const BasicBlock *BB);
   bool calcMetadataWeights(const BasicBlock *BB);
   bool calcColdCallHeuristics(const BasicBlock *BB);
   bool calcPointerHeuristics(const BasicBlock *BB);
   bool calcLoopBranchHeuristics(const BasicBlock *BB, const LoopInfo &LI);
-  bool calcZeroHeuristics(const BasicBlock *BB, const TargetLibraryInfo *TLI);
+  bool calcZeroHeuristics(const BasicBlock *BB);
   bool calcFloatingPointHeuristics(const BasicBlock *BB);
   bool calcInvokeHeuristics(const BasicBlock *BB);
 };

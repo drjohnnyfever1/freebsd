@@ -180,16 +180,6 @@ const internal::VariadicDynCastAllOfMatcher<Decl, TypedefNameDecl>
 ///   matches "using Y = int", but not "typedef int X"
 const internal::VariadicDynCastAllOfMatcher<Decl, TypeAliasDecl> typeAliasDecl;
 
-/// \brief Matches type alias template declarations.
-///
-/// typeAliasTemplateDecl() matches
-/// \code
-///   template <typename T>
-///   using Y = X<T>;
-/// \endcode
-const internal::VariadicDynCastAllOfMatcher<Decl, TypeAliasTemplateDecl>
-    typeAliasTemplateDecl;
-
 /// \brief Matches AST nodes that were expanded within the main-file.
 ///
 /// Example matches X but not Y
@@ -1128,69 +1118,6 @@ const internal::VariadicDynCastAllOfMatcher<
   Decl,
   ObjCInterfaceDecl> objcInterfaceDecl;
 
-/// \brief Matches Objective-C protocol declarations.
-///
-/// Example matches FooDelegate
-/// \code
-///   @protocol FooDelegate
-///   @end
-/// \endcode
-const internal::VariadicDynCastAllOfMatcher<
-  Decl,
-  ObjCProtocolDecl> objcProtocolDecl;
-
-/// \brief Matches Objective-C category declarations.
-///
-/// Example matches Foo (Additions)
-/// \code
-///   @interface Foo (Additions)
-///   @end
-/// \endcode
-const internal::VariadicDynCastAllOfMatcher<
-  Decl,
-  ObjCCategoryDecl> objcCategoryDecl;
-
-/// \brief Matches Objective-C method declarations.
-///
-/// Example matches both declaration and definition of -[Foo method]
-/// \code
-///   @interface Foo
-///   - (void)method;
-///   @end
-///
-///   @implementation Foo
-///   - (void)method {}
-///   @end
-/// \endcode
-const internal::VariadicDynCastAllOfMatcher<
-  Decl,
-  ObjCMethodDecl> objcMethodDecl;
-
-/// \brief Matches Objective-C instance variable declarations.
-///
-/// Example matches _enabled
-/// \code
-///   @implementation Foo {
-///     BOOL _enabled;
-///   }
-///   @end
-/// \endcode
-const internal::VariadicDynCastAllOfMatcher<
-  Decl,
-  ObjCIvarDecl> objcIvarDecl;
-
-/// \brief Matches Objective-C property declarations.
-///
-/// Example matches enabled
-/// \code
-///   @interface Foo
-///   @property BOOL enabled;
-///   @end
-/// \endcode
-const internal::VariadicDynCastAllOfMatcher<
-  Decl,
-  ObjCPropertyDecl> objcPropertyDecl;
-
 /// \brief Matches expressions that introduce cleanups to be run at the end
 /// of the sub-expression's evaluation.
 ///
@@ -1222,20 +1149,6 @@ AST_MATCHER_P(InitListExpr, hasSyntacticForm,
   return (SyntForm != nullptr &&
           InnerMatcher.matches(*SyntForm, Finder, Builder));
 }
-
-/// \brief Matches C++ initializer list expressions.
-///
-/// Given
-/// \code
-///   std::vector<int> a({ 1, 2, 3 });
-///   std::vector<int> b = { 4, 5 };
-///   int c[] = { 6, 7 };
-///   std::pair<int, int> d = { 8, 9 };
-/// \endcode
-/// cxxStdInitializerListExpr()
-///   matches "{ 1, 2, 3 }" and "{ 4, 5 }"
-const internal::VariadicDynCastAllOfMatcher<Stmt,
-  CXXStdInitializerListExpr> cxxStdInitializerListExpr;
 
 /// \brief Matches implicit initializers of init list expressions.
 ///
@@ -1420,7 +1333,7 @@ const internal::VariadicDynCastAllOfMatcher<
 ///
 /// Example: Given
 /// \code
-///   struct T {void func();};
+///   struct T {void func()};
 ///   T f();
 ///   void g(T);
 /// \endcode
@@ -2609,7 +2522,7 @@ AST_MATCHER_P(CXXMemberCallExpr, on, internal::Matcher<Expr>,
 /// \brief Matches on the receiver of an ObjectiveC Message expression.
 ///
 /// Example
-/// matcher = objCMessageExpr(hasReceiverType(asString("UIWebView *")));
+/// matcher = objCMessageExpr(hasRecieverType(asString("UIWebView *")));
 /// matches the [webView ...] message invocation.
 /// \code
 ///   NSString *webViewJavaScript = ...
@@ -3806,30 +3719,14 @@ AST_MATCHER_P(CompoundStmt, statementCountIs, unsigned, N) {
   return Node.size() == N;
 }
 
-/// \brief Matches literals that are equal to the given value of type ValueT.
+/// \brief Matches literals that are equal to the given value.
 ///
-/// Given
+/// Example matches true (matcher = cxxBoolLiteral(equals(true)))
 /// \code
-///   f('\0', false, 3.14, 42);
+///   true
 /// \endcode
-/// characterLiteral(equals(0))
-///   matches '\0'
-/// cxxBoolLiteral(equals(false)) and cxxBoolLiteral(equals(0))
-///   match false
-/// floatLiteral(equals(3.14)) and floatLiteral(equals(314e-2))
-///   match 3.14
-/// integerLiteral(equals(42))
-///   matches 42
 ///
-/// Note that you cannot directly match a negative numeric literal because the
-/// minus sign is not part of the literal: It is a unary operator whose operand
-/// is the positive numeric literal. Instead, you must use a unaryOperator()
-/// matcher to match the minus sign:
-///
-/// unaryOperator(hasOperatorName("-"),
-///               hasUnaryOperand(integerLiteral(equals(13))))
-///
-/// Usable as: Matcher<CharacterLiteral>, Matcher<CXXBoolLiteralExpr>,
+/// Usable as: Matcher<CharacterLiteral>, Matcher<CXXBoolLiteral>,
 ///            Matcher<FloatingLiteral>, Matcher<IntegerLiteral>
 template <typename ValueT>
 internal::PolymorphicMatcherWithParam1<internal::ValueEqualsMatcher, ValueT>
@@ -3837,34 +3734,6 @@ equals(const ValueT &Value) {
   return internal::PolymorphicMatcherWithParam1<
     internal::ValueEqualsMatcher,
     ValueT>(Value);
-}
-
-AST_POLYMORPHIC_MATCHER_P_OVERLOAD(equals,
-                          AST_POLYMORPHIC_SUPPORTED_TYPES(CharacterLiteral,
-                                                          CXXBoolLiteralExpr,
-                                                          IntegerLiteral),
-                          bool, Value, 0) {
-  return internal::ValueEqualsMatcher<NodeType, ParamT>(Value)
-    .matchesNode(Node);
-}
-
-AST_POLYMORPHIC_MATCHER_P_OVERLOAD(equals,
-                          AST_POLYMORPHIC_SUPPORTED_TYPES(CharacterLiteral,
-                                                          CXXBoolLiteralExpr,
-                                                          IntegerLiteral),
-                          unsigned, Value, 1) {
-  return internal::ValueEqualsMatcher<NodeType, ParamT>(Value)
-    .matchesNode(Node);
-}
-
-AST_POLYMORPHIC_MATCHER_P_OVERLOAD(equals,
-                          AST_POLYMORPHIC_SUPPORTED_TYPES(CharacterLiteral,
-                                                          CXXBoolLiteralExpr,
-                                                          FloatingLiteral,
-                                                          IntegerLiteral),
-                          double, Value, 2) {
-  return internal::ValueEqualsMatcher<NodeType, ParamT>(Value)
-    .matchesNode(Node);
 }
 
 /// \brief Matches the operator Name of operator expressions (binary or
@@ -5638,7 +5507,7 @@ AST_MATCHER_FUNCTION(internal::Matcher<Expr>, nullPointerConstant) {
       integerLiteral(equals(0), hasParent(expr(hasType(pointerType())))));
 }
 
-/// \brief Matches declaration of the function the statement belongs to
+/// \brief Matches declaration of the function the statemenet belongs to
 ///
 /// Given:
 /// \code

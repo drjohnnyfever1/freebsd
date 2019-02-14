@@ -18,12 +18,12 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE "machine-scheduler"
+#define DEBUG_TYPE "misched"
 
 #ifndef NDEBUG
 // Print the set of SUs
 void SystemZPostRASchedStrategy::SUSet::
-dump(SystemZHazardRecognizer &HazardRec) const {
+dump(SystemZHazardRecognizer &HazardRec) {
   dbgs() << "{";
   for (auto &SU : *this) {
     HazardRec.dumpSU(SU, dbgs());

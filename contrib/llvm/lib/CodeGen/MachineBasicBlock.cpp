@@ -23,7 +23,6 @@
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -149,11 +148,8 @@ MachineBasicBlock::iterator MachineBasicBlock::getFirstNonPHI() {
 
 MachineBasicBlock::iterator
 MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
-  const TargetInstrInfo *TII = getParent()->getSubtarget().getInstrInfo();
-
   iterator E = end();
-  while (I != E && (I->isPHI() || I->isPosition() ||
-                    TII->isBasicBlockPrologue(*I)))
+  while (I != E && (I->isPHI() || I->isPosition()))
     ++I;
   // FIXME: This needs to change if we wish to bundle labels
   // inside the bundle.
@@ -164,11 +160,8 @@ MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
 
 MachineBasicBlock::iterator
 MachineBasicBlock::SkipPHIsLabelsAndDebug(MachineBasicBlock::iterator I) {
-  const TargetInstrInfo *TII = getParent()->getSubtarget().getInstrInfo();
-
   iterator E = end();
-  while (I != E && (I->isPHI() || I->isPosition() || I->isDebugValue() ||
-                    TII->isBasicBlockPrologue(*I)))
+  while (I != E && (I->isPHI() || I->isPosition() || I->isDebugValue()))
     ++I;
   // FIXME: This needs to change if we wish to bundle labels / dbg_values
   // inside the bundle.
@@ -228,17 +221,11 @@ LLVM_DUMP_METHOD void MachineBasicBlock::dump() const {
 }
 #endif
 
-bool MachineBasicBlock::isLegalToHoistInto() const {
-  if (isReturnBlock() || hasEHPadSuccessor())
-    return false;
-  return true;
-}
-
 StringRef MachineBasicBlock::getName() const {
   if (const BasicBlock *LBB = getBasicBlock())
     return LBB->getName();
   else
-    return StringRef("", 0);
+    return "(null)";
 }
 
 /// Return a hopefully unique identifier for this block.
@@ -356,13 +343,6 @@ void MachineBasicBlock::removeLiveIn(MCPhysReg Reg, LaneBitmask LaneMask) {
     LiveIns.erase(I);
 }
 
-MachineBasicBlock::livein_iterator
-MachineBasicBlock::removeLiveIn(MachineBasicBlock::livein_iterator I) {
-  // Get non-const version of iterator.
-  LiveInVector::iterator LI = LiveIns.begin() + (I - LiveIns.begin());
-  return LiveIns.erase(LI);
-}
-
 bool MachineBasicBlock::isLiveIn(MCPhysReg Reg, LaneBitmask LaneMask) const {
   livein_iterator I = find_if(
       LiveIns, [Reg](const RegisterMaskPair &LI) { return LI.PhysReg == Reg; });
@@ -437,7 +417,7 @@ void MachineBasicBlock::updateTerminator() {
 
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   SmallVector<MachineOperand, 4> Cond;
-  DebugLoc DL = findBranchDebugLoc();
+  DebugLoc DL;  // FIXME: this is nowhere
   bool B = TII->analyzeBranch(*this, TBB, FBB, Cond);
   (void) B;
   assert(!B && "UpdateTerminators requires analyzable predecessors!");
@@ -505,7 +485,7 @@ void MachineBasicBlock::updateTerminator() {
       // FIXME: This does not seem like a reasonable pattern to support, but it
       // has been seen in the wild coming out of degenerate ARM test cases.
       TII->removeBranch(*this);
-
+  
       // Finally update the unconditional successor to be reached via a branch if
       // it would not be reached by fallthrough.
       if (!isLayoutSuccessor(TBB))
@@ -701,16 +681,16 @@ bool MachineBasicBlock::isLayoutSuccessor(const MachineBasicBlock *MBB) const {
   return std::next(I) == MachineFunction::const_iterator(MBB);
 }
 
-MachineBasicBlock *MachineBasicBlock::getFallThrough() {
+bool MachineBasicBlock::canFallThrough() {
   MachineFunction::iterator Fallthrough = getIterator();
   ++Fallthrough;
   // If FallthroughBlock is off the end of the function, it can't fall through.
   if (Fallthrough == getParent()->end())
-    return nullptr;
+    return false;
 
   // If FallthroughBlock isn't a successor, no fallthrough is possible.
   if (!isSuccessor(&*Fallthrough))
-    return nullptr;
+    return false;
 
   // Analyze the branches, if any, at the end of the block.
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
@@ -722,31 +702,25 @@ MachineBasicBlock *MachineBasicBlock::getFallThrough() {
     // is possible. The isPredicated check is needed because this code can be
     // called during IfConversion, where an instruction which is normally a
     // Barrier is predicated and thus no longer an actual control barrier.
-    return (empty() || !back().isBarrier() || TII->isPredicated(back()))
-               ? &*Fallthrough
-               : nullptr;
+    return empty() || !back().isBarrier() || TII->isPredicated(back());
   }
 
   // If there is no branch, control always falls through.
-  if (!TBB) return &*Fallthrough;
+  if (!TBB) return true;
 
   // If there is some explicit branch to the fallthrough block, it can obviously
   // reach, even though the branch should get folded to fall through implicitly.
   if (MachineFunction::iterator(TBB) == Fallthrough ||
       MachineFunction::iterator(FBB) == Fallthrough)
-    return &*Fallthrough;
+    return true;
 
   // If it's an unconditional branch to some block not the fall through, it
   // doesn't fall through.
-  if (Cond.empty()) return nullptr;
+  if (Cond.empty()) return false;
 
   // Otherwise, if it is conditional and has no explicit false block, it falls
   // through.
-  return (FBB == nullptr) ? &*Fallthrough : nullptr;
-}
-
-bool MachineBasicBlock::canFallThrough() {
-  return getFallThrough() != nullptr;
+  return FBB == nullptr;
 }
 
 MachineBasicBlock *MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ,
@@ -1168,24 +1142,6 @@ MachineBasicBlock::findDebugLoc(instr_iterator MBBI) {
   if (MBBI != instr_end())
     return MBBI->getDebugLoc();
   return {};
-}
-
-/// Find and return the merged DebugLoc of the branch instructions of the block.
-/// Return UnknownLoc if there is none.
-DebugLoc
-MachineBasicBlock::findBranchDebugLoc() {
-  DebugLoc DL;
-  auto TI = getFirstTerminator();
-  while (TI != end() && !TI->isBranch())
-    ++TI;
-
-  if (TI != end()) {
-    DL = TI->getDebugLoc();
-    for (++TI ; TI != end() ; ++TI)
-      if (TI->isBranch())
-        DL = DILocation::getMergedLocation(DL, TI->getDebugLoc());
-  }
-  return DL;
 }
 
 /// Return probability of the edge from this block to MBB.

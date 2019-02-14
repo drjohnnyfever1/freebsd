@@ -23,16 +23,15 @@ namespace llvm {
   class ModulePass;
   class FunctionPass;
 
-  ModulePass *createMipsOs16Pass();
-  ModulePass *createMips16HardFloatPass();
+  ModulePass *createMipsOs16Pass(MipsTargetMachine &TM);
+  ModulePass *createMips16HardFloatPass(MipsTargetMachine &TM);
 
-  FunctionPass *createMipsModuleISelDagPass();
-  FunctionPass *createMipsOptimizePICCallPass();
-  FunctionPass *createMipsDelaySlotFillerPass();
+  FunctionPass *createMipsModuleISelDagPass(MipsTargetMachine &TM);
+  FunctionPass *createMipsOptimizePICCallPass(MipsTargetMachine &TM);
+  FunctionPass *createMipsDelaySlotFillerPass(MipsTargetMachine &TM);
   FunctionPass *createMipsHazardSchedule();
-  FunctionPass *createMipsLongBranchPass();
+  FunctionPass *createMipsLongBranchPass(MipsTargetMachine &TM);
   FunctionPass *createMipsConstantIslandPass();
-  FunctionPass *createMicroMipsSizeReductionPass();
 } // end namespace llvm;
 
 #endif

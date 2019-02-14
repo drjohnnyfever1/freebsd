@@ -47,7 +47,6 @@ private:
   void tryMergePreviousTokens();
 
   bool tryMergeLessLess();
-  bool tryMergeNSStringLiteral();
 
   bool tryMergeTokens(ArrayRef<tok::TokenKind> Kinds, TokenType NewType);
 

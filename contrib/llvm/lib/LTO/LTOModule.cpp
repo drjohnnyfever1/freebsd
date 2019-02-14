@@ -14,12 +14,11 @@
 
 #include "llvm/LTO/legacy/LTOModule.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Analysis/ObjectUtils.h"
 #include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/CodeGen/Analysis.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Mangler.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCExpr.h"
@@ -77,12 +76,14 @@ bool LTOModule::isBitcodeFile(StringRef Path) {
 }
 
 bool LTOModule::isThinLTO() {
-  Expected<BitcodeLTOInfo> Result = getBitcodeLTOInfo(MBRef);
+  // Right now the detection is only based on the summary presence. We may want
+  // to add a dedicated flag at some point.
+  Expected<bool> Result = hasGlobalValueSummary(MBRef);
   if (!Result) {
     logAllUnhandledErrors(Result.takeError(), errs(), "");
     return false;
   }
-  return Result->IsThinLTO;
+  return *Result;
 }
 
 bool LTOModule::isBitcodeForTarget(MemoryBuffer *Buffer,
@@ -635,10 +636,10 @@ void LTOModule::parseMetadata() {
   raw_string_ostream OS(LinkerOpts);
 
   // Linker Options
-  if (NamedMDNode *LinkerOptions =
-          getModule().getNamedMetadata("llvm.linker.options")) {
+  if (Metadata *Val = getModule().getModuleFlag("Linker Options")) {
+    MDNode *LinkerOptions = cast<MDNode>(Val);
     for (unsigned i = 0, e = LinkerOptions->getNumOperands(); i != e; ++i) {
-      MDNode *MDOptions = LinkerOptions->getOperand(i);
+      MDNode *MDOptions = cast<MDNode>(LinkerOptions->getOperand(i));
       for (unsigned ii = 0, ie = MDOptions->getNumOperands(); ii != ie; ++ii) {
         MDString *MDOption = cast<MDString>(MDOptions->getOperand(ii));
         OS << " " << MDOption->getString();
@@ -646,15 +647,11 @@ void LTOModule::parseMetadata() {
     }
   }
 
-  // Globals - we only need to do this for COFF.
-  const Triple TT(_target->getTargetTriple());
-  if (!TT.isOSBinFormatCOFF())
-    return;
-  Mangler M;
+  // Globals
   for (const NameAndAttributes &Sym : _symbols) {
     if (!Sym.symbol)
       continue;
-    emitLinkerFlagsForGlobalCOFF(OS, Sym.symbol, TT, M);
+    _target->getObjFileLowering()->emitLinkerFlagsForGlobal(OS, Sym.symbol);
   }
 
   // Add other interesting metadata here.

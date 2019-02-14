@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/LegacyPassManager.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManagers.h"
@@ -466,11 +465,6 @@ public:
   // null.  It may be called multiple times.
   static void createTheTimeInfo();
 
-  // print - Prints out timing information and then resets the timers.
-  void print() {
-    TG.print(*CreateInfoOutputFile());
-  }
-
   /// getPassTimer - Return the timer for the specified pass if it exists.
   Timer *getPassTimer(Pass *P) {
     if (P->getAsPMDataManager())
@@ -593,7 +587,7 @@ AnalysisUsage *PMTopLevelManager::findAnalysisUsage(Pass *P) {
     assert(Node && "cached analysis usage must be non null");
 
     AnUsageMap[P] = &Node->AU;
-    AnUsage = &Node->AU;
+    AnUsage = &Node->AU;;
   }
   return AnUsage;
 }
@@ -625,21 +619,21 @@ void PMTopLevelManager::schedulePass(Pass *P) {
     checkAnalysis = false;
 
     const AnalysisUsage::VectorType &RequiredSet = AnUsage->getRequiredSet();
-    for (const AnalysisID ID : RequiredSet) {
+    for (AnalysisUsage::VectorType::const_iterator I = RequiredSet.begin(),
+           E = RequiredSet.end(); I != E; ++I) {
 
-      Pass *AnalysisPass = findAnalysisPass(ID);
+      Pass *AnalysisPass = findAnalysisPass(*I);
       if (!AnalysisPass) {
-        const PassInfo *PI = findAnalysisPassInfo(ID);
+        const PassInfo *PI = findAnalysisPassInfo(*I);
 
         if (!PI) {
           // Pass P is not in the global PassRegistry
           dbgs() << "Pass '"  << P->getPassName() << "' is not initialized." << "\n";
           dbgs() << "Verify if there is a pass dependency cycle." << "\n";
           dbgs() << "Required Passes:" << "\n";
-          for (const AnalysisID ID2 : RequiredSet) {
-            if (ID == ID2)
-              break;
-            Pass *AnalysisPass2 = findAnalysisPass(ID2);
+          for (AnalysisUsage::VectorType::const_iterator I2 = RequiredSet.begin(),
+                 E = RequiredSet.end(); I2 != E && I2 != I; ++I2) {
+            Pass *AnalysisPass2 = findAnalysisPass(*I2);
             if (AnalysisPass2) {
               dbgs() << "\t" << AnalysisPass2->getPassName() << "\n";
             } else {
@@ -1070,15 +1064,17 @@ void PMDataManager::collectRequiredAndUsedAnalyses(
 void PMDataManager::initializeAnalysisImpl(Pass *P) {
   AnalysisUsage *AnUsage = TPM->findAnalysisUsage(P);
 
-  for (const AnalysisID ID : AnUsage->getRequiredSet()) {
-    Pass *Impl = findAnalysisPass(ID, true);
+  for (AnalysisUsage::VectorType::const_iterator
+         I = AnUsage->getRequiredSet().begin(),
+         E = AnUsage->getRequiredSet().end(); I != E; ++I) {
+    Pass *Impl = findAnalysisPass(*I, true);
     if (!Impl)
       // This may be analysis pass that is initialized on the fly.
       // If that is not the case then it will raise an assert when it is used.
       continue;
     AnalysisResolver *AR = P->getResolver();
     assert(AR && "Analysis Resolver is not set");
-    AR->addAnalysisImplsPair(ID, Impl);
+    AR->addAnalysisImplsPair(*I, Impl);
   }
 }
 
@@ -1110,19 +1106,21 @@ void PMDataManager::dumpLastUses(Pass *P, unsigned Offset) const{
 
   TPM->collectLastUses(LUses, P);
 
-  for (Pass *P : LUses) {
+  for (SmallVectorImpl<Pass *>::iterator I = LUses.begin(),
+         E = LUses.end(); I != E; ++I) {
     dbgs() << "--" << std::string(Offset*2, ' ');
-    P->dumpPassStructure(0);
+    (*I)->dumpPassStructure(0);
   }
 }
 
 void PMDataManager::dumpPassArguments() const {
-  for (Pass *P : PassVector) {
-    if (PMDataManager *PMD = P->getAsPMDataManager())
+  for (SmallVectorImpl<Pass *>::const_iterator I = PassVector.begin(),
+        E = PassVector.end(); I != E; ++I) {
+    if (PMDataManager *PMD = (*I)->getAsPMDataManager())
       PMD->dumpPassArguments();
     else
       if (const PassInfo *PI =
-            TPM->findAnalysisPassInfo(P->getPassID()))
+            TPM->findAnalysisPassInfo((*I)->getPassID()))
         if (!PI->isAnalysisGroup())
           dbgs() << " -" << PI->getPassArgument();
   }
@@ -1251,8 +1249,9 @@ Pass *PMDataManager::getOnTheFlyPass(Pass *P, AnalysisID PI, Function &F) {
 
 // Destructor
 PMDataManager::~PMDataManager() {
-  for (Pass *P : PassVector)
-    delete P;
+  for (SmallVectorImpl<Pass *>::iterator I = PassVector.begin(),
+         E = PassVector.end(); I != E; ++I)
+    delete *I;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1279,35 +1278,35 @@ bool BBPassManager::runOnFunction(Function &F) {
 
   bool Changed = doInitialization(F);
 
-  for (BasicBlock &BB : F)
+  for (Function::iterator I = F.begin(), E = F.end(); I != E; ++I)
     for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
       BasicBlockPass *BP = getContainedPass(Index);
       bool LocalChanged = false;
 
-      dumpPassInfo(BP, EXECUTION_MSG, ON_BASICBLOCK_MSG, BB.getName());
+      dumpPassInfo(BP, EXECUTION_MSG, ON_BASICBLOCK_MSG, I->getName());
       dumpRequiredSet(BP);
 
       initializeAnalysisImpl(BP);
 
       {
         // If the pass crashes, remember this.
-        PassManagerPrettyStackEntry X(BP, BB);
+        PassManagerPrettyStackEntry X(BP, *I);
         TimeRegion PassTimer(getPassTimer(BP));
 
-        LocalChanged |= BP->runOnBasicBlock(BB);
+        LocalChanged |= BP->runOnBasicBlock(*I);
       }
 
       Changed |= LocalChanged;
       if (LocalChanged)
         dumpPassInfo(BP, MODIFICATION_MSG, ON_BASICBLOCK_MSG,
-                     BB.getName());
+                     I->getName());
       dumpPreservedSet(BP);
       dumpUsedSet(BP);
 
       verifyPreservedAnalysis(BP);
       removeNotPreservedAnalysis(BP);
       recordAvailableAnalysis(BP);
-      removeDeadPasses(BP, BB.getName(), ON_BASICBLOCK_MSG);
+      removeDeadPasses(BP, I->getName(), ON_BASICBLOCK_MSG);
     }
 
   return doFinalization(F) || Changed;
@@ -1751,13 +1750,6 @@ Timer *llvm::getPassTimer(Pass *P) {
   if (TheTimeInfo)
     return TheTimeInfo->getPassTimer(P);
   return nullptr;
-}
-
-/// If timing is enabled, report the times collected up to now and then reset
-/// them.
-void llvm::reportAndResetTimings() {
-  if (TheTimeInfo)
-    TheTimeInfo->print();
 }
 
 //===----------------------------------------------------------------------===//

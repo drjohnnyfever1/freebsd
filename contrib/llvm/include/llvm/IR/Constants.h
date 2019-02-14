@@ -26,7 +26,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -58,6 +57,8 @@ template <class ConstantClass> struct ConstantAggrKeyType;
 class ConstantData : public Constant {
   friend class Constant;
 
+  void anchor() override;
+
   Value *handleOperandChangeImpl(Value *From, Value *To) {
     llvm_unreachable("Constant data does not have operands!");
   }
@@ -68,7 +69,10 @@ protected:
   void *operator new(size_t s) { return User::operator new(s, 0); }
 
 public:
+  ConstantData() = delete;
   ConstantData(const ConstantData &) = delete;
+
+  void *operator new(size_t, unsigned) = delete;
 
   /// Methods to support type inquiry through isa, cast, and dyn_cast.
   static bool classof(const Value *V) {
@@ -88,6 +92,7 @@ class ConstantInt final : public ConstantData {
 
   ConstantInt(IntegerType *Ty, const APInt& V);
 
+  void anchor() override;
   void destroyConstantImpl();
 
 public:
@@ -133,7 +138,7 @@ public:
   static Constant *get(Type* Ty, const APInt& V);
 
   /// Return the constant as an APInt value reference. This allows clients to
-  /// obtain a full-precision copy of the value.
+  /// obtain a copy of the value, with all its precision in tact.
   /// @brief Return the constant's value.
   inline const APInt &getValue() const {
     return Val;
@@ -191,7 +196,7 @@ public:
   /// common code. It also correctly performs the comparison without the
   /// potential for an assertion from getZExtValue().
   bool isZero() const {
-    return Val.isNullValue();
+    return Val == 0;
   }
 
   /// This is just a convenience method to make client code smaller for a
@@ -199,7 +204,7 @@ public:
   /// potential for an assertion from getZExtValue().
   /// @brief Determine if the value is one.
   bool isOne() const {
-    return Val.isOneValue();
+    return Val == 1;
   }
 
   /// This function will return true iff every bit in this constant is set
@@ -240,7 +245,7 @@ public:
   /// @returns true iff this constant is greater or equal to the given number.
   /// @brief Determine if the value is greater or equal to the given number.
   bool uge(uint64_t Num) const {
-    return Val.uge(Num);
+    return Val.getActiveBits() > 64 || Val.getZExtValue() >= Num;
   }
 
   /// getLimitedValue - If the value is smaller than the specified limit,
@@ -268,6 +273,7 @@ class ConstantFP final : public ConstantData {
 
   ConstantFP(Type *Ty, const APFloat& V);
 
+  void anchor() override;
   void destroyConstantImpl();
 
 public:
@@ -446,14 +452,7 @@ class ConstantStruct final : public ConstantAggregate {
 public:
   // ConstantStruct accessors
   static Constant *get(StructType *T, ArrayRef<Constant*> V);
-
-  template <typename... Csts>
-  static typename std::enable_if<are_base_of<Constant, Csts...>::value,
-                                 Constant *>::type
-  get(StructType *T, Csts *... Vs) {
-    SmallVector<Constant *, 8> Values({Vs...});
-    return get(T, Values);
-  }
+  static Constant *get(StructType *T, ...) LLVM_END_WITH_NULL;
 
   /// Return an anonymous struct that has the specified elements.
   /// If the struct is possibly empty, then you must specify a context.
@@ -581,7 +580,7 @@ class ConstantDataSequential : public ConstantData {
 protected:
   explicit ConstantDataSequential(Type *ty, ValueTy VT, const char *Data)
       : ConstantData(ty, VT), DataElements(Data), Next(nullptr) {}
-  ~ConstantDataSequential() { delete Next; }
+  ~ConstantDataSequential() override { delete Next; }
 
   static Constant *getImpl(StringRef Bytes, Type *Ty);
 
@@ -597,10 +596,6 @@ public:
   /// If this is a sequential container of integers (of any size), return the
   /// specified element in the low bits of a uint64_t.
   uint64_t getElementAsInteger(unsigned i) const;
-
-  /// If this is a sequential container of integers (of any size), return the
-  /// specified element as an APInt.
-  APInt getElementAsAPInt(unsigned i) const;
 
   /// If this is a sequential container of floating point type, return the
   /// specified element as an APFloat.
@@ -635,8 +630,8 @@ public:
   /// The size of the elements is known to be a multiple of one byte.
   uint64_t getElementByteSize() const;
 
-  /// This method returns true if this is an array of \p CharSize integers.
-  bool isString(unsigned CharSize = 8) const;
+  /// This method returns true if this is an array of i8.
+  bool isString() const;
 
   /// This method returns true if the array "isString", ends with a null byte,
   /// and does not contains any other null bytes.
@@ -684,8 +679,17 @@ class ConstantDataArray final : public ConstantDataSequential {
   explicit ConstantDataArray(Type *ty, const char *Data)
       : ConstantDataSequential(ty, ConstantDataArrayVal, Data) {}
 
+  /// Allocate space for exactly zero operands.
+  void *operator new(size_t s) {
+    return User::operator new(s, 0);
+  }
+
+  void anchor() override;
+
 public:
   ConstantDataArray(const ConstantDataArray &) = delete;
+
+  void *operator new(size_t, unsigned) = delete;
 
   /// get() constructors - Return a constant with array type with an element
   /// count and element type matching the ArrayRef passed in.  Note that this
@@ -738,8 +742,17 @@ class ConstantDataVector final : public ConstantDataSequential {
   explicit ConstantDataVector(Type *ty, const char *Data)
       : ConstantDataSequential(ty, ConstantDataVectorVal, Data) {}
 
+  // allocate space for exactly zero operands.
+  void *operator new(size_t s) {
+    return User::operator new(s, 0);
+  }
+
+  void anchor() override;
+
 public:
   ConstantDataVector(const ConstantDataVector &) = delete;
+
+  void *operator new(size_t, unsigned) = delete;
 
   /// get() constructors - Return a constant with vector type with an element
   /// count and element type matching the ArrayRef passed in.  Note that this
@@ -764,10 +777,6 @@ public:
   /// The specified constant has to be a of a compatible type (i8/i16/
   /// i32/i64/float/double) and must be a ConstantFP or ConstantInt.
   static Constant *getSplat(unsigned NumElts, Constant *Elt);
-
-  /// Returns true if this is a splat constant, meaning that all elements have
-  /// the same value.
-  bool isSplat() const;
 
   /// If this is a splat constant, meaning that all of the elements have the
   /// same value, return that value. Otherwise return NULL.
@@ -821,6 +830,8 @@ class BlockAddress final : public Constant {
   Value *handleOperandChangeImpl(Value *From, Value *To);
 
 public:
+  void *operator new(size_t, unsigned) = delete;
+
   /// Return a BlockAddress for the specified function and basic block.
   static BlockAddress *get(Function *F, BasicBlock *BB);
 
@@ -840,7 +851,7 @@ public:
   BasicBlock *getBasicBlock() const { return (BasicBlock*)Op<1>().get(); }
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static bool classof(const Value *V) {
+  static inline bool classof(const Value *V) {
     return V->getValueID() == BlockAddressVal;
   }
 };
@@ -1215,7 +1226,7 @@ public:
   Instruction *getAsInstruction();
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast:
-  static bool classof(const Value *V) {
+  static inline bool classof(const Value *V) {
     return V->getValueID() == ConstantExprVal;
   }
 

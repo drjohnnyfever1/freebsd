@@ -199,24 +199,23 @@ const char *StripModuleName(const char *module) {
   return module;
 }
 
-void ReportErrorSummary(const char *error_message, const char *alt_tool_name) {
+void ReportErrorSummary(const char *error_message) {
   if (!common_flags()->print_summary)
     return;
   InternalScopedString buff(kMaxSummaryLength);
-  buff.append("SUMMARY: %s: %s",
-              alt_tool_name ? alt_tool_name : SanitizerToolName, error_message);
+  buff.append("SUMMARY: %s: %s", SanitizerToolName, error_message);
   __sanitizer_report_error_summary(buff.data());
 }
 
 #if !SANITIZER_GO
-void ReportErrorSummary(const char *error_type, const AddressInfo &info,
-                        const char *alt_tool_name) {
-  if (!common_flags()->print_summary) return;
+void ReportErrorSummary(const char *error_type, const AddressInfo &info) {
+  if (!common_flags()->print_summary)
+    return;
   InternalScopedString buff(kMaxSummaryLength);
   buff.append("%s ", error_type);
   RenderFrame(&buff, "%L %F", 0, info, common_flags()->symbolize_vs_style,
               common_flags()->strip_path_prefix);
-  ReportErrorSummary(buff.data(), alt_tool_name);
+  ReportErrorSummary(buff.data());
 }
 #endif
 
@@ -284,10 +283,9 @@ void LoadedModule::clear() {
   }
 }
 
-void LoadedModule::addAddressRange(uptr beg, uptr end, bool executable,
-                                   bool writable) {
+void LoadedModule::addAddressRange(uptr beg, uptr end, bool executable) {
   void *mem = InternalAlloc(sizeof(AddressRange));
-  AddressRange *r = new(mem) AddressRange(beg, end, executable, writable);
+  AddressRange *r = new(mem) AddressRange(beg, end, executable);
   ranges_.push_back(r);
   if (executable && end > max_executable_address_)
     max_executable_address_ = end;
@@ -491,8 +489,7 @@ void __sanitizer_set_report_fd(void *fd) {
   report_file.fd_pid = internal_getpid();
 }
 
-SANITIZER_INTERFACE_WEAK_DEF(void, __sanitizer_report_error_summary,
-                             const char *error_summary) {
+void __sanitizer_report_error_summary(const char *error_summary) {
   Printf("%s\n", error_summary);
 }
 
@@ -507,4 +504,11 @@ int __sanitizer_install_malloc_and_free_hooks(void (*malloc_hook)(const void *,
                                               void (*free_hook)(const void *)) {
   return InstallMallocFreeHooks(malloc_hook, free_hook);
 }
+
+#if !SANITIZER_GO && !SANITIZER_SUPPORTS_WEAK_HOOKS
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_print_memory_profile(int top_percent) {
+  (void)top_percent;
+}
+#endif
 } // extern "C"

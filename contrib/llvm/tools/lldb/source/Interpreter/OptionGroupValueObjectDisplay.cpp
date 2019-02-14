@@ -14,9 +14,10 @@
 // Other libraries and framework includes
 // Project includes
 #include "lldb/DataFormatters/ValueObjectPrinter.h"
-#include "lldb/Host/OptionParser.h"
+#include "lldb/Host/StringConvert.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/Utils.h"
 
 #include "llvm/ADT/ArrayRef.h"
 
@@ -75,10 +76,10 @@ OptionGroupValueObjectDisplay::GetDefinitions() {
   return llvm::makeArrayRef(g_option_table);
 }
 
-Status OptionGroupValueObjectDisplay::SetOptionValue(
+Error OptionGroupValueObjectDisplay::SetOptionValue(
     uint32_t option_idx, llvm::StringRef option_arg,
     ExecutionContext *execution_context) {
-  Status error;
+  Error error;
   const int short_option = g_option_table[option_idx].short_option;
   bool success = false;
 

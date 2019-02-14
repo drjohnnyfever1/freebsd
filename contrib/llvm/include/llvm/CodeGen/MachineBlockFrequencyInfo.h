@@ -1,4 +1,4 @@
-//===- MachineBlockFrequencyInfo.h - MBB Frequency Analysis -----*- C++ -*-===//
+//===- MachineBlockFrequencyInfo.h - MBB Frequency Analysis -*- C++ -*-----===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,38 +17,30 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/Support/BlockFrequency.h"
-#include <cstdint>
-#include <memory>
+#include <climits>
 
 namespace llvm {
 
-template <class BlockT> class BlockFrequencyInfoImpl;
 class MachineBasicBlock;
 class MachineBranchProbabilityInfo;
-class MachineFunction;
-class MachineLoopInfo;
-class raw_ostream;
+template <class BlockT> class BlockFrequencyInfoImpl;
 
 /// MachineBlockFrequencyInfo pass uses BlockFrequencyInfoImpl implementation
 /// to estimate machine basic block frequencies.
 class MachineBlockFrequencyInfo : public MachineFunctionPass {
-  using ImplType = BlockFrequencyInfoImpl<MachineBasicBlock>;
+  typedef BlockFrequencyInfoImpl<MachineBasicBlock> ImplType;
   std::unique_ptr<ImplType> MBFI;
 
 public:
   static char ID;
 
   MachineBlockFrequencyInfo();
+
   ~MachineBlockFrequencyInfo() override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
   bool runOnMachineFunction(MachineFunction &F) override;
-
-  /// calculate - compute block frequency info for the given function.
-  void calculate(const MachineFunction &F,
-                 const MachineBranchProbabilityInfo &MBPI,
-                 const MachineLoopInfo &MLI);
 
   void releaseMemory() override;
 
@@ -64,7 +56,7 @@ public:
 
   const MachineFunction *getFunction() const;
   const MachineBranchProbabilityInfo *getMBPI() const;
-  void view(const Twine &Name, bool isSimple = true) const;
+  void view() const;
 
   // Print the block frequency Freq to OS using the current functions entry
   // frequency to convert freq into a relative decimal form.
@@ -76,8 +68,9 @@ public:
                               const MachineBasicBlock *MBB) const;
 
   uint64_t getEntryFreq() const;
+
 };
 
-} // end namespace llvm
+}
 
-#endif // LLVM_CODEGEN_MACHINEBLOCKFREQUENCYINFO_H
+#endif

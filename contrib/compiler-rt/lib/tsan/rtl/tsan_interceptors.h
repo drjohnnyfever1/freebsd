@@ -19,8 +19,6 @@ class ScopedInterceptor {
   bool ignoring_;
 };
 
-LibIgnore *libignore();
-
 }  // namespace __tsan
 
 #define SCOPED_INTERCEPTOR_RAW(func, ...) \

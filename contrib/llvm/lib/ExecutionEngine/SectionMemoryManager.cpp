@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Config/config.h"
+#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Process.h"
 

@@ -592,10 +592,10 @@ void CommentASTToXMLConverter::formatTextOfDeclaration(
   unsigned Offset = 0;
   unsigned Length = Declaration.size();
 
-  format::FormatStyle Style = format::getLLVMStyle();
-  Style.FixNamespaceComments = false;
+  bool IncompleteFormat = false;
   tooling::Replacements Replaces =
-      reformat(Style, StringDecl, tooling::Range(Offset, Length), "xmldecl.xd");
+      reformat(format::getLLVMStyle(), StringDecl,
+               tooling::Range(Offset, Length), "xmldecl.xd", &IncompleteFormat);
   auto FormattedStringDecl = applyAllReplacements(StringDecl, Replaces);
   if (static_cast<bool>(FormattedStringDecl)) {
     Declaration = *FormattedStringDecl;

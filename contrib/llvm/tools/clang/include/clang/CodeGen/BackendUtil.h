@@ -15,8 +15,6 @@
 #include <memory>
 
 namespace llvm {
-  class BitcodeModule;
-  template <typename T> class Expected;
   class Module;
   class MemoryBufferRef;
 }
@@ -46,9 +44,6 @@ namespace clang {
 
   void EmbedBitcode(llvm::Module *M, const CodeGenOptions &CGOpts,
                     llvm::MemoryBufferRef Buf);
-
-  llvm::Expected<llvm::BitcodeModule>
-  FindThinLTOModule(llvm::MemoryBufferRef MBRef);
 }
 
 #endif

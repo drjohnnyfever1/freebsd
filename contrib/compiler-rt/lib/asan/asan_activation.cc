@@ -106,6 +106,7 @@ void AsanDeactivate() {
   // Deactivate the runtime.
   SetCanPoisonMemory(false);
   SetMallocContextSize(1);
+  ReInitializeCoverage(false, nullptr);
 
   AllocatorOptions disabled = asan_deactivated_flags.allocator_options;
   disabled.quarantine_size_mb = 0;
@@ -129,6 +130,8 @@ void AsanActivate() {
 
   SetCanPoisonMemory(asan_deactivated_flags.poison_heap);
   SetMallocContextSize(asan_deactivated_flags.malloc_context_size);
+  ReInitializeCoverage(asan_deactivated_flags.coverage,
+                       asan_deactivated_flags.coverage_dir);
   ReInitializeAllocator(asan_deactivated_flags.allocator_options);
 
   asan_is_deactivated = false;

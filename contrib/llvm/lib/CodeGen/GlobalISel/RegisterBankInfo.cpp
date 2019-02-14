@@ -45,10 +45,6 @@ STATISTIC(NumOperandsMappingsCreated,
           "Number of operands mappings dynamically created");
 STATISTIC(NumOperandsMappingsAccessed,
           "Number of operands mappings dynamically accessed");
-STATISTIC(NumInstructionMappingsCreated,
-          "Number of instruction mappings dynamically created");
-STATISTIC(NumInstructionMappingsAccessed,
-          "Number of instruction mappings dynamically accessed");
 
 const unsigned RegisterBankInfo::DefaultMappingID = UINT_MAX;
 const unsigned RegisterBankInfo::InvalidMappingID = UINT_MAX - 1;
@@ -65,6 +61,13 @@ RegisterBankInfo::RegisterBankInfo(RegisterBank **RegBanks,
     assert(RegBanks[Idx]->isValid() && "RegisterBank should be valid");
   }
 #endif // NDEBUG
+}
+
+RegisterBankInfo::~RegisterBankInfo() {
+  for (auto It : MapOfPartialMappings)
+    delete It.second;
+  for (auto It : MapOfValueMappings)
+    delete It.second;
 }
 
 bool RegisterBankInfo::verify(const TargetRegisterInfo &TRI) const {
@@ -130,27 +133,19 @@ const TargetRegisterClass *RegisterBankInfo::constrainGenericRegister(
   return &RC;
 }
 
-/// Check whether or not \p MI should be treated like a copy
-/// for the mappings.
-/// Copy like instruction are special for mapping because
-/// they don't have actual register constraints. Moreover,
-/// they sometimes have register classes assigned and we can
-/// just use that instead of failing to provide a generic mapping.
-static bool isCopyLike(const MachineInstr &MI) {
-  return MI.isCopy() || MI.isPHI() ||
-         MI.getOpcode() == TargetOpcode::REG_SEQUENCE;
-}
-
-const RegisterBankInfo::InstructionMapping &
+RegisterBankInfo::InstructionMapping
 RegisterBankInfo::getInstrMappingImpl(const MachineInstr &MI) const {
   // For copies we want to walk over the operands and try to find one
   // that has a register bank since the instruction itself will not get
   // us any constraint.
-  bool IsCopyLike = isCopyLike(MI);
+  bool isCopyLike = MI.isCopy() || MI.isPHI();
   // For copy like instruction, only the mapping of the definition
   // is important. The rest is not constrained.
-  unsigned NumOperandsForMapping = IsCopyLike ? 1 : MI.getNumOperands();
+  unsigned NumOperandsForMapping = isCopyLike ? 1 : MI.getNumOperands();
 
+  RegisterBankInfo::InstructionMapping Mapping(DefaultMappingID, /*Cost*/ 1,
+                                               /*OperandsMapping*/ nullptr,
+                                               NumOperandsForMapping);
   const MachineFunction &MF = *MI.getParent()->getParent();
   const TargetSubtargetInfo &STI = MF.getSubtarget();
   const TargetRegisterInfo &TRI = *STI.getRegisterInfo();
@@ -180,7 +175,7 @@ RegisterBankInfo::getInstrMappingImpl(const MachineInstr &MI) const {
     // For copy-like instruction, we want to reuse the register bank
     // that is already set on Reg, if any, since those instructions do
     // not have any constraints.
-    const RegisterBank *CurRegBank = IsCopyLike ? AltRegBank : nullptr;
+    const RegisterBank *CurRegBank = isCopyLike ? AltRegBank : nullptr;
     if (!CurRegBank) {
       // If this is a target specific instruction, we can deduce
       // the register bank from the encoding constraints.
@@ -189,15 +184,15 @@ RegisterBankInfo::getInstrMappingImpl(const MachineInstr &MI) const {
         // All our attempts failed, give up.
         CompleteMapping = false;
 
-        if (!IsCopyLike)
+        if (!isCopyLike)
           // MI does not carry enough information to guess the mapping.
-          return getInvalidInstructionMapping();
+          return InstructionMapping();
         continue;
       }
     }
     const ValueMapping *ValMapping =
         &getValueMapping(0, getSizeInBits(Reg, MRI, TRI), *CurRegBank);
-    if (IsCopyLike) {
+    if (isCopyLike) {
       OperandsMapping[0] = ValMapping;
       CompleteMapping = true;
       break;
@@ -205,15 +200,13 @@ RegisterBankInfo::getInstrMappingImpl(const MachineInstr &MI) const {
     OperandsMapping[OpIdx] = ValMapping;
   }
 
-  if (IsCopyLike && !CompleteMapping)
+  if (isCopyLike && !CompleteMapping)
     // No way to deduce the type from what we have.
-    return getInvalidInstructionMapping();
+    return InstructionMapping();
 
   assert(CompleteMapping && "Setting an uncomplete mapping");
-  return getInstructionMapping(
-      DefaultMappingID, /*Cost*/ 1,
-      /*OperandsMapping*/ getOperandsMapping(OperandsMapping),
-      NumOperandsForMapping);
+  Mapping.setOperandsMapping(getOperandsMapping(OperandsMapping));
+  return Mapping;
 }
 
 /// Hashing function for PartialMapping.
@@ -241,8 +234,8 @@ RegisterBankInfo::getPartialMapping(unsigned StartIdx, unsigned Length,
 
   ++NumPartialMappingsCreated;
 
-  auto &PartMapping = MapOfPartialMappings[Hash];
-  PartMapping = llvm::make_unique<PartialMapping>(StartIdx, Length, RegBank);
+  const PartialMapping *&PartMapping = MapOfPartialMappings[Hash];
+  PartMapping = new PartialMapping{StartIdx, Length, RegBank};
   return *PartMapping;
 }
 
@@ -275,8 +268,8 @@ RegisterBankInfo::getValueMapping(const PartialMapping *BreakDown,
 
   ++NumValueMappingsCreated;
 
-  auto &ValMapping = MapOfValueMappings[Hash];
-  ValMapping = llvm::make_unique<ValueMapping>(BreakDown, NumBreakDowns);
+  const ValueMapping *&ValMapping = MapOfValueMappings[Hash];
+  ValMapping = new ValueMapping{BreakDown, NumBreakDowns};
   return *ValMapping;
 }
 
@@ -289,9 +282,9 @@ RegisterBankInfo::getOperandsMapping(Iterator Begin, Iterator End) const {
   // The addresses of the value mapping are unique.
   // Therefore, we can use them directly to hash the operand mapping.
   hash_code Hash = hash_combine_range(Begin, End);
-  auto &Res = MapOfOperandsMappings[Hash];
-  if (Res)
-    return Res.get();
+  const auto &It = MapOfOperandsMappings.find(Hash);
+  if (It != MapOfOperandsMappings.end())
+    return It->second;
 
   ++NumOperandsMappingsCreated;
 
@@ -300,7 +293,8 @@ RegisterBankInfo::getOperandsMapping(Iterator Begin, Iterator End) const {
   // mapping, because we use the pointer of the ValueMapping
   // to hash and we expect them to uniquely identify an instance
   // of value mapping.
-  Res = llvm::make_unique<ValueMapping[]>(std::distance(Begin, End));
+  ValueMapping *&Res = MapOfOperandsMappings[Hash];
+  Res = new ValueMapping[std::distance(Begin, End)];
   unsigned Idx = 0;
   for (Iterator It = Begin; It != End; ++It, ++Idx) {
     const ValueMapping *ValMap = *It;
@@ -308,7 +302,7 @@ RegisterBankInfo::getOperandsMapping(Iterator Begin, Iterator End) const {
       continue;
     Res[Idx] = *ValMap;
   }
-  return Res.get();
+  return Res;
 }
 
 const RegisterBankInfo::ValueMapping *RegisterBankInfo::getOperandsMapping(
@@ -323,44 +317,9 @@ const RegisterBankInfo::ValueMapping *RegisterBankInfo::getOperandsMapping(
   return getOperandsMapping(OpdsMapping.begin(), OpdsMapping.end());
 }
 
-static hash_code
-hashInstructionMapping(unsigned ID, unsigned Cost,
-                       const RegisterBankInfo::ValueMapping *OperandsMapping,
-                       unsigned NumOperands) {
-  return hash_combine(ID, Cost, OperandsMapping, NumOperands);
-}
-
-const RegisterBankInfo::InstructionMapping &
-RegisterBankInfo::getInstructionMappingImpl(
-    bool IsInvalid, unsigned ID, unsigned Cost,
-    const RegisterBankInfo::ValueMapping *OperandsMapping,
-    unsigned NumOperands) const {
-  assert(((IsInvalid && ID == InvalidMappingID && Cost == 0 &&
-           OperandsMapping == nullptr && NumOperands == 0) ||
-          !IsInvalid) &&
-         "Mismatch argument for invalid input");
-  ++NumInstructionMappingsAccessed;
-
-  hash_code Hash =
-      hashInstructionMapping(ID, Cost, OperandsMapping, NumOperands);
-  const auto &It = MapOfInstructionMappings.find(Hash);
-  if (It != MapOfInstructionMappings.end())
-    return *It->second;
-
-  ++NumInstructionMappingsCreated;
-
-  auto &InstrMapping = MapOfInstructionMappings[Hash];
-  if (IsInvalid)
-    InstrMapping = llvm::make_unique<InstructionMapping>();
-  else
-    InstrMapping = llvm::make_unique<InstructionMapping>(
-        ID, Cost, OperandsMapping, NumOperands);
-  return *InstrMapping;
-}
-
-const RegisterBankInfo::InstructionMapping &
+RegisterBankInfo::InstructionMapping
 RegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
-  const RegisterBankInfo::InstructionMapping &Mapping = getInstrMappingImpl(MI);
+  RegisterBankInfo::InstructionMapping Mapping = getInstrMappingImpl(MI);
   if (Mapping.isValid())
     return Mapping;
   llvm_unreachable("The target must implement this");
@@ -370,14 +329,14 @@ RegisterBankInfo::InstructionMappings
 RegisterBankInfo::getInstrPossibleMappings(const MachineInstr &MI) const {
   InstructionMappings PossibleMappings;
   // Put the default mapping first.
-  PossibleMappings.push_back(&getInstrMapping(MI));
+  PossibleMappings.push_back(getInstrMapping(MI));
   // Then the alternative mapping, if any.
   InstructionMappings AltMappings = getInstrAlternativeMappings(MI);
-  for (const InstructionMapping *AltMapping : AltMappings)
-    PossibleMappings.push_back(AltMapping);
+  for (InstructionMapping &AltMapping : AltMappings)
+    PossibleMappings.emplace_back(std::move(AltMapping));
 #ifndef NDEBUG
-  for (const InstructionMapping *Mapping : PossibleMappings)
-    assert(Mapping->verify(MI) && "Mapping is invalid");
+  for (const InstructionMapping &Mapping : PossibleMappings)
+    assert(Mapping.verify(MI) && "Mapping is invalid");
 #endif
   return PossibleMappings;
 }
@@ -390,7 +349,6 @@ RegisterBankInfo::getInstrAlternativeMappings(const MachineInstr &MI) const {
 
 void RegisterBankInfo::applyDefaultMapping(const OperandsMapper &OpdMapper) {
   MachineInstr &MI = OpdMapper.getMI();
-  MachineRegisterInfo &MRI = OpdMapper.getMRI();
   DEBUG(dbgs() << "Applying default-like mapping\n");
   for (unsigned OpIdx = 0,
                 EndIdx = OpdMapper.getInstrMapping().getNumOperands();
@@ -401,13 +359,6 @@ void RegisterBankInfo::applyDefaultMapping(const OperandsMapper &OpdMapper) {
       DEBUG(dbgs() << " is not a register, nothing to be done\n");
       continue;
     }
-    if (!MO.getReg()) {
-      DEBUG(dbgs() << " is %%noreg, nothing to be done\n");
-      continue;
-    }
-    assert(OpdMapper.getInstrMapping().getOperandMapping(OpIdx).NumBreakDowns !=
-               0 &&
-           "Invalid mapping");
     assert(OpdMapper.getInstrMapping().getOperandMapping(OpIdx).NumBreakDowns ==
                1 &&
            "This mapping is too complex for this function");
@@ -417,25 +368,9 @@ void RegisterBankInfo::applyDefaultMapping(const OperandsMapper &OpdMapper) {
       DEBUG(dbgs() << " has not been repaired, nothing to be done\n");
       continue;
     }
-    unsigned OrigReg = MO.getReg();
-    unsigned NewReg = *NewRegs.begin();
-    DEBUG(dbgs() << " changed, replace " << PrintReg(OrigReg, nullptr));
-    MO.setReg(NewReg);
-    DEBUG(dbgs() << " with " << PrintReg(NewReg, nullptr));
-
-    // The OperandsMapper creates plain scalar, we may have to fix that.
-    // Check if the types match and if not, fix that.
-    LLT OrigTy = MRI.getType(OrigReg);
-    LLT NewTy = MRI.getType(NewReg);
-    if (OrigTy != NewTy) {
-      assert(OrigTy.getSizeInBits() == NewTy.getSizeInBits() &&
-             "Types with difference size cannot be handled by the default "
-             "mapping");
-      DEBUG(dbgs() << "\nChange type of new opd from " << NewTy << " to "
-                   << OrigTy);
-      MRI.setType(NewReg, OrigTy);
-    }
-    DEBUG(dbgs() << '\n');
+    DEBUG(dbgs() << " changed, replace " << MO.getReg());
+    MO.setReg(*NewRegs.begin());
+    DEBUG(dbgs() << " with " << MO.getReg());
   }
 }
 
@@ -459,18 +394,16 @@ unsigned RegisterBankInfo::getSizeInBits(unsigned Reg,
     RC = MRI.getRegClass(Reg);
   }
   assert(RC && "Unable to deduce the register class");
-  return TRI.getRegSizeInBits(*RC);
+  return RC->getSize() * 8;
 }
 
 //------------------------------------------------------------------------------
 // Helper classes implementation.
 //------------------------------------------------------------------------------
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void RegisterBankInfo::PartialMapping::dump() const {
   print(dbgs());
   dbgs() << '\n';
 }
-#endif
 
 bool RegisterBankInfo::PartialMapping::verify() const {
   assert(RegBank && "Register bank not set");
@@ -518,12 +451,10 @@ bool RegisterBankInfo::ValueMapping::verify(unsigned MeaningfulBitWidth) const {
   return true;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void RegisterBankInfo::ValueMapping::dump() const {
   print(dbgs());
   dbgs() << '\n';
 }
-#endif
 
 void RegisterBankInfo::ValueMapping::print(raw_ostream &OS) const {
   OS << "#BreakDown: " << NumBreakDowns << " ";
@@ -541,7 +472,8 @@ bool RegisterBankInfo::InstructionMapping::verify(
   // Check that all the register operands are properly mapped.
   // Check the constructor invariant.
   // For PHI, we only care about mapping the definition.
-  assert(NumOperands == (isCopyLike(MI) ? 1 : MI.getNumOperands()) &&
+  assert(NumOperands ==
+             ((MI.isCopy() || MI.isPHI()) ? 1 : MI.getNumOperands()) &&
          "NumOperands must match, see constructor");
   assert(MI.getParent() && MI.getParent()->getParent() &&
          "MI must be connected to a MachineFunction");
@@ -571,12 +503,10 @@ bool RegisterBankInfo::InstructionMapping::verify(
   return true;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void RegisterBankInfo::InstructionMapping::dump() const {
   print(dbgs());
   dbgs() << '\n';
 }
-#endif
 
 void RegisterBankInfo::InstructionMapping::print(raw_ostream &OS) const {
   OS << "ID: " << getID() << " Cost: " << getCost() << " Mapping: ";
@@ -646,11 +576,6 @@ void RegisterBankInfo::OperandsMapper::createVRegs(unsigned OpIdx) {
   for (unsigned &NewVReg : NewVRegsForOpIdx) {
     assert(PartMap != ValMapping.end() && "Out-of-bound access");
     assert(NewVReg == 0 && "Register has already been created");
-    // The new registers are always bound to scalar with the right size.
-    // The actual type has to be set when the target does the mapping
-    // of the instruction.
-    // The rationale is that this generic code cannot guess how the
-    // target plans to split the input type.
     NewVReg = MRI.createGenericVirtualRegister(LLT::scalar(PartMap->Length));
     MRI.setRegBank(NewVReg, *PartMap->RegBank);
     ++PartMap;
@@ -694,12 +619,10 @@ RegisterBankInfo::OperandsMapper::getVRegs(unsigned OpIdx,
   return Res;
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void RegisterBankInfo::OperandsMapper::dump() const {
   print(dbgs(), true);
   dbgs() << '\n';
 }
-#endif
 
 void RegisterBankInfo::OperandsMapper::print(raw_ostream &OS,
                                              bool ForDebug) const {

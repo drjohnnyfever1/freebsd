@@ -41,7 +41,8 @@ namespace pdb {
       return DICtx->getKind() == CK_PDB;
     }
 
-    void dump(raw_ostream &OS, DIDumpOptions DIDumpOpts) override;
+    void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All,
+              bool DumpEH = false, bool SummarizeTypes = false) override;
 
     DILineInfo getLineInfoForAddress(
         uint64_t Address,

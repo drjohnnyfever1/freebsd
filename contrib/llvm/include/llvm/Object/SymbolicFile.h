@@ -14,20 +14,9 @@
 #ifndef LLVM_OBJECT_SYMBOLICFILE_H
 #define LLVM_OBJECT_SYMBOLICFILE_H
 
-#include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/iterator_range.h"
-#include "llvm/BinaryFormat/Magic.h"
 #include "llvm/Object/Binary.h"
-#include "llvm/Support/Error.h"
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include <cinttypes>
-#include <cstdint>
-#include <cstring>
-#include <iterator>
-#include <memory>
-#include <system_error>
+#include <utility>
 
 namespace llvm {
 namespace object {
@@ -39,14 +28,12 @@ union DataRefImpl {
     uint32_t a, b;
   } d;
   uintptr_t p;
-
   DataRefImpl() { std::memset(this, 0, sizeof(DataRefImpl)); }
 };
 
 template <typename OStream>
 OStream& operator<<(OStream &OS, const DataRefImpl &D) {
-  OS << "(" << format("0x%08" PRIxPTR, D.p) << " (" << format("0x%08x", D.d.a)
-     << ", " << format("0x%08x", D.d.b) << "))";
+  OS << "(" << format("0x%x8", D.p) << " (" << format("0x%x8", D.d.a) << ", " << format("0x%x8", D.d.b) << "))";
   return OS;
 }
 
@@ -98,7 +85,7 @@ class SymbolicFile;
 /// symbols in the object file.
 class BasicSymbolRef {
   DataRefImpl SymbolPimpl;
-  const SymbolicFile *OwningObject = nullptr;
+  const SymbolicFile *OwningObject;
 
 public:
   enum Flags : unsigned {
@@ -119,7 +106,7 @@ public:
                                  // (IR only)
   };
 
-  BasicSymbolRef() = default;
+  BasicSymbolRef() : OwningObject(nullptr) { }
   BasicSymbolRef(DataRefImpl SymbolP, const SymbolicFile *Owner);
 
   bool operator==(const BasicSymbolRef &Other) const;
@@ -136,12 +123,12 @@ public:
   const SymbolicFile *getObject() const;
 };
 
-using basic_symbol_iterator = content_iterator<BasicSymbolRef>;
+typedef content_iterator<BasicSymbolRef> basic_symbol_iterator;
 
 class SymbolicFile : public Binary {
 public:
-  SymbolicFile(unsigned int Type, MemoryBufferRef Source);
   ~SymbolicFile() override;
+  SymbolicFile(unsigned int Type, MemoryBufferRef Source);
 
   // virtual interface.
   virtual void moveSymbolNext(DataRefImpl &Symb) const = 0;
@@ -156,24 +143,24 @@ public:
   virtual basic_symbol_iterator symbol_end() const = 0;
 
   // convenience wrappers.
-  using basic_symbol_iterator_range = iterator_range<basic_symbol_iterator>;
+  typedef iterator_range<basic_symbol_iterator> basic_symbol_iterator_range;
   basic_symbol_iterator_range symbols() const {
     return basic_symbol_iterator_range(symbol_begin(), symbol_end());
   }
 
   // construction aux.
   static Expected<std::unique_ptr<SymbolicFile>>
-  createSymbolicFile(MemoryBufferRef Object, llvm::file_magic Type,
+  createSymbolicFile(MemoryBufferRef Object, sys::fs::file_magic Type,
                      LLVMContext *Context);
 
   static Expected<std::unique_ptr<SymbolicFile>>
   createSymbolicFile(MemoryBufferRef Object) {
-    return createSymbolicFile(Object, llvm::file_magic::unknown, nullptr);
+    return createSymbolicFile(Object, sys::fs::file_magic::unknown, nullptr);
   }
   static Expected<OwningBinary<SymbolicFile>>
   createSymbolicFile(StringRef ObjectPath);
 
-  static bool classof(const Binary *v) {
+  static inline bool classof(const Binary *v) {
     return v->isSymbolic();
   }
 };
@@ -210,7 +197,7 @@ inline const SymbolicFile *BasicSymbolRef::getObject() const {
   return OwningObject;
 }
 
-} // end namespace object
-} // end namespace llvm
+}
+}
 
-#endif // LLVM_OBJECT_SYMBOLICFILE_H
+#endif

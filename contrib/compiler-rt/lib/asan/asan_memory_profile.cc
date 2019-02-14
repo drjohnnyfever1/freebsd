@@ -48,7 +48,7 @@ class HeapProfile {
     }
   }
 
-  void Print(uptr top_percent, uptr max_number_of_contexts) {
+  void Print(uptr top_percent) {
     InternalSort(&allocations_, allocations_.size(),
                  [](const AllocationSite &a, const AllocationSite &b) {
                    return a.total_size > b.total_size;
@@ -57,14 +57,12 @@ class HeapProfile {
     uptr total_shown = 0;
     Printf("Live Heap Allocations: %zd bytes in %zd chunks; quarantined: "
            "%zd bytes in %zd chunks; %zd other chunks; total chunks: %zd; "
-           "showing top %zd%% (at most %zd unique contexts)\n",
+           "showing top %zd%%\n",
            total_allocated_user_size_, total_allocated_count_,
            total_quarantined_user_size_, total_quarantined_count_,
            total_other_count_, total_allocated_count_ +
-           total_quarantined_count_ + total_other_count_, top_percent,
-           max_number_of_contexts);
-    for (uptr i = 0; i < Min(allocations_.size(), max_number_of_contexts);
-         i++) {
+           total_quarantined_count_ + total_other_count_, top_percent);
+    for (uptr i = 0; i < allocations_.size(); i++) {
       auto &a = allocations_[i];
       Printf("%zd byte(s) (%zd%%) in %zd allocation(s)\n", a.total_size,
              a.total_size * 100 / total_allocated_user_size_, a.count);
@@ -105,23 +103,16 @@ static void MemoryProfileCB(const SuspendedThreadsList &suspended_threads_list,
                             void *argument) {
   HeapProfile hp;
   __lsan::ForEachChunk(ChunkCallback, &hp);
-  uptr *Arg = reinterpret_cast<uptr*>(argument);
-  hp.Print(Arg[0], Arg[1]);
+  hp.Print(reinterpret_cast<uptr>(argument));
 }
 
 }  // namespace __asan
 
-#endif  // CAN_SANITIZE_LEAKS
-
 extern "C" {
 SANITIZER_INTERFACE_ATTRIBUTE
-void __sanitizer_print_memory_profile(uptr top_percent,
-                                      uptr max_number_of_contexts) {
-#if CAN_SANITIZE_LEAKS
-  uptr Arg[2];
-  Arg[0] = top_percent;
-  Arg[1] = max_number_of_contexts;
-  __sanitizer::StopTheWorld(__asan::MemoryProfileCB, Arg);
-#endif  // CAN_SANITIZE_LEAKS
+void __sanitizer_print_memory_profile(uptr top_percent) {
+  __sanitizer::StopTheWorld(__asan::MemoryProfileCB, (void*)top_percent);
 }
 }  // extern "C"
+
+#endif  // CAN_SANITIZE_LEAKS

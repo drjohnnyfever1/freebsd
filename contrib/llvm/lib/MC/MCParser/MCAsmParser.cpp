@@ -8,21 +8,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCParser/MCAsmParser.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/SMLoc.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include <cassert>
-
 using namespace llvm;
 
-MCAsmParser::MCAsmParser() : ShowParsedOperands(0) {}
+MCAsmParser::MCAsmParser()
+    : TargetParser(nullptr), ShowParsedOperands(0), HadError(false),
+      PendingErrors() {}
 
-MCAsmParser::~MCAsmParser() = default;
+MCAsmParser::~MCAsmParser() {
+}
 
 void MCAsmParser::setTargetParser(MCTargetAsmParser &P) {
   assert(!TargetParser && "Target parser is already initialized!");
@@ -118,10 +118,10 @@ bool MCAsmParser::addErrorSuffix(const Twine &Suffix) {
   return true;
 }
 
-bool MCAsmParser::parseMany(function_ref<bool()> parseOne, bool hasComma) {
+bool MCAsmParser::parseMany(std::function<bool()> parseOne, bool hasComma) {
   if (parseOptionalToken(AsmToken::EndOfStatement))
     return false;
-  while (true) {
+  while (1) {
     if (parseOne())
       return true;
     if (parseOptionalToken(AsmToken::EndOfStatement))
@@ -137,9 +137,6 @@ bool MCAsmParser::parseExpression(const MCExpr *&Res) {
   return parseExpression(Res, L);
 }
 
-void MCParsedAsmOperand::dump() const {
-  // Cannot completely remove virtual function even in release mode.
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void MCParsedAsmOperand::dump() const {
   dbgs() << "  " << *this;
-#endif
 }

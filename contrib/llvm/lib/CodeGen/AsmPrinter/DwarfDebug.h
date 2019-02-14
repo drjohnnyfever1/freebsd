@@ -89,7 +89,7 @@ public:
     assert(!MInsn && "Already initialized?");
 
     assert((!E || E->isValid()) && "Expected valid expression");
-    assert(FI != INT_MAX && "Expected valid index");
+    assert(~FI && "Expected valid index");
 
     FrameIndexExprs.push_back({FI, E});
   }
@@ -134,13 +134,6 @@ public:
     assert(!FrameIndexExprs.empty() && "Expected an MMI entry");
     assert(!V.FrameIndexExprs.empty() && "Expected an MMI entry");
 
-    if (FrameIndexExprs.size()) {
-      auto *Expr = FrameIndexExprs.back().Expr;
-      // Get rid of duplicate non-fragment entries. More than one non-fragment
-      // dbg.declare makes no sense so ignore all but the first.
-      if (!Expr || !Expr->isFragment())
-        return;
-    }
     FrameIndexExprs.append(V.FrameIndexExprs.begin(), V.FrameIndexExprs.end());
     assert(all_of(FrameIndexExprs,
                   [](FrameIndexExpr &FIE) {
@@ -217,6 +210,7 @@ class DwarfDebug : public DebugHandlerBase {
   DenseMap<const MCSymbol *, uint64_t> SymSize;
 
   /// Collection of abstract variables.
+  DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> AbstractVariables;
   SmallVector<std::unique_ptr<DbgVariable>, 64> ConcreteVariables;
 
   /// Collection of DebugLocEntry. Stored in a linked list so that DIELocLists
@@ -252,6 +246,9 @@ class DwarfDebug : public DebugHandlerBase {
   SmallVector<
       std::pair<std::unique_ptr<DwarfTypeUnit>, const DICompositeType *>, 1>
       TypeUnitsUnderConstruction;
+
+  /// Whether to emit the pubnames/pubtypes sections.
+  bool HasDwarfPubSections;
 
   /// Whether to use the GNU TLS opcode (instead of the standard opcode).
   bool UseGNUTLSOpcode;
@@ -316,16 +313,20 @@ class DwarfDebug : public DebugHandlerBase {
 
   typedef DbgValueHistoryMap::InlinedVariable InlinedVariable;
 
-  void ensureAbstractVariableIsCreated(DwarfCompileUnit &CU, InlinedVariable Var,
+  /// Find abstract variable associated with Var.
+  DbgVariable *getExistingAbstractVariable(InlinedVariable IV,
+                                           const DILocalVariable *&Cleansed);
+  DbgVariable *getExistingAbstractVariable(InlinedVariable IV);
+  void createAbstractVariable(const DILocalVariable *DV, LexicalScope *Scope);
+  void ensureAbstractVariableIsCreated(InlinedVariable Var,
                                        const MDNode *Scope);
-  void ensureAbstractVariableIsCreatedIfScoped(DwarfCompileUnit &CU, InlinedVariable Var,
+  void ensureAbstractVariableIsCreatedIfScoped(InlinedVariable Var,
                                                const MDNode *Scope);
 
-  DbgVariable *createConcreteVariable(DwarfCompileUnit &TheCU,
-                                      LexicalScope &Scope, InlinedVariable IV);
+  DbgVariable *createConcreteVariable(LexicalScope &Scope, InlinedVariable IV);
 
   /// Construct a DIE for this abstract scope.
-  void constructAbstractSubprogramScopeDIE(DwarfCompileUnit &SrcCU, LexicalScope *Scope);
+  void constructAbstractSubprogramScopeDIE(LexicalScope *Scope);
 
   void finishVariableDefinitions();
 
@@ -419,11 +420,11 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Flags to let the linker know we have emitted new style pubnames. Only
   /// emit it here if we don't have a skeleton CU for split dwarf.
-  void addGnuPubAttributes(DwarfCompileUnit &U, DIE &D) const;
+  void addGnuPubAttributes(DwarfUnit &U, DIE &D) const;
 
   /// Create new DwarfCompileUnit for the given metadata node with tag
   /// DW_TAG_compile_unit.
-  DwarfCompileUnit &getOrCreateDwarfCompileUnit(const DICompileUnit *DIUnit);
+  DwarfCompileUnit &constructDwarfCompileUnit(const DICompileUnit *DIUnit);
 
   /// Construct imported_module or imported_declaration DIE.
   void constructAndAddImportedEntityDIE(DwarfCompileUnit &TheCU,
@@ -445,17 +446,7 @@ class DwarfDebug : public DebugHandlerBase {
                          const DbgValueHistoryMap::InstrRanges &Ranges);
 
   /// Collect variable information from the side table maintained by MF.
-  void collectVariableInfoFromMFTable(DwarfCompileUnit &TheCU,
-                                      DenseSet<InlinedVariable> &P);
-
-protected:
-  /// Gather pre-function debug information.
-  void beginFunctionImpl(const MachineFunction *MF) override;
-
-  /// Gather and emit post-function debug information.
-  void endFunctionImpl(const MachineFunction *MF) override;
-
-  void skippedNonDebugFunction() override;
+  void collectVariableInfoFromMFTable(DenseSet<InlinedVariable> &P);
 
 public:
   //===--------------------------------------------------------------------===//
@@ -471,6 +462,12 @@ public:
 
   /// Emit all Dwarf sections that should come after the content.
   void endModule() override;
+
+  /// Gather pre-function debug information.
+  void beginFunction(const MachineFunction *MF) override;
+
+  /// Gather and emit post-function debug information.
+  void endFunction(const MachineFunction *MF) override;
 
   /// Process beginning of an instruction.
   void beginInstruction(const MachineInstr *MI) override;
@@ -518,8 +515,6 @@ public:
   /// split dwarf proposal support.
   bool useSplitDwarf() const { return HasSplitDwarf; }
 
-  bool shareAcrossDWOCUs() const;
-
   /// Returns the Dwarf Version.
   uint16_t getDwarfVersion() const;
 
@@ -560,8 +555,6 @@ public:
   /// A helper function to check whether the DIE for a given Scope is
   /// going to be null.
   bool isLexicalScopeDIENull(LexicalScope *Scope);
-
-  bool hasDwarfPubSections(bool includeMinimalInlineScopes) const;
 };
 } // End of namespace llvm
 

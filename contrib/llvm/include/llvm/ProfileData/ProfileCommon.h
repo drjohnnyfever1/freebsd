@@ -1,4 +1,4 @@
-//===- ProfileCommon.h - Common profiling APIs. -----------------*- C++ -*-===//
+//===-- ProfileCommon.h - Common profiling APIs. ----------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,32 +12,38 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_PROFILEDATA_PROFILECOMMON_H
-#define LLVM_PROFILEDATA_PROFILECOMMON_H
+#ifndef LLVM_PROFILEDATA_PROFILE_COMMON_H
+#define LLVM_PROFILEDATA_PROFILE_COMMON_H
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/IR/ProfileSummary.h"
-#include "llvm/ProfileData/InstrProf.h"
-#include "llvm/Support/Error.h"
-#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <map>
-#include <memory>
+#include <utility>
 #include <vector>
 
+#include "llvm/IR/ProfileSummary.h"
+#include "llvm/Support/Error.h"
+#include "llvm/ADT/ArrayRef.h"
+
 namespace llvm {
-
+class Function;
+namespace IndexedInstrProf {
+struct Summary;
+}
 namespace sampleprof {
-
 class FunctionSamples;
-
-} // end namespace sampleprof
+}
+struct InstrProfRecord;
+class LLVMContext;
+class Metadata;
+class MDTuple;
+class MDNode;
 
 inline const char *getHotSectionPrefix() { return ".hot"; }
 inline const char *getUnlikelySectionPrefix() { return ".unlikely"; }
 
 class ProfileSummaryBuilder {
+
 private:
   /// We keep track of the number of times a count (block count or samples)
   /// appears in the profile. The map is kept sorted in the descending order of
@@ -47,18 +53,13 @@ private:
 
 protected:
   SummaryEntryVector DetailedSummary;
-  uint64_t TotalCount = 0;
-  uint64_t MaxCount = 0;
-  uint64_t MaxFunctionCount = 0;
-  uint32_t NumCounts = 0;
-  uint32_t NumFunctions = 0;
-
   ProfileSummaryBuilder(std::vector<uint32_t> Cutoffs)
       : DetailedSummaryCutoffs(std::move(Cutoffs)) {}
-  ~ProfileSummaryBuilder() = default;
-
   inline void addCount(uint64_t Count);
+  ~ProfileSummaryBuilder() = default;
   void computeDetailedSummary();
+  uint64_t TotalCount = 0, MaxCount = 0, MaxFunctionCount = 0;
+  uint32_t NumCounts = 0, NumFunctions = 0;
 
 public:
   /// \brief A vector of useful cutoff values for detailed summary.
@@ -67,24 +68,22 @@ public:
 
 class InstrProfSummaryBuilder final : public ProfileSummaryBuilder {
   uint64_t MaxInternalBlockCount = 0;
-
   inline void addEntryCount(uint64_t Count);
   inline void addInternalCount(uint64_t Count);
 
 public:
   InstrProfSummaryBuilder(std::vector<uint32_t> Cutoffs)
       : ProfileSummaryBuilder(std::move(Cutoffs)) {}
-
   void addRecord(const InstrProfRecord &);
   std::unique_ptr<ProfileSummary> getSummary();
 };
 
 class SampleProfileSummaryBuilder final : public ProfileSummaryBuilder {
+
 public:
+  void addRecord(const sampleprof::FunctionSamples &FS);
   SampleProfileSummaryBuilder(std::vector<uint32_t> Cutoffs)
       : ProfileSummaryBuilder(std::move(Cutoffs)) {}
-
-  void addRecord(const sampleprof::FunctionSamples &FS);
   std::unique_ptr<ProfileSummary> getSummary();
 };
 
@@ -97,6 +96,6 @@ void ProfileSummaryBuilder::addCount(uint64_t Count) {
   CountFrequencies[Count]++;
 }
 
-} // end namespace llvm
 
-#endif // LLVM_PROFILEDATA_PROFILECOMMON_H
+} // end namespace llvm
+#endif

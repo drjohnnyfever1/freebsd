@@ -44,8 +44,7 @@
 #endif
 #define CONST_SECTION .section .rodata
 
-#if defined(__GNU__) || defined(__FreeBSD__) || defined(__Fuchsia__) || \
-    defined(__linux__)
+#if defined(__GNU__) || defined(__ANDROID__) || defined(__FreeBSD__)
 #define NO_EXEC_STACK_DIRECTIVE .section .note.GNU-stack,"",%progbits
 #else
 #define NO_EXEC_STACK_DIRECTIVE
@@ -115,12 +114,10 @@
 #if defined(USE_THUMB_2)
 #define IT(cond)  it cond
 #define ITT(cond) itt cond
-#define ITE(cond) ite cond
 #define WIDE(op) op.w
 #else
 #define IT(cond)
 #define ITT(cond)
-#define ITE(cond)
 #define WIDE(op) op
 #endif
 #endif /* defined(__arm__) */

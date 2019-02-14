@@ -31,6 +31,8 @@
 
 namespace llvm {
 
+class TargetMachine;
+
 #define INITIALIZE_PASS(passName, arg, name, cfg, analysis)                    \
   static void *initialize##passName##PassOnce(PassRegistry &Registry) {        \
     PassInfo *PI = new PassInfo(                                               \
@@ -39,7 +41,7 @@ namespace llvm {
     Registry.registerPass(*PI, true);                                          \
     return PI;                                                                 \
   }                                                                            \
-  static llvm::once_flag Initialize##passName##PassFlag;                       \
+  LLVM_DEFINE_ONCE_FLAG(Initialize##passName##PassFlag);                       \
   void llvm::initialize##passName##Pass(PassRegistry &Registry) {              \
     llvm::call_once(Initialize##passName##PassFlag,                            \
                     initialize##passName##PassOnce, std::ref(Registry));       \
@@ -59,7 +61,7 @@ namespace llvm {
   Registry.registerPass(*PI, true);                                            \
   return PI;                                                                   \
   }                                                                            \
-  static llvm::once_flag Initialize##passName##PassFlag;                       \
+  LLVM_DEFINE_ONCE_FLAG(Initialize##passName##PassFlag);                       \
   void llvm::initialize##passName##Pass(PassRegistry &Registry) {              \
     llvm::call_once(Initialize##passName##PassFlag,                            \
                     initialize##passName##PassOnce, std::ref(Registry));       \
@@ -76,6 +78,10 @@ namespace llvm {
 
 template <typename PassName> Pass *callDefaultCtor() { return new PassName(); }
 
+template <typename PassName> Pass *callTargetMachineCtor(TargetMachine *TM) {
+  return new PassName(TM);
+}
+
 //===---------------------------------------------------------------------------
 /// RegisterPass<t> template - This template class is used to notify the system
 /// that a Pass is available for use, and registers it into the internal
@@ -87,7 +93,11 @@ template <typename PassName> Pass *callDefaultCtor() { return new PassName(); }
 /// static RegisterPass<YourPassClassName> tmp("passopt", "My Pass Name");
 ///
 /// This statement will cause your pass to be created by calling the default
-/// constructor exposed by the pass.
+/// constructor exposed by the pass.  If you have a different constructor that
+/// must be called, create a global constructor function (which takes the
+/// arguments you need and returns a Pass*) and register your pass like this:
+///
+/// static RegisterPass<PassClassName> tmp("passopt", "My Name");
 ///
 template <typename passName> struct RegisterPass : public PassInfo {
   // Register Pass using default constructor...
@@ -142,7 +152,7 @@ struct RegisterAnalysisGroup : public RegisterAGBase {
     Registry.registerAnalysisGroup(&agName::ID, 0, *AI, false, true);          \
     return AI;                                                                 \
   }                                                                            \
-  static llvm::once_flag Initialize##agName##AnalysisGroupFlag;                \
+  LLVM_DEFINE_ONCE_FLAG(Initialize##agName##AnalysisGroupFlag);                \
   void llvm::initialize##agName##AnalysisGroup(PassRegistry &Registry) {       \
     llvm::call_once(Initialize##agName##AnalysisGroupFlag,                     \
                     initialize##agName##AnalysisGroupOnce,                     \
@@ -163,7 +173,7 @@ struct RegisterAnalysisGroup : public RegisterAGBase {
                                    true);                                      \
     return AI;                                                                 \
   }                                                                            \
-  static llvm::once_flag Initialize##passName##PassFlag;                       \
+  LLVM_DEFINE_ONCE_FLAG(Initialize##passName##PassFlag);                       \
   void llvm::initialize##passName##Pass(PassRegistry &Registry) {              \
     llvm::call_once(Initialize##passName##PassFlag,                            \
                     initialize##passName##PassOnce, std::ref(Registry));       \
@@ -184,7 +194,7 @@ struct RegisterAnalysisGroup : public RegisterAGBase {
   Registry.registerAnalysisGroup(&agName::ID, &passName::ID, *AI, def, true);  \
   return AI;                                                                   \
   }                                                                            \
-  static llvm::once_flag Initialize##passName##PassFlag;                       \
+  LLVM_DEFINE_ONCE_FLAG(Initialize##passName##PassFlag);                       \
   void llvm::initialize##passName##Pass(PassRegistry &Registry) {              \
     llvm::call_once(Initialize##passName##PassFlag,                            \
                     initialize##passName##PassOnce, std::ref(Registry));       \

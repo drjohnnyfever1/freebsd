@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "MipsTargetMachine.h"
-#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Debug.h"
@@ -29,16 +28,14 @@ namespace {
   public:
     static char ID;
 
-    Mips16HardFloat() : ModulePass(ID) {}
+    Mips16HardFloat(MipsTargetMachine &TM_) : ModulePass(ID), TM(TM_) {}
 
     StringRef getPassName() const override { return "MIPS16 Hard Float Pass"; }
 
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<TargetPassConfig>();
-      ModulePass::getAnalysisUsage(AU);
-    }
-
     bool runOnModule(Module &M) override;
+
+  protected:
+    const MipsTargetMachine &TM;
   };
 
   static void EmitInlineAsm(LLVMContext &C, BasicBlock *BB, StringRef AsmText) {
@@ -408,7 +405,7 @@ static bool fixupFPReturnAndCall(Function &F, Module *M,
           "__mips16_ret_dc"
         };
         const char *Name = Helper[RV];
-        AttributeList A;
+        AttributeSet A;
         Value *Params[] = {RVal};
         Modified = true;
         //
@@ -417,13 +414,13 @@ static bool fixupFPReturnAndCall(Function &F, Module *M,
         // during call setup, the proper call lowering to the helper
         // functions will take place.
         //
-        A = A.addAttribute(C, AttributeList::FunctionIndex,
+        A = A.addAttribute(C, AttributeSet::FunctionIndex,
                            "__Mips16RetHelper");
-        A = A.addAttribute(C, AttributeList::FunctionIndex,
+        A = A.addAttribute(C, AttributeSet::FunctionIndex,
                            Attribute::ReadNone);
-        A = A.addAttribute(C, AttributeList::FunctionIndex,
+        A = A.addAttribute(C, AttributeSet::FunctionIndex,
                            Attribute::NoInline);
-        Value *F = (M->getOrInsertFunction(Name, A, MyVoid, T));
+        Value *F = (M->getOrInsertFunction(Name, A, MyVoid, T, nullptr));
         CallInst::Create(F, Params, "", &I);
       } else if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
         FunctionType *FT = CI->getFunctionType();
@@ -493,14 +490,15 @@ static void createFPFnStub(Function *F, Module *M, FPParamVariant PV,
 // remove the use-soft-float attribute
 //
 static void removeUseSoftFloat(Function &F) {
-  AttrBuilder B;
+  AttributeSet A;
   DEBUG(errs() << "removing -use-soft-float\n");
-  B.addAttribute("use-soft-float", "false");
-  F.removeAttributes(AttributeList::FunctionIndex, B);
+  A = A.addAttribute(F.getContext(), AttributeSet::FunctionIndex,
+                     "use-soft-float", "false");
+  F.removeAttributes(AttributeSet::FunctionIndex, A);
   if (F.hasFnAttribute("use-soft-float")) {
     DEBUG(errs() << "still has -use-soft-float\n");
   }
-  F.addAttributes(AttributeList::FunctionIndex, B);
+  F.addAttributes(AttributeSet::FunctionIndex, A);
 }
 
 
@@ -523,8 +521,6 @@ static void removeUseSoftFloat(Function &F) {
 //       during call lowering but it should be moved here in the future.
 //
 bool Mips16HardFloat::runOnModule(Module &M) {
-  auto &TM = static_cast<const MipsTargetMachine &>(
-      getAnalysis<TargetPassConfig>().getTM<TargetMachine>());
   DEBUG(errs() << "Run on Module Mips16HardFloat\n");
   bool Modified = false;
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
@@ -546,6 +542,6 @@ bool Mips16HardFloat::runOnModule(Module &M) {
 }
 
 
-ModulePass *llvm::createMips16HardFloatPass() {
-  return new Mips16HardFloat();
+ModulePass *llvm::createMips16HardFloatPass(MipsTargetMachine &TM) {
+  return new Mips16HardFloat(TM);
 }

@@ -14,13 +14,13 @@
 #ifndef LLVM_LIB_TARGET_XCORE_MCTARGETDESC_XCOREMCTARGETDESC_H
 #define LLVM_LIB_TARGET_XCORE_MCTARGETDESC_XCOREMCTARGETDESC_H
 
+#include "llvm/Support/DataTypes.h"
+
 namespace llvm {
-
 class Target;
-
 Target &getTheXCoreTarget();
 
-} // end namespace llvm
+} // End llvm namespace
 
 // Defines symbolic names for XCore registers.  This defines a mapping from
 // register name to register number.
@@ -36,4 +36,4 @@ Target &getTheXCoreTarget();
 #define GET_SUBTARGETINFO_ENUM
 #include "XCoreGenSubtargetInfo.inc"
 
-#endif // LLVM_LIB_TARGET_XCORE_MCTARGETDESC_XCOREMCTARGETDESC_H
+#endif

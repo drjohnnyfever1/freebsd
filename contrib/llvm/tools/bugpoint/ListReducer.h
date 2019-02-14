@@ -19,7 +19,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdlib>
-#include <random>
 #include <vector>
 
 namespace llvm {
@@ -47,7 +46,7 @@ template <typename ElTy> struct ListReducer {
   /// that bugpoint does.
   Expected<bool> reduceList(std::vector<ElTy> &TheList) {
     std::vector<ElTy> empty;
-    std::mt19937 randomness(0x6e5ea738);  // Seed the random number generator
+    std::srand(0x6e5ea738); // Seed the random number generator
     Expected<TestResult> Result = doTest(TheList, empty);
     if (Error E = Result.takeError())
       return std::move(E);
@@ -93,7 +92,7 @@ template <typename ElTy> struct ListReducer {
       // distribution (improving the speed of convergence).
       if (ShufflingEnabled && NumOfIterationsWithoutProgress > MaxIterations) {
         std::vector<ElTy> ShuffledList(TheList);
-        std::shuffle(ShuffledList.begin(), ShuffledList.end(), randomness);
+        std::random_shuffle(ShuffledList.begin(), ShuffledList.end());
         errs() << "\n\n*** Testing shuffled set...\n\n";
         // Check that random shuffle doesn't lose the bug
         Expected<TestResult> Result = doTest(ShuffledList, empty);

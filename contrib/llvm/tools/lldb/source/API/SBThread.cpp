@@ -15,7 +15,9 @@
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/State.h"
+#include "lldb/Core/Stream.h"
 #include "lldb/Core/StreamFile.h"
+#include "lldb/Core/StructuredData.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Symbol/CompileUnit.h"
@@ -32,8 +34,6 @@
 #include "lldb/Target/ThreadPlanStepOut.h"
 #include "lldb/Target/ThreadPlanStepRange.h"
 #include "lldb/Target/UnixSignals.h"
-#include "lldb/Utility/Stream.h"
-#include "lldb/Utility/StructuredData.h"
 
 #include "lldb/API/SBAddress.h"
 #include "lldb/API/SBDebugger.h"
@@ -43,7 +43,6 @@
 #include "lldb/API/SBThreadCollection.h"
 #include "lldb/API/SBThreadPlan.h"
 #include "lldb/API/SBValue.h"
-#include "lldb/lldb-enumerations.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -292,6 +291,10 @@ SBThreadCollection
 SBThread::GetStopReasonExtendedBacktraces(InstrumentationRuntimeType type) {
   ThreadCollectionSP threads;
   threads.reset(new ThreadCollection());
+
+  // We currently only support ThreadSanitizer.
+  if (type != eInstrumentationRuntimeTypeThreadSanitizer)
+    return threads;
 
   std::unique_lock<std::recursive_mutex> lock;
   ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
@@ -558,26 +561,26 @@ bool SBThread::GetInfoItemByPathAsString(const char *path, SBStream &strm) {
         StructuredData::ObjectSP node =
             info_root_sp->GetObjectForDotSeparatedPath(path);
         if (node) {
-          if (node->GetType() == eStructuredDataTypeString) {
-            strm.Printf("%s", node->GetAsString()->GetValue().str().c_str());
+          if (node->GetType() == StructuredData::Type::eTypeString) {
+            strm.Printf("%s", node->GetAsString()->GetValue().c_str());
             success = true;
           }
-          if (node->GetType() == eStructuredDataTypeInteger) {
+          if (node->GetType() == StructuredData::Type::eTypeInteger) {
             strm.Printf("0x%" PRIx64, node->GetAsInteger()->GetValue());
             success = true;
           }
-          if (node->GetType() == eStructuredDataTypeFloat) {
+          if (node->GetType() == StructuredData::Type::eTypeFloat) {
             strm.Printf("0x%f", node->GetAsFloat()->GetValue());
             success = true;
           }
-          if (node->GetType() == eStructuredDataTypeBoolean) {
+          if (node->GetType() == StructuredData::Type::eTypeBoolean) {
             if (node->GetAsBoolean()->GetValue() == true)
               strm.Printf("true");
             else
               strm.Printf("false");
             success = true;
           }
-          if (node->GetType() == eStructuredDataTypeNull) {
+          if (node->GetType() == StructuredData::Type::eTypeNull) {
             strm.Printf("null");
             success = true;
           }
@@ -592,8 +595,8 @@ bool SBThread::GetInfoItemByPathAsString(const char *path, SBStream &strm) {
   }
 
   if (log)
-    log->Printf("SBThread(%p)::GetInfoItemByPathAsString (\"%s\") => \"%s\"",
-                static_cast<void *>(exe_ctx.GetThreadPtr()), path, strm.GetData());
+    log->Printf("SBThread(%p)::GetInfoItemByPathAsString () => %s",
+                static_cast<void *>(exe_ctx.GetThreadPtr()), strm.GetData());
 
   return success;
 }
@@ -1034,7 +1037,7 @@ SBError SBThread::JumpToLine(lldb::SBFileSpec &file_spec, uint32_t line) {
 
   Thread *thread = exe_ctx.GetThreadPtr();
 
-  Status err = thread->JumpToLine(file_spec.get(), line, true);
+  Error err = thread->JumpToLine(file_spec.get(), line, true);
   sb_error.SetError(err);
   return sb_error;
 }

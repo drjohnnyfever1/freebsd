@@ -17,7 +17,6 @@
 
 #include "clang/Lex/MultipleIncludeOpt.h"
 #include "clang/Lex/Token.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 
 namespace clang {
@@ -176,11 +175,6 @@ public:
   }
   conditional_iterator conditional_end() const { 
     return ConditionalStack.end(); 
-  }
-
-  void setConditionalLevels(ArrayRef<PPConditionalInfo> CL) {
-    ConditionalStack.clear();
-    ConditionalStack.append(CL.begin(), CL.end());
   }
 };
 

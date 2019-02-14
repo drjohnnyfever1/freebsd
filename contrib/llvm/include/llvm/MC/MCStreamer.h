@@ -15,26 +15,17 @@
 #define LLVM_MC_MCSTREAMER_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCLinkerOptimizationHint.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCWinEH.h"
+#include "llvm/Support/DataTypes.h"
 #include "llvm/Support/SMLoc.h"
-#include <cassert>
-#include <cstdint>
-#include <memory>
 #include <string>
-#include <utility>
-#include <vector>
 
 namespace llvm {
-
-class AssemblerConstantPools;
-class formatted_raw_ostream;
 class MCAsmBackend;
 class MCCodeEmitter;
 class MCContext;
@@ -43,12 +34,16 @@ class MCInst;
 class MCInstPrinter;
 class MCSection;
 class MCStreamer;
+class MCSymbolELF;
 class MCSymbolRefExpr;
 class MCSubtargetInfo;
-class raw_ostream;
+class StringRef;
 class Twine;
+class raw_ostream;
+class formatted_raw_ostream;
+class AssemblerConstantPools;
 
-using MCSectionSubPair = std::pair<MCSection *, const MCExpr *>;
+typedef std::pair<MCSection *, const MCExpr *> MCSectionSubPair;
 
 /// Target specific streamer interface. This is used so that targets can
 /// implement support for target specific assembly directives.
@@ -127,7 +122,6 @@ public:
   virtual void emitArch(unsigned Arch);
   virtual void emitArchExtension(unsigned ArchExt);
   virtual void emitObjectArch(unsigned Arch);
-  void emitTargetAttributes(const MCSubtargetInfo &STI);
   virtual void finishAttributeSection();
   virtual void emitInst(uint32_t Inst, char Suffix = '\0');
 
@@ -167,6 +161,9 @@ private:
 class MCStreamer {
   MCContext &Context;
   std::unique_ptr<MCTargetStreamer> TargetStreamer;
+
+  MCStreamer(const MCStreamer &) = delete;
+  MCStreamer &operator=(const MCStreamer &) = delete;
 
   std::vector<MCDwarfFrameInfo> DwarfFrameInfos;
   MCDwarfFrameInfo *getCurrentDwarfFrameInfo();
@@ -208,8 +205,6 @@ protected:
   virtual void EmitRawTextImpl(StringRef String);
 
 public:
-  MCStreamer(const MCStreamer &) = delete;
-  MCStreamer &operator=(const MCStreamer &) = delete;
   virtual ~MCStreamer();
 
   void visitUsedExpr(const MCExpr &Expr);
@@ -287,7 +282,6 @@ public:
   /// \brief Add explicit comment T. T is required to be a valid
   /// comment in the output and does not need to be escaped.
   virtual void addExplicitComment(const Twine &T);
-
   /// \brief Emit added explicit comments.
   virtual void emitExplicitComments();
 
@@ -399,7 +393,7 @@ public:
   /// used in an assignment.
   // FIXME: These emission are non-const because we mutate the symbol to
   // add the section we're emitting it to later.
-  virtual void EmitLabel(MCSymbol *Symbol, SMLoc Loc = SMLoc());
+  virtual void EmitLabel(MCSymbol *Symbol);
 
   virtual void EmitEHSymAttributes(const MCSymbol *Symbol, MCSymbol *EHSymbol);
 
@@ -488,14 +482,6 @@ public:
   /// This corresponds to an assembler statement such as:
   ///  .size symbol, expression
   virtual void emitELFSize(MCSymbol *Symbol, const MCExpr *Value);
-
-  /// \brief Emit an ELF .symver directive.
-  ///
-  /// This corresponds to an assembler statement such as:
-  ///  .symver _start, foo@@SOME_VERSION
-  /// \param Alias - The versioned alias (i.e. "foo@@SOME_VERSION")
-  /// \param Aliasee - The aliased symbol (i.e. "_start")
-  virtual void emitELFSymverDirective(MCSymbol *Alias, const MCSymbol *Aliasee);
 
   /// \brief Emit a Linker Optimization Hint (LOH) directive.
   /// \param Args - Arguments of the LOH.
@@ -836,9 +822,7 @@ public:
   }
 
   /// \brief Emit the given \p Instruction into the current section.
-  /// PrintSchedInfo == true then schedul comment should be added to output
-  virtual void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
-                               bool PrintSchedInfo = false);
+  virtual void EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &STI);
 
   /// \brief Set the bundle alignment mode from now on in the section.
   /// The argument is the power of 2 to which the alignment is set. The
@@ -892,7 +876,6 @@ MCStreamer *createAsmStreamer(MCContext &Ctx,
                               bool isVerboseAsm, bool useDwarfDirectory,
                               MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                               MCAsmBackend *TAB, bool ShowInst);
-
 } // end namespace llvm
 
-#endif // LLVM_MC_MCSTREAMER_H
+#endif

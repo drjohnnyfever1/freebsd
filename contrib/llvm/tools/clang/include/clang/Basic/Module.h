@@ -42,17 +42,7 @@ class IdentifierInfo;
   
 /// \brief Describes the name of a module.
 typedef SmallVector<std::pair<std::string, SourceLocation>, 2> ModuleId;
-
-/// The signature of a module, which is a hash of the AST content.
-struct ASTFileSignature : std::array<uint32_t, 5> {
-  ASTFileSignature(std::array<uint32_t, 5> S = {{0}})
-      : std::array<uint32_t, 5>(std::move(S)) {}
-
-  explicit operator bool() const {
-    return *this != std::array<uint32_t, 5>({{0}});
-  }
-};
-
+  
 /// \brief Describes a module or submodule.
 class Module {
 public:
@@ -61,18 +51,6 @@ public:
   
   /// \brief The location of the module definition.
   SourceLocation DefinitionLoc;
-
-  enum ModuleKind {
-    /// \brief This is a module that was defined by a module map and built out
-    /// of header files.
-    ModuleMapModule,
-
-    /// \brief This is a C++ Modules TS module interface unit.
-    ModuleInterfaceUnit
-  };
-
-  /// \brief The kind of this module.
-  ModuleKind Kind = ModuleMapModule;
 
   /// \brief The parent of this module. This will be NULL for the top-level
   /// module.
@@ -83,15 +61,11 @@ public:
   /// are found.
   const DirectoryEntry *Directory;
 
-  /// \brief The presumed file name for the module map defining this module.
-  /// Only non-empty when building from preprocessed source.
-  std::string PresumedModuleMapFile;
-
   /// \brief The umbrella header or directory.
   llvm::PointerUnion<const DirectoryEntry *, const FileEntry *> Umbrella;
 
   /// \brief The module signature.
-  ASTFileSignature Signature;
+  uint64_t Signature;
 
   /// \brief The name of the umbrella entry, as written in the module map.
   std::string UmbrellaAsWritten;
@@ -154,18 +128,10 @@ public:
   /// \brief Stored information about a header directive that was found in the
   /// module map file but has not been resolved to a file.
   struct UnresolvedHeaderDirective {
-    HeaderKind Kind = HK_Normal;
     SourceLocation FileNameLoc;
     std::string FileName;
-    bool IsUmbrella = false;
-    bool HasBuiltinHeader = false;
-    Optional<off_t> Size;
-    Optional<time_t> ModTime;
+    bool IsUmbrella;
   };
-
-  /// Headers that are mentioned in the module map file but that we have not
-  /// yet attempted to resolve to a file on the file system.
-  SmallVector<UnresolvedHeaderDirective, 1> UnresolvedHeaders;
 
   /// \brief Headers that are mentioned in the module map file but could not be
   /// found on the file system.
@@ -393,9 +359,7 @@ public:
 
   /// \brief Retrieve the full name of this module, including the path from
   /// its top-level module.
-  /// \param AllowStringLiterals If \c true, components that might not be
-  ///        lexically valid as identifiers will be emitted as string literals.
-  std::string getFullModuleName(bool AllowStringLiterals = false) const;
+  std::string getFullModuleName() const;
 
   /// \brief Whether the full name of this module is equal to joining
   /// \p nameParts with "."s.

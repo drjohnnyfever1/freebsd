@@ -18,6 +18,7 @@
 #ifndef LLVM_CODEGEN_MIRPARSER_MIRPARSER_H
 #define LLVM_CODEGEN_MIRPARSER_MIRPARSER_H
 
+#include "llvm/CodeGen/MachineFunctionInitializer.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <memory>
@@ -26,30 +27,29 @@ namespace llvm {
 
 class StringRef;
 class MIRParserImpl;
-class MachineModuleInfo;
 class SMDiagnostic;
 
 /// This class initializes machine functions by applying the state loaded from
 /// a MIR file.
-class MIRParser {
+class MIRParser : public MachineFunctionInitializer {
   std::unique_ptr<MIRParserImpl> Impl;
 
 public:
   MIRParser(std::unique_ptr<MIRParserImpl> Impl);
   MIRParser(const MIRParser &) = delete;
-  ~MIRParser();
+  ~MIRParser() override;
 
-  /// Parses the optional LLVM IR module in the MIR file.
+  /// Parse the optional LLVM IR module that's embedded in the MIR file.
   ///
   /// A new, empty module is created if the LLVM IR isn't present.
-  /// \returns nullptr if a parsing error occurred.
-  std::unique_ptr<Module> parseIRModule();
+  /// Returns null if a parsing error occurred.
+  std::unique_ptr<Module> parseLLVMModule();
 
-  /// \brief Parses MachineFunctions in the MIR file and add them to the given
-  /// MachineModuleInfo \p MMI.
+  /// Initialize the machine function to the state that's described in the MIR
+  /// file.
   ///
-  /// \returns true if an error occurred.
-  bool parseMachineFunctions(Module &M, MachineModuleInfo &MMI);
+  /// Return true if error occurred.
+  bool initializeMachineFunction(MachineFunction &MF) override;
 };
 
 /// This function is the main interface to the MIR serialization format parser.

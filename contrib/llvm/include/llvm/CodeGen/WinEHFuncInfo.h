@@ -1,4 +1,4 @@
-//===- llvm/CodeGen/WinEHFuncInfo.h -----------------------------*- C++ -*-===//
+//===-- llvm/CodeGen/WinEHFuncInfo.h ----------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,26 +17,28 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/SmallVector.h"
-#include <cstdint>
-#include <limits>
-#include <utility>
+#include "llvm/ADT/TinyPtrVector.h"
+#include "llvm/IR/Instructions.h"
 
 namespace llvm {
-
 class AllocaInst;
 class BasicBlock;
-class FuncletPadInst;
+class CatchReturnInst;
+class Constant;
 class Function;
 class GlobalVariable;
-class Instruction;
 class InvokeInst;
-class MachineBasicBlock;
+class IntrinsicInst;
+class LandingPadInst;
+class MCExpr;
 class MCSymbol;
+class MachineBasicBlock;
+class Value;
 
 // The following structs respresent the .xdata tables for various
 // Windows-related EH personalities.
 
-using MBBOrBasicBlock = PointerUnion<const BasicBlock *, MachineBasicBlock *>;
+typedef PointerUnion<const BasicBlock *, MachineBasicBlock *> MBBOrBasicBlock;
 
 struct CxxUnwindMapEntry {
   int ToState;
@@ -97,18 +99,18 @@ struct WinEHFuncInfo {
   SmallVector<WinEHTryBlockMapEntry, 4> TryBlockMap;
   SmallVector<SEHUnwindMapEntry, 4> SEHUnwindMap;
   SmallVector<ClrEHUnwindMapEntry, 4> ClrEHUnwindMap;
-  int UnwindHelpFrameIdx = std::numeric_limits<int>::max();
-  int PSPSymFrameIdx = std::numeric_limits<int>::max();
+  int UnwindHelpFrameIdx = INT_MAX;
+  int PSPSymFrameIdx = INT_MAX;
 
   int getLastStateNumber() const { return CxxUnwindMap.size() - 1; }
 
   void addIPToStateRange(const InvokeInst *II, MCSymbol *InvokeBegin,
                          MCSymbol *InvokeEnd);
 
-  int EHRegNodeFrameIndex = std::numeric_limits<int>::max();
-  int EHRegNodeEndOffset = std::numeric_limits<int>::max();
-  int EHGuardFrameIndex = std::numeric_limits<int>::max();
-  int SEHSetFrameOffset = std::numeric_limits<int>::max();
+  int EHRegNodeFrameIndex = INT_MAX;
+  int EHRegNodeEndOffset = INT_MAX;
+  int EHGuardFrameIndex = INT_MAX;
+  int SEHSetFrameOffset = INT_MAX;
 
   WinEHFuncInfo();
 };
@@ -123,7 +125,5 @@ void calculateSEHStateNumbers(const Function *ParentFn,
                               WinEHFuncInfo &FuncInfo);
 
 void calculateClrEHStateNumbers(const Function *Fn, WinEHFuncInfo &FuncInfo);
-
-} // end namespace llvm
-
+}
 #endif // LLVM_CODEGEN_WINEHFUNCINFO_H

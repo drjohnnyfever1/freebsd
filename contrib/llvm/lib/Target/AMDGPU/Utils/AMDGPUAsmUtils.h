@@ -25,12 +25,6 @@ namespace Hwreg { // Symbolic names for the hwreg(...) syntax.
 extern const char* const IdSymbolic[];
 
 } // namespace Hwreg
-
-namespace Swizzle { // Symbolic names for the swizzle(...) syntax.
-
-extern const char* const IdSymbolic[];
-
-} // namespace Swizzle
 } // namespace AMDGPU
 } // namespace llvm
 

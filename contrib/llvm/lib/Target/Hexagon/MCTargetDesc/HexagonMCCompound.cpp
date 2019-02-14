@@ -14,7 +14,6 @@
 #include "Hexagon.h"
 #include "MCTargetDesc/HexagonBaseInfo.h"
 #include "MCTargetDesc/HexagonMCInstrInfo.h"
-#include "MCTargetDesc/HexagonMCShuffler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Debug.h"
@@ -397,7 +396,7 @@ static bool lookForCompound(MCInstrInfo const &MCII, MCContext &Context,
 /// is found update the contents fo the bundle with the compound insn.
 /// If a compound instruction is found then the bundle will have one
 /// additional slot.
-void HexagonMCInstrInfo::tryCompound(MCInstrInfo const &MCII, MCSubtargetInfo const &STI,
+void HexagonMCInstrInfo::tryCompound(MCInstrInfo const &MCII,
                                      MCContext &Context, MCInst &MCI) {
   assert(HexagonMCInstrInfo::isBundle(MCI) &&
          "Non-Bundle where Bundle expected");
@@ -406,24 +405,8 @@ void HexagonMCInstrInfo::tryCompound(MCInstrInfo const &MCII, MCSubtargetInfo co
   if (MCI.size() < 2)
     return;
 
-  bool StartedValid = llvm::HexagonMCShuffle(Context, false, MCII, STI, MCI);
-
-  // Create a vector, needed to keep the order of jump instructions.
-  MCInst CheckList(MCI);
-
   // Look for compounds until none are found, only update the bundle when
   // a compound is found.
-  while (lookForCompound(MCII, Context, CheckList)) {
-    // Keep the original bundle around in case the shuffle fails.
-    MCInst OriginalBundle(MCI);
-
-    // Need to update the bundle.
-    MCI = CheckList;
-
-    if (StartedValid &&
-        !llvm::HexagonMCShuffle(Context, false, MCII, STI, MCI)) {
-       DEBUG(dbgs() << "Found ERROR\n");
-      MCI = OriginalBundle;
-    }
-  }
+  while (lookForCompound(MCII, Context, MCI))
+    ;
 }

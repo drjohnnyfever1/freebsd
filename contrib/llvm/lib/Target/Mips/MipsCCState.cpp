@@ -38,7 +38,7 @@ static bool isF128SoftLibCall(const char *CallSym) {
 
 /// This function returns true if Ty is fp128, {f128} or i128 which was
 /// originally a fp128.
-static bool originalTypeIsF128(const Type *Ty, const char *Func) {
+static bool originalTypeIsF128(Type *Ty, const SDNode *CallNode) {
   if (Ty->isFP128Ty())
     return true;
 
@@ -46,25 +46,12 @@ static bool originalTypeIsF128(const Type *Ty, const char *Func) {
       Ty->getStructElementType(0)->isFP128Ty())
     return true;
 
+  const ExternalSymbolSDNode *ES =
+      dyn_cast_or_null<const ExternalSymbolSDNode>(CallNode);
+
   // If the Ty is i128 and the function being called is a long double emulation
   // routine, then the original type is f128.
-  return (Func && Ty->isIntegerTy(128) && isF128SoftLibCall(Func));
-}
-
-/// Return true if the original type was vXfXX.
-static bool originalEVTTypeIsVectorFloat(EVT Ty) {
-  if (Ty.isVector() && Ty.getVectorElementType().isFloatingPoint())
-    return true;
-
-  return false;
-}
-
-/// Return true if the original type was vXfXX / vXfXX.
-static bool originalTypeIsVectorFloat(const Type * Ty) {
-  if (Ty->isVectorTy() && Ty->isFPOrFPVectorTy())
-    return true;
-
-  return false;
+  return (ES && Ty->isIntegerTy(128) && isF128SoftLibCall(ES->getSymbol()));
 }
 
 MipsCCState::SpecialCallingConvType
@@ -86,16 +73,16 @@ MipsCCState::getSpecialCallingConvForCallee(const SDNode *Callee,
 
 void MipsCCState::PreAnalyzeCallResultForF128(
     const SmallVectorImpl<ISD::InputArg> &Ins,
-    const Type *RetTy, const char *Call) {
+    const TargetLowering::CallLoweringInfo &CLI) {
   for (unsigned i = 0; i < Ins.size(); ++i) {
     OriginalArgWasF128.push_back(
-        originalTypeIsF128(RetTy, Call));
-    OriginalArgWasFloat.push_back(RetTy->isFloatingPointTy());
+        originalTypeIsF128(CLI.RetTy, CLI.Callee.getNode()));
+    OriginalArgWasFloat.push_back(CLI.RetTy->isFloatingPointTy());
   }
 }
 
-/// Identify lowered values that originated from f128 or float arguments and
-/// record this for use by RetCC_MipsN.
+/// Identify lowered values that originated from f128 arguments and record
+/// this for use by RetCC_MipsN.
 void MipsCCState::PreAnalyzeReturnForF128(
     const SmallVectorImpl<ISD::OutputArg> &Outs) {
   const MachineFunction &MF = getMachineFunction();
@@ -107,44 +94,23 @@ void MipsCCState::PreAnalyzeReturnForF128(
   }
 }
 
-/// Identify lower values that originated from vXfXX and record
+/// Identify lowered values that originated from f128 arguments and record
 /// this.
-void MipsCCState::PreAnalyzeCallResultForVectorFloat(
-    const SmallVectorImpl<ISD::InputArg> &Ins, const Type *RetTy) {
-  for (unsigned i = 0; i < Ins.size(); ++i) {
-    OriginalRetWasFloatVector.push_back(originalTypeIsVectorFloat(RetTy));
-  }
-}
-
-/// Identify lowered values that originated from vXfXX arguments and record
-/// this.
-void MipsCCState::PreAnalyzeReturnForVectorFloat(
-    const SmallVectorImpl<ISD::OutputArg> &Outs) {
-  for (unsigned i = 0; i < Outs.size(); ++i) {
-    ISD::OutputArg Out = Outs[i];
-    OriginalRetWasFloatVector.push_back(
-        originalEVTTypeIsVectorFloat(Out.ArgVT));
-  }
-}
-
-/// Identify lowered values that originated from f128, float and sret to vXfXX
-/// arguments and record this.
 void MipsCCState::PreAnalyzeCallOperands(
     const SmallVectorImpl<ISD::OutputArg> &Outs,
     std::vector<TargetLowering::ArgListEntry> &FuncArgs,
-    const char *Func) {
+    const SDNode *CallNode) {
   for (unsigned i = 0; i < Outs.size(); ++i) {
-    TargetLowering::ArgListEntry FuncArg = FuncArgs[Outs[i].OrigArgIndex];
-
-    OriginalArgWasF128.push_back(originalTypeIsF128(FuncArg.Ty, Func));
-    OriginalArgWasFloat.push_back(FuncArg.Ty->isFloatingPointTy());
-    OriginalArgWasFloatVector.push_back(FuncArg.Ty->isVectorTy());
+    OriginalArgWasF128.push_back(
+        originalTypeIsF128(FuncArgs[Outs[i].OrigArgIndex].Ty, CallNode));
+    OriginalArgWasFloat.push_back(
+        FuncArgs[Outs[i].OrigArgIndex].Ty->isFloatingPointTy());
     CallOperandIsFixed.push_back(Outs[i].IsFixed);
   }
 }
 
-/// Identify lowered values that originated from f128, float and vXfXX arguments
-/// and record this.
+/// Identify lowered values that originated from f128 arguments and record
+/// this.
 void MipsCCState::PreAnalyzeFormalArgumentsForF128(
     const SmallVectorImpl<ISD::InputArg> &Ins) {
   const MachineFunction &MF = getMachineFunction();
@@ -157,7 +123,6 @@ void MipsCCState::PreAnalyzeFormalArgumentsForF128(
     if (Ins[i].Flags.isSRet()) {
       OriginalArgWasF128.push_back(false);
       OriginalArgWasFloat.push_back(false);
-      OriginalArgWasFloatVector.push_back(false);
       continue;
     }
 
@@ -167,10 +132,5 @@ void MipsCCState::PreAnalyzeFormalArgumentsForF128(
     OriginalArgWasF128.push_back(
         originalTypeIsF128(FuncArg->getType(), nullptr));
     OriginalArgWasFloat.push_back(FuncArg->getType()->isFloatingPointTy());
-
-    // The MIPS vector ABI exhibits a corner case of sorts or quirk; if the
-    // first argument is actually an SRet pointer to a vector, then the next
-    // argument slot is $a2.
-    OriginalArgWasFloatVector.push_back(FuncArg->getType()->isVectorTy());
   }
 }

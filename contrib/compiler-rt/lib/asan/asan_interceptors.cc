@@ -37,18 +37,11 @@
 namespace __asan {
 
 // Return true if we can quickly decide that the region is unpoisoned.
-// We assume that a redzone is at least 16 bytes.
 static inline bool QuickCheckForUnpoisonedRegion(uptr beg, uptr size) {
   if (size == 0) return true;
   if (size <= 32)
     return !AddressIsPoisoned(beg) &&
            !AddressIsPoisoned(beg + size - 1) &&
-           !AddressIsPoisoned(beg + size / 2);
-  if (size <= 64)
-    return !AddressIsPoisoned(beg) &&
-           !AddressIsPoisoned(beg + size / 4) &&
-           !AddressIsPoisoned(beg + size - 1) &&
-           !AddressIsPoisoned(beg + 3 * size / 4) &&
            !AddressIsPoisoned(beg + size / 2);
   return false;
 }
@@ -178,10 +171,6 @@ void SetThreadName(const char *name) {
 }
 
 int OnExit() {
-  if (CAN_SANITIZE_LEAKS && common_flags()->detect_leaks &&
-      __lsan::HasReportedLeaks()) {
-    return common_flags()->exitcode;
-  }
   // FIXME: ask frontend whether we need to return failure.
   return 0;
 }
@@ -239,14 +228,13 @@ DECLARE_REAL_AND_INTERCEPTOR(void, free, void *)
 // Strict init-order checking is dlopen-hostile:
 // https://github.com/google/sanitizers/issues/178
 #define COMMON_INTERCEPTOR_ON_DLOPEN(filename, flag)                           \
-  do {                                                                         \
-    if (flags()->strict_init_order)                                            \
-      StopInitOrderChecking();                                                 \
-    CheckNoDeepBind(filename, flag);                                           \
-  } while (false)
+  if (flags()->strict_init_order) {                                            \
+    StopInitOrderChecking();                                                   \
+  }
 #define COMMON_INTERCEPTOR_ON_EXIT(ctx) OnExit()
-#define COMMON_INTERCEPTOR_LIBRARY_LOADED(filename, handle)
-#define COMMON_INTERCEPTOR_LIBRARY_UNLOADED()
+#define COMMON_INTERCEPTOR_LIBRARY_LOADED(filename, handle) \
+  CoverageUpdateMapping()
+#define COMMON_INTERCEPTOR_LIBRARY_UNLOADED() CoverageUpdateMapping()
 #define COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED (!asan_inited)
 #define COMMON_INTERCEPTOR_GET_TLS_RANGE(begin, end)                           \
   if (AsanThread *t = GetCurrentThread()) {                                    \
@@ -360,22 +348,28 @@ DEFINE_REAL_PTHREAD_FUNCTIONS
 
 #if SANITIZER_ANDROID
 INTERCEPTOR(void*, bsd_signal, int signum, void *handler) {
-  if (GetHandleSignalMode(signum) != kHandleSignalExclusive)
+  if (!IsHandledDeadlySignal(signum) ||
+      common_flags()->allow_user_segv_handler) {
     return REAL(bsd_signal)(signum, handler);
+  }
   return 0;
 }
 #endif
 
 INTERCEPTOR(void*, signal, int signum, void *handler) {
-  if (GetHandleSignalMode(signum) != kHandleSignalExclusive)
+  if (!IsHandledDeadlySignal(signum) ||
+      common_flags()->allow_user_segv_handler) {
     return REAL(signal)(signum, handler);
+  }
   return nullptr;
 }
 
 INTERCEPTOR(int, sigaction, int signum, const struct sigaction *act,
                             struct sigaction *oldact) {
-  if (GetHandleSignalMode(signum) != kHandleSignalExclusive)
+  if (!IsHandledDeadlySignal(signum) ||
+      common_flags()->allow_user_segv_handler) {
     return REAL(sigaction)(signum, act, oldact);
+  }
   return 0;
 }
 
@@ -437,13 +431,6 @@ INTERCEPTOR(void, longjmp, void *env, int val) {
 INTERCEPTOR(void, _longjmp, void *env, int val) {
   __asan_handle_no_return();
   REAL(_longjmp)(env, val);
-}
-#endif
-
-#if ASAN_INTERCEPT___LONGJMP_CHK
-INTERCEPTOR(void, __longjmp_chk, void *env, int val) {
-  __asan_handle_no_return();
-  REAL(__longjmp_chk)(env, val);
 }
 #endif
 
@@ -583,6 +570,17 @@ INTERCEPTOR(char*, __strdup, const char *s) {
 }
 #endif // ASAN_INTERCEPT___STRDUP
 
+INTERCEPTOR(SIZE_T, wcslen, const wchar_t *s) {
+  void *ctx;
+  ASAN_INTERCEPTOR_ENTER(ctx, wcslen);
+  SIZE_T length = internal_wcslen(s);
+  if (!asan_init_is_running) {
+    ENSURE_ASAN_INITED();
+    ASAN_READ_RANGE(ctx, s, (length + 1) * sizeof(wchar_t));
+  }
+  return length;
+}
+
 INTERCEPTOR(char*, strncpy, char *to, const char *from, uptr size) {
   void *ctx;
   ASAN_INTERCEPTOR_ENTER(ctx, strncpy);
@@ -699,7 +697,9 @@ INTERCEPTOR(int, __cxa_atexit, void (*func)(void *), void *arg,
 #if ASAN_INTERCEPT_FORK
 INTERCEPTOR(int, fork, void) {
   ENSURE_ASAN_INITED();
+  if (common_flags()->coverage) CovBeforeFork();
   int pid = REAL(fork)();
+  if (common_flags()->coverage) CovAfterFork(pid);
   return pid;
 }
 #endif  // ASAN_INTERCEPT_FORK
@@ -715,6 +715,7 @@ void InitializeAsanInterceptors() {
   // Intercept str* functions.
   ASAN_INTERCEPT_FUNC(strcat);  // NOLINT
   ASAN_INTERCEPT_FUNC(strcpy);  // NOLINT
+  ASAN_INTERCEPT_FUNC(wcslen);
   ASAN_INTERCEPT_FUNC(strncat);
   ASAN_INTERCEPT_FUNC(strncpy);
   ASAN_INTERCEPT_FUNC(strdup);
@@ -747,9 +748,6 @@ void InitializeAsanInterceptors() {
 #endif
 #if ASAN_INTERCEPT__LONGJMP
   ASAN_INTERCEPT_FUNC(_longjmp);
-#endif
-#if ASAN_INTERCEPT___LONGJMP_CHK
-  ASAN_INTERCEPT_FUNC(__longjmp_chk);
 #endif
 #if ASAN_INTERCEPT_SIGLONGJMP
   ASAN_INTERCEPT_FUNC(siglongjmp);

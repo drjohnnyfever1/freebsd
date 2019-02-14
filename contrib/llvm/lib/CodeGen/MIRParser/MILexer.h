@@ -16,8 +16,8 @@
 #define LLVM_LIB_CODEGEN_MIRPARSER_MILEXER_H
 
 #include "llvm/ADT/APSInt.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/STLExtras.h"
 #include <functional>
 
 namespace llvm {
@@ -127,8 +127,7 @@ struct MIToken {
     NamedIRValue,
     IRValue,
     QuotedIRValue, // `<constant value>`
-    SubRegisterIndex,
-    StringConstant
+    SubRegisterIndex
   };
 
 private:
@@ -169,8 +168,7 @@ public:
 
   bool isMemoryOperandFlag() const {
     return Kind == kw_volatile || Kind == kw_non_temporal ||
-           Kind == kw_dereferenceable || Kind == kw_invariant ||
-           Kind == StringConstant;
+           Kind == kw_dereferenceable || Kind == kw_invariant;
   }
 
   bool is(TokenKind K) const { return Kind == K; }

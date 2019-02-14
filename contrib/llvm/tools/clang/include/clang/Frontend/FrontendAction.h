@@ -76,7 +76,8 @@ protected:
   ///
   /// \return True on success; on failure ExecutionAction() and
   /// EndSourceFileAction() will not be called.
-  virtual bool BeginSourceFileAction(CompilerInstance &CI) {
+  virtual bool BeginSourceFileAction(CompilerInstance &CI,
+                                     StringRef Filename) {
     return true;
   }
 
@@ -145,8 +146,6 @@ public:
     return *CurrentASTUnit;
   }
 
-  Module *getCurrentModule() const;
-
   std::unique_ptr<ASTUnit> takeCurrentASTUnit() {
     return std::move(CurrentASTUnit);
   }
@@ -175,10 +174,10 @@ public:
   virtual TranslationUnitKind getTranslationUnitKind() { return TU_Complete; }
 
   /// \brief Does this action support use with PCH?
-  virtual bool hasPCHSupport() const { return true; }
+  virtual bool hasPCHSupport() const { return !usesPreprocessorOnly(); }
 
   /// \brief Does this action support use with AST files?
-  virtual bool hasASTFileSupport() const { return true; }
+  virtual bool hasASTFileSupport() const { return !usesPreprocessorOnly(); }
 
   /// \brief Does this action support use with IR files?
   virtual bool hasIRSupport() const { return false; }
@@ -290,7 +289,7 @@ protected:
   std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
                                                  StringRef InFile) override;
   bool BeginInvocation(CompilerInstance &CI) override;
-  bool BeginSourceFileAction(CompilerInstance &CI) override;
+  bool BeginSourceFileAction(CompilerInstance &CI, StringRef Filename) override;
   void ExecuteAction() override;
   void EndSourceFileAction() override;
 

@@ -44,12 +44,13 @@ static MCRegisterInfo *createRISCVMCRegisterInfo(const Triple &TT) {
 
 static MCAsmInfo *createRISCVMCAsmInfo(const MCRegisterInfo &MRI,
                                        const Triple &TT) {
-  return new RISCVMCAsmInfo(TT);
+  MCAsmInfo *MAI = new RISCVMCAsmInfo(TT);
+  return MAI;
 }
 
 extern "C" void LLVMInitializeRISCVTargetMC() {
   for (Target *T : {&getTheRISCV32Target(), &getTheRISCV64Target()}) {
-    TargetRegistry::RegisterMCAsmInfo(*T, createRISCVMCAsmInfo);
+    RegisterMCAsmInfoFn X(*T, createRISCVMCAsmInfo);
     TargetRegistry::RegisterMCInstrInfo(*T, createRISCVMCInstrInfo);
     TargetRegistry::RegisterMCRegInfo(*T, createRISCVMCRegisterInfo);
     TargetRegistry::RegisterMCAsmBackend(*T, createRISCVAsmBackend);

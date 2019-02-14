@@ -18,6 +18,7 @@
 // The rest is handled by the run-time library.
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -31,7 +32,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
@@ -267,35 +267,35 @@ void EfficiencySanitizer::initializeCallbacks(Module &M) {
     SmallString<32> AlignedLoadName("__esan_aligned_load" + ByteSizeStr);
     EsanAlignedLoad[Idx] =
         checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-            AlignedLoadName, IRB.getVoidTy(), IRB.getInt8PtrTy()));
+            AlignedLoadName, IRB.getVoidTy(), IRB.getInt8PtrTy(), nullptr));
     SmallString<32> AlignedStoreName("__esan_aligned_store" + ByteSizeStr);
     EsanAlignedStore[Idx] =
         checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-            AlignedStoreName, IRB.getVoidTy(), IRB.getInt8PtrTy()));
+            AlignedStoreName, IRB.getVoidTy(), IRB.getInt8PtrTy(), nullptr));
     SmallString<32> UnalignedLoadName("__esan_unaligned_load" + ByteSizeStr);
     EsanUnalignedLoad[Idx] =
         checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-            UnalignedLoadName, IRB.getVoidTy(), IRB.getInt8PtrTy()));
+            UnalignedLoadName, IRB.getVoidTy(), IRB.getInt8PtrTy(), nullptr));
     SmallString<32> UnalignedStoreName("__esan_unaligned_store" + ByteSizeStr);
     EsanUnalignedStore[Idx] =
         checkSanitizerInterfaceFunction(M.getOrInsertFunction(
-            UnalignedStoreName, IRB.getVoidTy(), IRB.getInt8PtrTy()));
+            UnalignedStoreName, IRB.getVoidTy(), IRB.getInt8PtrTy(), nullptr));
   }
   EsanUnalignedLoadN = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("__esan_unaligned_loadN", IRB.getVoidTy(),
-                            IRB.getInt8PtrTy(), IntptrTy));
+                            IRB.getInt8PtrTy(), IntptrTy, nullptr));
   EsanUnalignedStoreN = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("__esan_unaligned_storeN", IRB.getVoidTy(),
-                            IRB.getInt8PtrTy(), IntptrTy));
+                            IRB.getInt8PtrTy(), IntptrTy, nullptr));
   MemmoveFn = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("memmove", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-                            IRB.getInt8PtrTy(), IntptrTy));
+                            IRB.getInt8PtrTy(), IntptrTy, nullptr));
   MemcpyFn = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("memcpy", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-                            IRB.getInt8PtrTy(), IntptrTy));
+                            IRB.getInt8PtrTy(), IntptrTy, nullptr));
   MemsetFn = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction("memset", IRB.getInt8PtrTy(), IRB.getInt8PtrTy(),
-                            IRB.getInt32Ty(), IntptrTy));
+                            IRB.getInt32Ty(), IntptrTy, nullptr));
 }
 
 bool EfficiencySanitizer::shouldIgnoreStructType(StructType *StructTy) {
@@ -398,8 +398,8 @@ GlobalVariable *EfficiencySanitizer::createCacheFragInfoGV(
   //   u64 *ArrayCounter;
   // };
   auto *StructInfoTy =
-      StructType::get(Int8PtrTy, Int32Ty, Int32Ty, Int32PtrTy, Int32PtrTy,
-                      Int8PtrPtrTy, Int64PtrTy, Int64PtrTy);
+    StructType::get(Int8PtrTy, Int32Ty, Int32Ty, Int32PtrTy, Int32PtrTy,
+                    Int8PtrPtrTy, Int64PtrTy, Int64PtrTy, nullptr);
   auto *StructInfoPtrTy = StructInfoTy->getPointerTo();
   // This structure should be kept consistent with the CacheFragInfo struct
   // in the runtime library.
@@ -408,7 +408,8 @@ GlobalVariable *EfficiencySanitizer::createCacheFragInfoGV(
   //   u32 NumStructs;
   //   StructInfo *Structs;
   // };
-  auto *CacheFragInfoTy = StructType::get(Int8PtrTy, Int32Ty, StructInfoPtrTy);
+  auto *CacheFragInfoTy =
+    StructType::get(Int8PtrTy, Int32Ty, StructInfoPtrTy, nullptr);
 
   std::vector<StructType *> Vec = M.getIdentifiedStructTypes();
   unsigned NumStructs = 0;
@@ -456,23 +457,24 @@ GlobalVariable *EfficiencySanitizer::createCacheFragInfoGV(
     ArrayCounterIdx[0] = ConstantInt::get(Int32Ty, 0);
     ArrayCounterIdx[1] = ConstantInt::get(Int32Ty,
                                           getArrayCounterIdx(StructTy));
-    Initializers.push_back(ConstantStruct::get(
-        StructInfoTy,
-        ConstantExpr::getPointerCast(StructCounterName, Int8PtrTy),
-        ConstantInt::get(Int32Ty,
-                         DL.getStructLayout(StructTy)->getSizeInBytes()),
-        ConstantInt::get(Int32Ty, StructTy->getNumElements()),
-        Offset == nullptr ? ConstantPointerNull::get(Int32PtrTy)
-                          : ConstantExpr::getPointerCast(Offset, Int32PtrTy),
-        Size == nullptr ? ConstantPointerNull::get(Int32PtrTy)
-                        : ConstantExpr::getPointerCast(Size, Int32PtrTy),
-        TypeName == nullptr
-            ? ConstantPointerNull::get(Int8PtrPtrTy)
-            : ConstantExpr::getPointerCast(TypeName, Int8PtrPtrTy),
-        ConstantExpr::getGetElementPtr(CounterArrayTy, Counters,
-                                       FieldCounterIdx),
-        ConstantExpr::getGetElementPtr(CounterArrayTy, Counters,
-                                       ArrayCounterIdx)));
+    Initializers.push_back(
+        ConstantStruct::get(
+            StructInfoTy,
+            ConstantExpr::getPointerCast(StructCounterName, Int8PtrTy),
+            ConstantInt::get(Int32Ty,
+                             DL.getStructLayout(StructTy)->getSizeInBytes()),
+            ConstantInt::get(Int32Ty, StructTy->getNumElements()),
+            Offset == nullptr ? ConstantPointerNull::get(Int32PtrTy) :
+                ConstantExpr::getPointerCast(Offset, Int32PtrTy),
+            Size == nullptr ? ConstantPointerNull::get(Int32PtrTy) :
+                ConstantExpr::getPointerCast(Size, Int32PtrTy),
+            TypeName == nullptr ? ConstantPointerNull::get(Int8PtrPtrTy) :
+                ConstantExpr::getPointerCast(TypeName, Int8PtrPtrTy),
+            ConstantExpr::getGetElementPtr(CounterArrayTy, Counters,
+                                           FieldCounterIdx),
+            ConstantExpr::getGetElementPtr(CounterArrayTy, Counters,
+                                           ArrayCounterIdx),
+            nullptr));
   }
   // Structs.
   Constant *StructInfo;
@@ -489,8 +491,11 @@ GlobalVariable *EfficiencySanitizer::createCacheFragInfoGV(
 
   auto *CacheFragInfoGV = new GlobalVariable(
       M, CacheFragInfoTy, true, GlobalVariable::InternalLinkage,
-      ConstantStruct::get(CacheFragInfoTy, UnitName,
-                          ConstantInt::get(Int32Ty, NumStructs), StructInfo));
+      ConstantStruct::get(CacheFragInfoTy,
+                          UnitName,
+                          ConstantInt::get(Int32Ty, NumStructs),
+                          StructInfo,
+                          nullptr));
   return CacheFragInfoGV;
 }
 
@@ -528,7 +533,7 @@ void EfficiencySanitizer::createDestructor(Module &M, Constant *ToolInfoArg) {
   IRBuilder<> IRB_Dtor(EsanDtorFunction->getEntryBlock().getTerminator());
   Function *EsanExit = checkSanitizerInterfaceFunction(
       M.getOrInsertFunction(EsanExitName, IRB_Dtor.getVoidTy(),
-                            Int8PtrTy));
+                            Int8PtrTy, nullptr));
   EsanExit->setLinkage(Function::ExternalLinkage);
   IRB_Dtor.CreateCall(EsanExit, {ToolInfoArg});
   appendToGlobalDtors(M, EsanDtorFunction, EsanCtorAndDtorPriority);
@@ -752,7 +757,7 @@ bool EfficiencySanitizer::instrumentGetElementPtr(Instruction *I, Module &M) {
     return false;
   }
   Type *SourceTy = GepInst->getSourceElementType();
-  StructType *StructTy = nullptr;
+  StructType *StructTy;
   ConstantInt *Idx;
   // Check if GEP calculates address from a struct array.
   if (isa<StructType>(SourceTy)) {

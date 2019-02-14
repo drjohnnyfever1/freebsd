@@ -89,7 +89,7 @@ protected:
 
   SBListener(const lldb::ListenerSP &listener_sp);
 
-  lldb::ListenerSP GetSP();
+  lldb::ListenerSP GetSP() { return m_opaque_sp; }
 
 private:
   lldb_private::Listener *operator->() const;
