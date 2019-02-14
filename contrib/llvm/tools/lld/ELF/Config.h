@@ -156,7 +156,6 @@ struct Configuration {
   bool ZRelro;
   bool ZRodynamic;
   bool ZText;
-  bool ZRetpolineplt;
   bool ExitEarly;
   bool ZWxneeded;
   DiscardPolicy Discard;

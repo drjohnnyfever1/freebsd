@@ -401,7 +401,6 @@ int main(int argc, char **argv) {
   initializeSjLjEHPreparePass(Registry);
   initializePreISelIntrinsicLoweringLegacyPassPass(Registry);
   initializeGlobalMergePass(Registry);
-  initializeIndirectBrExpandPassPass(Registry);
   initializeInterleavedAccessPass(Registry);
   initializeCountingFunctionInserterPass(Registry);
   initializeUnreachableBlockElimLegacyPassPass(Registry);
