@@ -16,8 +16,9 @@
 
 	.syntax unified
 	.text
-
-DEFINE_CODE_STATE
+#if defined(USE_THUMB_PROLOGUE)
+	.thumb
+#endif
 
 	.p2align 2
 DEFINE_AEABI_FUNCTION_ALIAS(__aeabi_uidiv, __udivsi3)
@@ -25,7 +26,11 @@ DEFINE_AEABI_FUNCTION_ALIAS(__aeabi_uidiv, __udivsi3)
 @ unsigned int __udivsi3(unsigned int divident, unsigned int divisor)
 @   Calculate and return the quotient of the (unsigned) division.
 
+#if defined(USE_THUMB_PROLOGUE)
+DEFINE_COMPILERRT_THUMB_FUNCTION(__udivsi3)
+#else
 DEFINE_COMPILERRT_FUNCTION(__udivsi3)
+#endif
 #if __ARM_ARCH_EXT_IDIV__
 	tst     r1, r1
 	beq     LOCAL_LABEL(divby0)

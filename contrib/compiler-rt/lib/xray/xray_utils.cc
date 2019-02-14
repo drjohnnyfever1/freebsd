@@ -117,8 +117,7 @@ int getLogFD() XRAY_NEVER_INSTRUMENT {
            TmpFilename);
     return -1;
   }
-  if (__sanitizer::Verbosity())
-    Report("XRay: Log file in '%s'\n", TmpFilename);
+  Report("XRay: Log file in '%s'\n", TmpFilename);
 
   return Fd;
 }

@@ -24,10 +24,8 @@
 
 #if SANITIZER_FREEBSD || SANITIZER_MAC
 #  define __errno_location __error
-#elif SANITIZER_ANDROID || SANITIZER_NETBSD
+#elif SANITIZER_ANDROID
 #  define __errno_location __errno
-#elif SANITIZER_SOLARIS
-#  define __errno_location ___errno
 #elif SANITIZER_WINDOWS
 #  define __errno_location _errno
 #endif

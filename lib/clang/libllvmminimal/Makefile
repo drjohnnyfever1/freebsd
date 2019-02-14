@@ -9,7 +9,6 @@ SRCDIR=		lib
 SRCS+=		Support/APFloat.cpp
 SRCS+=		Support/APInt.cpp
 SRCS+=		Support/Atomic.cpp
-SRCS+=		Support/CodeGenCoverage.cpp
 SRCS+=		Support/CommandLine.cpp
 SRCS+=		Support/ConvertUTF.cpp
 SRCS+=		Support/ConvertUTFWrapper.cpp

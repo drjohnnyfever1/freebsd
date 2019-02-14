@@ -25,6 +25,4 @@
 
 #define HAVE_NR_PROCESS_VM_READV 0
 
-/* #undef HAVE_LIBCOMPRESSION */
-
 #endif // #ifndef LLDB_HOST_CONFIG_H

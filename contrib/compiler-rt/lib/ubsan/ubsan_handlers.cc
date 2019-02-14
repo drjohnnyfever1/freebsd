@@ -38,8 +38,7 @@ bool ignoreReport(SourceLocation SLoc, ReportOptions Opts, ErrorType ET) {
 const char *TypeCheckKinds[] = {
     "load of", "store to", "reference binding to", "member access within",
     "member call on", "constructor call on", "downcast of", "downcast of",
-    "upcast of", "cast to virtual base of", "_Nonnull binding to",
-    "dynamic operation on"};
+    "upcast of", "cast to virtual base of", "_Nonnull binding to"};
 }
 
 static void handleTypeMismatchImpl(TypeMismatchData *Data, ValueHandle Pointer,
@@ -298,7 +297,7 @@ void __ubsan::__ubsan_handle_out_of_bounds_abort(OutOfBoundsData *Data,
 static void handleBuiltinUnreachableImpl(UnreachableData *Data,
                                          ReportOptions Opts) {
   ScopedReport R(Opts, Data->Loc, ErrorType::UnreachableCall);
-  Diag(Data->Loc, DL_Error, "execution reached an unreachable program point");
+  Diag(Data->Loc, DL_Error, "execution reached a __builtin_unreachable() call");
 }
 
 void __ubsan::__ubsan_handle_builtin_unreachable(UnreachableData *Data) {
@@ -435,30 +434,6 @@ void __ubsan::__ubsan_handle_load_invalid_value_abort(InvalidValueData *Data,
                                                       ValueHandle Val) {
   GET_REPORT_OPTIONS(true);
   handleLoadInvalidValue(Data, Val, Opts);
-  Die();
-}
-
-static void handleInvalidBuiltin(InvalidBuiltinData *Data, ReportOptions Opts) {
-  SourceLocation Loc = Data->Loc.acquire();
-  ErrorType ET = ErrorType::InvalidBuiltin;
-
-  if (ignoreReport(Loc, Opts, ET))
-    return;
-
-  ScopedReport R(Opts, Loc, ET);
-
-  Diag(Loc, DL_Error,
-       "passing zero to %0, which is not a valid argument")
-    << ((Data->Kind == BCK_CTZPassedZero) ? "ctz()" : "clz()");
-}
-
-void __ubsan::__ubsan_handle_invalid_builtin(InvalidBuiltinData *Data) {
-  GET_REPORT_OPTIONS(true);
-  handleInvalidBuiltin(Data, Opts);
-}
-void __ubsan::__ubsan_handle_invalid_builtin_abort(InvalidBuiltinData *Data) {
-  GET_REPORT_OPTIONS(true);
-  handleInvalidBuiltin(Data, Opts);
   Die();
 }
 
@@ -653,32 +628,16 @@ static void handleCFIBadIcall(CFICheckFailData *Data, ValueHandle Function,
 }
 
 namespace __ubsan {
-
 #ifdef UBSAN_CAN_USE_CXXABI
-
-#ifdef _WIN32
-
-extern "C" void __ubsan_handle_cfi_bad_type_default(CFICheckFailData *Data,
-                                                    ValueHandle Vtable,
-                                                    bool ValidVtable,
-                                                    ReportOptions Opts) {
-  Die();
-}
-
-WIN_WEAK_ALIAS(__ubsan_handle_cfi_bad_type, __ubsan_handle_cfi_bad_type_default)
-#else
 SANITIZER_WEAK_ATTRIBUTE
-#endif
-void __ubsan_handle_cfi_bad_type(CFICheckFailData *Data, ValueHandle Vtable,
-                                 bool ValidVtable, ReportOptions Opts);
-
+void HandleCFIBadType(CFICheckFailData *Data, ValueHandle Vtable,
+                      bool ValidVtable, ReportOptions Opts);
 #else
-void __ubsan_handle_cfi_bad_type(CFICheckFailData *Data, ValueHandle Vtable,
-                                 bool ValidVtable, ReportOptions Opts) {
+static void HandleCFIBadType(CFICheckFailData *Data, ValueHandle Vtable,
+                             bool ValidVtable, ReportOptions Opts) {
   Die();
 }
 #endif
-
 }  // namespace __ubsan
 
 void __ubsan::__ubsan_handle_cfi_check_fail(CFICheckFailData *Data,
@@ -688,7 +647,7 @@ void __ubsan::__ubsan_handle_cfi_check_fail(CFICheckFailData *Data,
   if (Data->CheckKind == CFITCK_ICall)
     handleCFIBadIcall(Data, Value, Opts);
   else
-    __ubsan_handle_cfi_bad_type(Data, Value, ValidVtable, Opts);
+    HandleCFIBadType(Data, Value, ValidVtable, Opts);
 }
 
 void __ubsan::__ubsan_handle_cfi_check_fail_abort(CFICheckFailData *Data,
@@ -698,7 +657,7 @@ void __ubsan::__ubsan_handle_cfi_check_fail_abort(CFICheckFailData *Data,
   if (Data->CheckKind == CFITCK_ICall)
     handleCFIBadIcall(Data, Value, Opts);
   else
-    __ubsan_handle_cfi_bad_type(Data, Value, ValidVtable, Opts);
+    HandleCFIBadType(Data, Value, ValidVtable, Opts);
   Die();
 }
 
