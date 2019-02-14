@@ -1,11 +1,8 @@
 /******************************************************************************/
 #ifdef JEMALLOC_H_TYPES
 
-#if defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0
-#define JEMALLOC_CLOCK_GETTIME 1
-#else
-#define JEMALLOC_CLOCK_GETTIME 0
-#endif
+#define	JEMALLOC_CLOCK_GETTIME defined(_POSIX_MONOTONIC_CLOCK) \
+    && _POSIX_MONOTONIC_CLOCK >= 0
 
 typedef struct nstime_s nstime_t;
 
