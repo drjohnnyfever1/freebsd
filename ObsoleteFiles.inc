@@ -38,7 +38,6 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
-<<<<<<< HEAD
 # 20180613: obsolete libc++ files missed from the 5.0.0 import
 OLD_FILES+=usr/include/c++/v1/__refstring
 OLD_FILES+=usr/include/c++/v1/__undef_min_max
