@@ -2459,6 +2459,8 @@ bool AsmParser::parseMacroArguments(const MCAsmMacro *M,
       NamedParametersFound = true;
     }
 
+    bool Vararg = HasVararg && Parameter == (NParameters - 1);
+
     if (NamedParametersFound && FA.Name.empty())
       return Error(IDLoc, "cannot mix positional and keyword arguments");
 
