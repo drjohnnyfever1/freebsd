@@ -651,7 +651,7 @@ ctl_ha_datamove(union ctl_io *io)
 
 	memset(&msg.dt, 0, sizeof(msg.dt));
 	msg.hdr.msg_type = CTL_MSG_DATAMOVE;
-	msg.hdr.original_sc = io->io_hdr.original_sc;
+	msg.hdr.original_sc = io->io_hdr.remote_io;
 	msg.hdr.serializing_sc = io;
 	msg.hdr.nexus = io->io_hdr.nexus;
 	msg.hdr.status = io->io_hdr.status;
@@ -766,7 +766,7 @@ ctl_ha_done(union ctl_io *io)
 	if (io->io_hdr.io_type == CTL_IO_SCSI) {
 		memset(&msg, 0, sizeof(msg));
 		msg.hdr.msg_type = CTL_MSG_FINISH_IO;
-		msg.hdr.original_sc = io->io_hdr.original_sc;
+		msg.hdr.original_sc = io->io_hdr.remote_io;
 		msg.hdr.nexus = io->io_hdr.nexus;
 		msg.hdr.status = io->io_hdr.status;
 		msg.scsi.scsi_status = io->scsiio.scsi_status;
@@ -1439,7 +1439,7 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 			// populate ctsio from msg
 			io->io_hdr.io_type = CTL_IO_SCSI;
 			io->io_hdr.msg_type = CTL_MSG_SERIALIZE;
-			io->io_hdr.original_sc = msg->hdr.original_sc;
+			io->io_hdr.remote_io = msg->hdr.original_sc;
 			io->io_hdr.flags |= CTL_FLAG_FROM_OTHER_SC |
 					    CTL_FLAG_IO_ACTIVE;
 			/*
@@ -1452,12 +1452,6 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 			if (softc->ha_mode != CTL_HA_MODE_XFER)
 				io->io_hdr.flags |= CTL_FLAG_INT_COPY;
 			io->io_hdr.nexus = msg->hdr.nexus;
-#if 0
-			printf("port %u, iid %u, lun %u\n",
-			       io->io_hdr.nexus.targ_port,
-			       io->io_hdr.nexus.initid,
-			       io->io_hdr.nexus.targ_lun);
-#endif
 			io->scsiio.tag_num = msg->scsi.tag_num;
 			io->scsiio.tag_type = msg->scsi.tag_type;
 #ifdef CTL_TIME_IO
@@ -1495,7 +1489,7 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 			 * Keep track of this, we need to send it back over
 			 * when the datamove is complete.
 			 */
-			io->io_hdr.serializing_sc = msg->hdr.serializing_sc;
+			io->io_hdr.remote_io = msg->hdr.serializing_sc;
 			if (msg->hdr.status == CTL_SUCCESS)
 				io->io_hdr.status = msg->hdr.status;
 
@@ -1508,9 +1502,8 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 				    CTL_HA_DATAMOVE_SEGMENT + 1;
 				sgl = malloc(sizeof(*sgl) * i, M_CTL,
 				    M_WAITOK | M_ZERO);
-				io->io_hdr.remote_sglist = sgl;
-				io->io_hdr.local_sglist =
-				    &sgl[msg->dt.kern_sg_entries];
+				CTL_RSGL(io) = sgl;
+				CTL_LSGL(io) = &sgl[msg->dt.kern_sg_entries];
 
 				io->scsiio.kern_data_ptr = (uint8_t *)sgl;
 
@@ -1538,11 +1531,6 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 			     msg->dt.cur_sg_entries); i++, j++) {
 				sgl[i].addr = msg->dt.sg_list[j].addr;
 				sgl[i].len = msg->dt.sg_list[j].len;
-
-#if 0
-				printf("%s: DATAMOVE: %p,%lu j=%d, i=%d\n",
-				    __func__, sgl[i].addr, sgl[i].len, j, i);
-#endif
 			}
 
 			/*
@@ -1597,7 +1585,7 @@ ctl_isc_event_handler(ctl_ha_channel channel, ctl_ha_event event, int param)
 			}
 			io->io_hdr.flags |= CTL_FLAG_IO_ACTIVE;
 			io->io_hdr.msg_type = CTL_MSG_R2R;
-			io->io_hdr.serializing_sc = msg->hdr.serializing_sc;
+			io->io_hdr.remote_io = msg->hdr.serializing_sc;
 			ctl_enqueue_isc(io);
 			break;
 
@@ -2369,7 +2357,7 @@ ctl_serialize_other_sc_cmd(struct ctl_scsiio *ctsio)
 			mtx_unlock(&lun->lun_lock);
 
 			/* send msg back to other side */
-			msg_info.hdr.original_sc = ctsio->io_hdr.original_sc;
+			msg_info.hdr.original_sc = ctsio->io_hdr.remote_io;
 			msg_info.hdr.serializing_sc = (union ctl_io *)ctsio;
 			msg_info.hdr.msg_type = CTL_MSG_R2R;
 			ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg_info,
@@ -2395,7 +2383,7 @@ ctl_serialize_other_sc_cmd(struct ctl_scsiio *ctsio)
 					 /*retry_count*/ 0);
 badjuju:
 		ctl_copy_sense_data_back((union ctl_io *)ctsio, &msg_info);
-		msg_info.hdr.original_sc = ctsio->io_hdr.original_sc;
+		msg_info.hdr.original_sc = ctsio->io_hdr.remote_io;
 		msg_info.hdr.serializing_sc = NULL;
 		msg_info.hdr.msg_type = CTL_MSG_BAD_JUJU;
 		ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg_info,
@@ -2743,39 +2731,6 @@ ctl_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag,
 #endif /* CTL_IO_DELAY */
 		break;
 	}
-#ifdef CTL_LEGACY_STATS
-	case CTL_GETSTATS: {
-		struct ctl_stats *stats = (struct ctl_stats *)addr;
-		int i;
-
-		/*
-		 * XXX KDM no locking here.  If the LUN list changes,
-		 * things can blow up.
-		 */
-		i = 0;
-		stats->status = CTL_SS_OK;
-		stats->fill_len = 0;
-		STAILQ_FOREACH(lun, &softc->lun_list, links) {
-			if (stats->fill_len + sizeof(lun->legacy_stats) >
-			    stats->alloc_len) {
-				stats->status = CTL_SS_NEED_MORE_SPACE;
-				break;
-			}
-			retval = copyout(&lun->legacy_stats, &stats->lun_stats[i++],
-					 sizeof(lun->legacy_stats));
-			if (retval != 0)
-				break;
-			stats->fill_len += sizeof(lun->legacy_stats);
-		}
-		stats->num_luns = softc->num_luns;
-		stats->flags = CTL_STATS_FLAG_NONE;
-#ifdef CTL_TIME_IO
-		stats->flags |= CTL_STATS_FLAG_TIME_VALID;
-#endif
-		getnanouptime(&stats->timestamp);
-		break;
-	}
-#endif /* CTL_LEGACY_STATS */
 	case CTL_ERROR_INJECT: {
 		struct ctl_error_desc *err_desc, *new_err_desc;
 
@@ -4758,17 +4713,6 @@ fail:
 	ctl_init_log_page_index(lun);
 
 	/* Setup statistics gathering */
-#ifdef CTL_LEGACY_STATS
-	lun->legacy_stats.device_type = be_lun->lun_type;
-	lun->legacy_stats.lun_number = lun_number;
-	lun->legacy_stats.blocksize = be_lun->blocksize;
-	if (be_lun->blocksize == 0)
-		lun->legacy_stats.flags = CTL_LUN_STATS_NO_BLOCKSIZE;
-	lun->legacy_stats.ports = malloc(sizeof(struct ctl_lun_io_port_stats) *
-	    ctl_max_ports, M_DEVBUF, M_WAITOK | M_ZERO);
-	for (len = 0; len < ctl_max_ports; len++)
-		lun->legacy_stats.ports[len].targ_port = len;
-#endif /* CTL_LEGACY_STATS */
 	lun->stats.item = lun_number;
 
 	/*
@@ -6511,11 +6455,6 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 			 && (subpage == SMS_SUBPAGE_PAGE_0))
 				continue;
 
-#if 0
-			printf("found page %#x len %d\n",
-			       page_index->page_code & SMPH_PC_MASK,
-			       page_index->page_len);
-#endif
 			page_len += page_index->page_len;
 		}
 		break;
@@ -6548,12 +6487,6 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 			 && (subpage != SMS_SUBPAGE_ALL))
 				continue;
 
-#if 0
-			printf("found page %#x len %d\n",
-			       page_index->page_code & SMPH_PC_MASK,
-			       page_index->page_len);
-#endif
-
 			page_len += page_index->page_len;
 		}
 
@@ -6572,10 +6505,6 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 	}
 
 	total_len = header_len + page_len;
-#if 0
-	printf("header_len = %d, page_len = %d, total_len = %d\n",
-	       header_len, page_len, total_len);
-#endif
 
 	ctsio->kern_data_ptr = malloc(total_len, M_CTL, M_WAITOK | M_ZERO);
 	ctsio->kern_sg_entries = 0;
@@ -8263,10 +8192,6 @@ ctl_persistent_reserve_out(struct ctl_scsiio *ctsio)
 	case SPRO_REGISTER:
 	case SPRO_REG_IGNO: {
 
-#if 0
-		printf("Registration received\n");
-#endif
-
 		/*
 		 * We don't support any of these options, as we report in
 		 * the read capabilities request (see
@@ -8379,9 +8304,6 @@ ctl_persistent_reserve_out(struct ctl_scsiio *ctsio)
 		break;
 	}
 	case SPRO_RESERVE:
-#if 0
-                printf("Reserve executed type %d\n", type);
-#endif
 		mtx_lock(&lun->lun_lock);
 		if (lun->flags & CTL_LUN_PR_RESERVED) {
 			/*
@@ -11087,7 +11009,7 @@ ctl_check_blocked(struct ctl_lun *lun)
 
 				cur_blocked->io_hdr.flags &= ~CTL_FLAG_IO_ACTIVE;
 				msg_info.hdr.original_sc =
-					cur_blocked->io_hdr.original_sc;
+					cur_blocked->io_hdr.remote_io;
 				msg_info.hdr.serializing_sc = cur_blocked;
 				msg_info.hdr.msg_type = CTL_MSG_R2R;
 				ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg_info,
@@ -11943,14 +11865,7 @@ ctl_abort_task(union ctl_io *io)
 	struct ctl_softc *softc = CTL_SOFTC(io);
 	union ctl_io *xio;
 	struct ctl_lun *lun;
-#if 0
-	struct sbuf sb;
-	char printbuf[128];
-#endif
-	int found;
 	uint32_t targ_lun;
-
-	found = 0;
 
 	/*
 	 * Look up the LUN.
@@ -11964,11 +11879,6 @@ ctl_abort_task(union ctl_io *io)
 		return (1);
 	}
 
-#if 0
-	printf("ctl_abort_task: called for lun %lld, tag %d type %d\n",
-	       lun->lun, io->taskio.tag_num, io->taskio.tag_type);
-#endif
-
 	mtx_lock(&lun->lun_lock);
 	mtx_unlock(&softc->ctl_lock);
 	/*
@@ -11980,24 +11890,6 @@ ctl_abort_task(union ctl_io *io)
 	 */
 	for (xio = (union ctl_io *)TAILQ_FIRST(&lun->ooa_queue); xio != NULL;
 	     xio = (union ctl_io *)TAILQ_NEXT(&xio->io_hdr, ooa_links)) {
-#if 0
-		sbuf_new(&sb, printbuf, sizeof(printbuf), SBUF_FIXEDLEN);
-
-		sbuf_printf(&sb, "LUN %lld tag %d type %d%s%s%s%s: ",
-			    lun->lun, xio->scsiio.tag_num,
-			    xio->scsiio.tag_type,
-			    (xio->io_hdr.blocked_links.tqe_prev
-			    == NULL) ? "" : " BLOCKED",
-			    (xio->io_hdr.flags &
-			    CTL_FLAG_DMA_INPROG) ? " DMA" : "",
-			    (xio->io_hdr.flags &
-			    CTL_FLAG_ABORT) ? " ABORT" : "",
-			    (xio->io_hdr.flags &
-			    CTL_FLAG_IS_WAS_ON_RTR ? " RTR" : ""));
-		ctl_scsi_command_string(&xio->scsiio, NULL, &sb);
-		sbuf_finish(&sb);
-		printf("%s\n", sbuf_data(&sb));
-#endif
 
 		if ((xio->io_hdr.nexus.targ_port != io->io_hdr.nexus.targ_port)
 		 || (xio->io_hdr.nexus.initid != io->io_hdr.nexus.initid)
@@ -12015,8 +11907,8 @@ ctl_abort_task(union ctl_io *io)
 #if 0
 		if (((xio->scsiio.tag_type == CTL_TAG_UNTAGGED)
 		  && (io->taskio.tag_type == CTL_TAG_UNTAGGED))
-		 || (xio->scsiio.tag_num == io->taskio.tag_num))
-#endif
+		 || (xio->scsiio.tag_num == io->taskio.tag_num)) {
+#else
 		/*
 		 * XXX KDM we've got problems with FC, because it
 		 * doesn't send down a tag type with aborts.  So we
@@ -12025,8 +11917,8 @@ ctl_abort_task(union ctl_io *io)
 		 * Need to figure that out!!
 		 */
 		if (xio->scsiio.tag_num == io->taskio.tag_num) {
+#endif
 			xio->io_hdr.flags |= CTL_FLAG_ABORT;
-			found = 1;
 			if ((io->io_hdr.flags & CTL_FLAG_FROM_OTHER_SC) == 0 &&
 			    !(lun->flags & CTL_LUN_PRIMARY_SC)) {
 				union ctl_ha_msg msg_info;
@@ -12038,34 +11930,12 @@ ctl_abort_task(union ctl_io *io)
 				msg_info.hdr.msg_type = CTL_MSG_MANAGE_TASKS;
 				msg_info.hdr.original_sc = NULL;
 				msg_info.hdr.serializing_sc = NULL;
-#if 0
-				printf("Sent Abort to other side\n");
-#endif
 				ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg_info,
 				    sizeof(msg_info.task), M_NOWAIT);
 			}
-#if 0
-			printf("ctl_abort_task: found I/O to abort\n");
-#endif
 		}
 	}
 	mtx_unlock(&lun->lun_lock);
-
-	if (found == 0) {
-		/*
-		 * This isn't really an error.  It's entirely possible for
-		 * the abort and command completion to cross on the wire.
-		 * This is more of an informative/diagnostic error.
-		 */
-#if 0
-		printf("ctl_abort_task: ABORT sent for nonexistent I/O: "
-		       "%u:%u:%u tag %d type %d\n",
-		       io->io_hdr.nexus.initid,
-		       io->io_hdr.nexus.targ_port,
-		       io->io_hdr.nexus.targ_lun, io->taskio.tag_num,
-		       io->taskio.tag_type);
-#endif
-	}
 	io->taskio.task_status = CTL_TASK_FUNCTION_COMPLETE;
 	return (0);
 }
@@ -12524,7 +12394,7 @@ ctl_send_datamove_done(union ctl_io *io, int have_lock)
 	memset(&msg, 0, sizeof(msg));
 	msg.hdr.msg_type = CTL_MSG_DATAMOVE_DONE;
 	msg.hdr.original_sc = io;
-	msg.hdr.serializing_sc = io->io_hdr.serializing_sc;
+	msg.hdr.serializing_sc = io->io_hdr.remote_io;
 	msg.hdr.nexus = io->io_hdr.nexus;
 	msg.hdr.status = io->io_hdr.status;
 	msg.scsi.kern_data_resid = io->scsiio.kern_data_resid;
@@ -12575,10 +12445,10 @@ ctl_datamove_remote_write_cb(struct ctl_ha_dt_req *rq)
 	ctl_dt_req_free(rq);
 
 	for (i = 0; i < io->scsiio.kern_sg_entries; i++)
-		free(io->io_hdr.local_sglist[i].addr, M_CTL);
-	free(io->io_hdr.remote_sglist, M_CTL);
-	io->io_hdr.remote_sglist = NULL;
-	io->io_hdr.local_sglist = NULL;
+		free(CTL_LSGLT(io)[i].addr, M_CTL);
+	free(CTL_RSGL(io), M_CTL);
+	CTL_RSGL(io) = NULL;
+	CTL_LSGL(io) = NULL;
 
 	/*
 	 * The data is in local and remote memory, so now we need to send
@@ -12618,7 +12488,7 @@ ctl_datamove_remote_write(union ctl_io *io)
 		return;
 
 	/* Switch the pointer over so the FETD knows what to do */
-	io->scsiio.kern_data_ptr = (uint8_t *)io->io_hdr.local_sglist;
+	io->scsiio.kern_data_ptr = (uint8_t *)CTL_LSGL(io);
 
 	/*
 	 * Use a custom move done callback, since we need to send completion
@@ -12633,35 +12503,13 @@ ctl_datamove_remote_write(union ctl_io *io)
 static int
 ctl_datamove_remote_dm_read_cb(union ctl_io *io)
 {
-#if 0
-	char str[256];
-	char path_str[64];
-	struct sbuf sb;
-#endif
 	uint32_t i;
 
 	for (i = 0; i < io->scsiio.kern_sg_entries; i++)
-		free(io->io_hdr.local_sglist[i].addr, M_CTL);
-	free(io->io_hdr.remote_sglist, M_CTL);
-	io->io_hdr.remote_sglist = NULL;
-	io->io_hdr.local_sglist = NULL;
-
-#if 0
-	scsi_path_string(io, path_str, sizeof(path_str));
-	sbuf_new(&sb, str, sizeof(str), SBUF_FIXEDLEN);
-	sbuf_cat(&sb, path_str);
-	scsi_command_string(&io->scsiio, NULL, &sb);
-	sbuf_printf(&sb, "\n");
-	sbuf_cat(&sb, path_str);
-	sbuf_printf(&sb, "Tag: 0x%04x, type %d\n",
-		    io->scsiio.tag_num, io->scsiio.tag_type);
-	sbuf_cat(&sb, path_str);
-	sbuf_printf(&sb, "%s: flags %#x, status %#x\n", __func__,
-		    io->io_hdr.flags, io->io_hdr.status);
-	sbuf_finish(&sb);
-	printk("%s", sbuf_data(&sb));
-#endif
-
+		free(CTL_LSGLT(io)[i].addr, M_CTL);
+	free(CTL_RSGL(io), M_CTL);
+	CTL_RSGL(io) = NULL;
+	CTL_LSGL(io) = NULL;
 
 	/*
 	 * The read is done, now we need to send status (good or bad) back
@@ -12691,7 +12539,7 @@ ctl_datamove_remote_read_cb(struct ctl_ha_dt_req *rq)
 	ctl_dt_req_free(rq);
 
 	/* Switch the pointer over so the FETD knows what to do */
-	io->scsiio.kern_data_ptr = (uint8_t *)io->io_hdr.local_sglist;
+	io->scsiio.kern_data_ptr = (uint8_t *)CTL_LSGL(io);
 
 	/*
 	 * Use a custom move done callback, since we need to send completion
@@ -12714,7 +12562,7 @@ ctl_datamove_remote_sgl_setup(union ctl_io *io)
 	int i;
 
 	retval = 0;
-	local_sglist = io->io_hdr.local_sglist;
+	local_sglist = CTL_LSGL(io);
 	len_to_go = io->scsiio.kern_data_len;
 
 	/*
@@ -12735,14 +12583,6 @@ ctl_datamove_remote_sgl_setup(union ctl_io *io)
 	 * number of S/G entries is available in rem_sg_entries.
 	 */
 	io->scsiio.kern_sg_entries = i;
-
-#if 0
-	printf("%s: kern_sg_entries = %d\n", __func__,
-	       io->scsiio.kern_sg_entries);
-	for (i = 0; i < io->scsiio.kern_sg_entries; i++)
-		printf("%s: sg[%d] = %p, %lu\n", __func__, i,
-		       local_sglist[i].addr, local_sglist[i].len);
-#endif
 
 	return (retval);
 }
@@ -12785,8 +12625,8 @@ ctl_datamove_remote_xfer(union ctl_io *io, unsigned command,
 		return (1);
 	}
 
-	local_sglist = io->io_hdr.local_sglist;
-	remote_sglist = io->io_hdr.remote_sglist;
+	local_sglist = CTL_LSGL(io);
+	remote_sglist = CTL_RSGL(io);
 	local_used = 0;
 	remote_used = 0;
 	total_used = 0;
@@ -12857,12 +12697,6 @@ ctl_datamove_remote_xfer(union ctl_io *io, unsigned command,
 		if (total_used >= io->scsiio.kern_data_len)
 			rq->callback = callback;
 
-#if 0
-		printf("%s: %s: local %p remote %p size %d\n", __func__,
-		       (command == CTL_HA_DT_CMD_WRITE) ? "WRITE" : "READ",
-		       rq->local, rq->remote, rq->size);
-#endif
-
 		isc_ret = ctl_dt_single(rq);
 		if (isc_ret > CTL_HA_STATUS_SUCCESS)
 			break;
@@ -12899,10 +12733,10 @@ ctl_datamove_remote_read(union ctl_io *io)
 		 * error if there is a problem.
 		 */
 		for (i = 0; i < io->scsiio.kern_sg_entries; i++)
-			free(io->io_hdr.local_sglist[i].addr, M_CTL);
-		free(io->io_hdr.remote_sglist, M_CTL);
-		io->io_hdr.remote_sglist = NULL;
-		io->io_hdr.local_sglist = NULL;
+			free(CTL_LSGLT(io)[i].addr, M_CTL);
+		free(CTL_RSGL(io), M_CTL);
+		CTL_RSGL(io) = NULL;
+		CTL_LSGL(io) = NULL;
 	}
 }
 
@@ -13079,21 +12913,6 @@ ctl_process_done(union ctl_io *io)
 		else
 			type = CTL_STATS_NO_IO;
 
-#ifdef CTL_LEGACY_STATS
-		uint32_t targ_port = port->targ_port;
-		lun->legacy_stats.ports[targ_port].bytes[type] +=
-		    io->scsiio.kern_total_len;
-		lun->legacy_stats.ports[targ_port].operations[type] ++;
-		lun->legacy_stats.ports[targ_port].num_dmas[type] +=
-		    io->io_hdr.num_dmas;
-#ifdef CTL_TIME_IO
-		bintime_add(&lun->legacy_stats.ports[targ_port].dma_time[type],
-		   &io->io_hdr.dma_bt);
-		bintime_add(&lun->legacy_stats.ports[targ_port].time[type],
-		    &bt);
-#endif
-#endif /* CTL_LEGACY_STATS */
-
 		lun->stats.bytes[type] += io->scsiio.kern_total_len;
 		lun->stats.operations[type] ++;
 		lun->stats.dmas[type] += io->io_hdr.num_dmas;
@@ -13165,7 +12984,7 @@ bailout:
 	    (io->io_hdr.flags & CTL_FLAG_SENT_2OTHER_SC)) {
 		memset(&msg, 0, sizeof(msg));
 		msg.hdr.msg_type = CTL_MSG_FINISH_IO;
-		msg.hdr.serializing_sc = io->io_hdr.serializing_sc;
+		msg.hdr.serializing_sc = io->io_hdr.remote_io;
 		msg.hdr.nexus = io->io_hdr.nexus;
 		ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg,
 		    sizeof(msg.scsi) - sizeof(msg.scsi.sense_data),
