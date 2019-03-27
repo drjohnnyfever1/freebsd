@@ -63,6 +63,8 @@ __FBSDID("$FreeBSD$");
 #ifdef RSS
 #include <net/rss_config.h>
 #endif
+#include <netinet/in.h>
+#include <netinet/ip.h>
 #if defined(__i386__) || defined(__amd64__)
 #include <machine/md_var.h>
 #include <machine/cputypes.h>
@@ -1653,8 +1655,12 @@ cxgbe_vi_attach(device_t dev, struct vi_info *vi)
 	ifp->if_hwassist = CSUM_TCP | CSUM_UDP | CSUM_IP | CSUM_TSO |
 	    CSUM_UDP_IPV6 | CSUM_TCP_IPV6;
 
-	ifp->if_hw_tsomax = 65536 - (ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN);
-	ifp->if_hw_tsomaxsegcount = TX_SGL_SEGS;
+	ifp->if_hw_tsomax = IP_MAXPACKET;
+	ifp->if_hw_tsomaxsegcount = TX_SGL_SEGS_TSO;
+#ifdef RATELIMIT
+	if (is_ethoffload(vi->pi->adapter) && vi->nofldtxq != 0)
+		ifp->if_hw_tsomaxsegcount = TX_SGL_SEGS_EO_TSO;
+#endif
 	ifp->if_hw_tsomaxsegsize = 65536;
 
 	ether_ifattach(ifp, vi->hw_addr);
@@ -4052,6 +4058,18 @@ get_params__post_init(struct adapter *sc)
 	else
 		sc->params.filter2_wr_support = 0;
 
+	/*
+	 * Find out whether we're allowed to use the ULPTX MEMWRITE DSGL.
+	 * This is queried separately for the same reason as other params above.
+	 */
+	param[0] = FW_PARAM_DEV(ULPTX_MEMWRITE_DSGL);
+	val[0] = 0;
+	rc = -t4_query_params(sc, sc->mbox, sc->pf, 0, 1, param, val);
+	if (rc == 0)
+		sc->params.ulptx_memwrite_dsgl = val[0] != 0;
+	else
+		sc->params.ulptx_memwrite_dsgl = false;
+
 	/* get capabilites */
 	bzero(&caps, sizeof(caps));
 	caps.op_to_write = htobe32(V_FW_CMD_OP(FW_CAPS_CONFIG_CMD) |
@@ -4267,6 +4285,11 @@ set_params__post_init(struct adapter *sc)
 	val = 1;
 	if (t4_set_params(sc, sc->mbox, sc->pf, 0, 1, &param, &val) == 0)
 		sc->params.port_caps32 = 1;
+
+	/* Let filter + maskhash steer to a part of the VI's RSS region. */
+	val = 1 << (G_MASKSIZE(t4_read_reg(sc, A_TP_RSS_CONFIG_TNL)) - 1);
+	t4_set_reg_field(sc, A_TP_RSS_CONFIG_TNL, V_MASKFILTER(M_MASKFILTER),
+	    V_MASKFILTER(val - 1));
 
 #ifdef TCP_OFFLOAD
 	/*
@@ -5264,7 +5287,7 @@ vi_full_init(struct vi_info *vi)
 	struct ifnet *ifp = vi->ifp;
 	uint16_t *rss;
 	struct sge_rxq *rxq;
-	int rc, i, j, hashen;
+	int rc, i, j;
 #ifdef RSS
 	int nbuckets = rss_getnumbuckets();
 	int hashconfig = rss_gethashconfig();
@@ -5328,14 +5351,14 @@ vi_full_init(struct vi_info *vi)
 	}
 
 #ifdef RSS
-	hashen = hashconfig_to_hashen(hashconfig);
+	vi->hashen = hashconfig_to_hashen(hashconfig);
 
 	/*
 	 * We may have had to enable some hashes even though the global config
 	 * wants them disabled.  This is a potential problem that must be
 	 * reported to the user.
 	 */
-	extra = hashen_to_hashconfig(hashen) ^ hashconfig;
+	extra = hashen_to_hashconfig(vi->hashen) ^ hashconfig;
 
 	/*
 	 * If we consider only the supported hash types, then the enabled hashes
@@ -5364,12 +5387,12 @@ vi_full_init(struct vi_info *vi)
 	if (extra & RSS_HASHTYPE_RSS_UDP_IPV6)
 		if_printf(ifp, "UDP/IPv6 4-tuple hashing forced on.\n");
 #else
-	hashen = F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN |
+	vi->hashen = F_FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN |
 	    F_FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN |
 	    F_FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN |
 	    F_FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN | F_FW_RSS_VI_CONFIG_CMD_UDPEN;
 #endif
-	rc = -t4_config_vi_rss(sc, sc->mbox, vi->viid, hashen, rss[0], 0, 0);
+	rc = -t4_config_vi_rss(sc, sc->mbox, vi->viid, vi->hashen, rss[0], 0, 0);
 	if (rc != 0) {
 		free(rss, M_CXGBE);
 		if_printf(ifp, "rss hash/defaultq config failed: %d\n", rc);
@@ -6181,6 +6204,8 @@ vi_sysctls(struct vi_info *vi)
 	    &vi->first_rxq, 0, "index of first rx queue");
 	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "first_txq", CTLFLAG_RD,
 	    &vi->first_txq, 0, "index of first tx queue");
+	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "rss_base", CTLFLAG_RD, NULL,
+	    vi->rss_base, "start of RSS indirection table");
 	SYSCTL_ADD_UINT(ctx, children, OID_AUTO, "rss_size", CTLFLAG_RD, NULL,
 	    vi->rss_size, "size of RSS indirection table");
 
