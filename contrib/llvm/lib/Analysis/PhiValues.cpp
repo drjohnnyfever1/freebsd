@@ -14,16 +14,6 @@
 
 using namespace llvm;
 
-void PhiValues::PhiValuesCallbackVH::deleted() {
-  PV->invalidateValue(getValPtr());
-}
-
-void PhiValues::PhiValuesCallbackVH::allUsesReplacedWith(Value *) {
-  // We could potentially update the cached values we have with the new value,
-  // but it's simpler to just treat the old value as invalidated.
-  PV->invalidateValue(getValPtr());
-}
-
 bool PhiValues::invalidate(Function &, const PreservedAnalyses &PA,
                            FunctionAnalysisManager::Invalidator &) {
   // PhiValues is invalidated if it isn't preserved.
@@ -56,7 +46,6 @@ void PhiValues::processPhi(const PHINode *Phi,
   DepthMap[Phi] = DepthNumber;
 
   // Recursively process the incoming phis of this phi.
-  TrackedValues.insert(PhiValuesCallbackVH(const_cast<PHINode *>(Phi), this));
   for (Value *PhiOp : Phi->incoming_values()) {
     if (PHINode *PhiPhiOp = dyn_cast<PHINode>(PhiOp)) {
       // Recurse if the phi has not yet been visited.
@@ -67,8 +56,6 @@ void PhiValues::processPhi(const PHINode *Phi,
       // phi are part of the same component, so adjust the depth number.
       if (!ReachableMap.count(DepthMap[PhiPhiOp]))
         DepthMap[Phi] = std::min(DepthMap[Phi], DepthMap[PhiPhiOp]);
-    } else {
-      TrackedValues.insert(PhiValuesCallbackVH(PhiOp, this));
     }
   }
 
@@ -135,10 +122,6 @@ void PhiValues::invalidateValue(const Value *V) {
     NonPhiReachableMap.erase(N);
     ReachableMap.erase(N);
   }
-  // This value is no longer tracked
-  auto It = TrackedValues.find_as(V);
-  if (It != TrackedValues.end())
-    TrackedValues.erase(It);
 }
 
 void PhiValues::releaseMemory() {

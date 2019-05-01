@@ -702,7 +702,6 @@ basic_filebuf<_CharT, _Traits>::close()
             __file_ = 0;
         else
             __rt = 0;
-        setbuf(0, 0);
     }
     return __rt;
 }

@@ -10,6 +10,10 @@
 #ifndef liblldb_ThreadPlanStepThrough_h_
 #define liblldb_ThreadPlanStepThrough_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadPlan.h"
 
@@ -41,9 +45,10 @@ protected:
 
 private:
   friend lldb::ThreadPlanSP
+
   Thread::QueueThreadPlanForStepThrough(StackID &return_stack_id,
                                         bool abort_other_plans,
-                                        bool stop_others, Status &status);
+                                        bool stop_others);
 
   void ClearBackstopBreakpoint();
 

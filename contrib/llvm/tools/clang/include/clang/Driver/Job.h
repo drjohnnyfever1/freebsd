@@ -29,6 +29,9 @@ class Action;
 class InputInfo;
 class Tool;
 
+// Re-export this as clang::driver::ArgStringList.
+using llvm::opt::ArgStringList;
+
 struct CrashReportInfo {
   StringRef Filename;
   StringRef VFSPath;
@@ -55,9 +58,6 @@ class Command {
 
   /// The list of program arguments which are inputs.
   llvm::opt::ArgStringList InputFilenames;
-
-  /// Whether to print the input filenames when executing.
-  bool PrintInputFilenames = false;
 
   /// Response file name, if this command is set to use one, or nullptr
   /// otherwise
@@ -128,9 +128,6 @@ public:
 
   /// Print a command argument, and optionally quote it.
   static void printArg(llvm::raw_ostream &OS, StringRef Arg, bool Quote);
-
-  /// Set whether to print the input filenames when executing.
-  void setPrintInputFilenames(bool P) { PrintInputFilenames = P; }
 };
 
 /// Like Command, but with a fallback which is executed in case
@@ -138,8 +135,7 @@ public:
 class FallbackCommand : public Command {
 public:
   FallbackCommand(const Action &Source_, const Tool &Creator_,
-                  const char *Executable_,
-                  const llvm::opt::ArgStringList &Arguments_,
+                  const char *Executable_, const ArgStringList &Arguments_,
                   ArrayRef<InputInfo> Inputs,
                   std::unique_ptr<Command> Fallback_);
 
@@ -157,8 +153,7 @@ private:
 class ForceSuccessCommand : public Command {
 public:
   ForceSuccessCommand(const Action &Source_, const Tool &Creator_,
-                      const char *Executable_,
-                      const llvm::opt::ArgStringList &Arguments_,
+                      const char *Executable_, const ArgStringList &Arguments_,
                       ArrayRef<InputInfo> Inputs);
 
   void Print(llvm::raw_ostream &OS, const char *Terminator, bool Quote,

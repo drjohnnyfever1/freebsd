@@ -16,7 +16,6 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
-#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/TemplateName.h"
 #include "clang/AST/Type.h"
@@ -271,8 +270,9 @@ bool NestedNameSpecifier::containsUnexpandedParameterPack() const {
 
 /// Print this nested name specifier to the given output
 /// stream.
-void NestedNameSpecifier::print(raw_ostream &OS, const PrintingPolicy &Policy,
-                                bool ResolveTemplateArguments) const {
+void
+NestedNameSpecifier::print(raw_ostream &OS,
+                           const PrintingPolicy &Policy) const {
   if (getPrefix())
     getPrefix()->print(OS, Policy);
 
@@ -305,15 +305,6 @@ void NestedNameSpecifier::print(raw_ostream &OS, const PrintingPolicy &Policy,
     LLVM_FALLTHROUGH;
 
   case TypeSpec: {
-    const auto *Record =
-            dyn_cast_or_null<ClassTemplateSpecializationDecl>(getAsRecordDecl());
-    if (ResolveTemplateArguments && Record) {
-        // Print the type trait with resolved template parameters.
-        Record->printName(OS);
-        printTemplateArgumentList(OS, Record->getTemplateArgs().asArray(),
-                                  Policy);
-        break;
-    }
     const Type *T = getAsType();
 
     PrintingPolicy InnerPolicy(Policy);
@@ -348,20 +339,13 @@ void NestedNameSpecifier::print(raw_ostream &OS, const PrintingPolicy &Policy,
   OS << "::";
 }
 
-LLVM_DUMP_METHOD void NestedNameSpecifier::dump(const LangOptions &LO) const {
-  dump(llvm::errs(), LO);
+void NestedNameSpecifier::dump(const LangOptions &LO) const {
+  print(llvm::errs(), PrintingPolicy(LO));
 }
 
-LLVM_DUMP_METHOD void NestedNameSpecifier::dump() const { dump(llvm::errs()); }
-
-LLVM_DUMP_METHOD void NestedNameSpecifier::dump(llvm::raw_ostream &OS) const {
+LLVM_DUMP_METHOD void NestedNameSpecifier::dump() const {
   LangOptions LO;
-  dump(OS, LO);
-}
-
-LLVM_DUMP_METHOD void NestedNameSpecifier::dump(llvm::raw_ostream &OS,
-                                                const LangOptions &LO) const {
-  print(OS, PrintingPolicy(LO));
+  print(llvm::errs(), PrintingPolicy(LO));
 }
 
 unsigned
@@ -462,9 +446,9 @@ SourceRange NestedNameSpecifierLoc::getLocalSourceRange() const {
 }
 
 TypeLoc NestedNameSpecifierLoc::getTypeLoc() const {
-  if (Qualifier->getKind() != NestedNameSpecifier::TypeSpec &&
-      Qualifier->getKind() != NestedNameSpecifier::TypeSpecWithTemplate)
-    return TypeLoc();
+  assert((Qualifier->getKind() == NestedNameSpecifier::TypeSpec ||
+          Qualifier->getKind() == NestedNameSpecifier::TypeSpecWithTemplate) &&
+         "Nested-name-specifier location is not a type");
 
   // The "void*" that points at the TypeLoc data.
   unsigned Offset = getDataLength(Qualifier->getPrefix());
@@ -563,7 +547,6 @@ operator=(const NestedNameSpecifierLocBuilder &Other) {
   }
 
   // Deep copy.
-  BufferSize = 0;
   Append(Other.Buffer, Other.Buffer + Other.BufferSize, Buffer, BufferSize,
          BufferCapacity);
   return *this;

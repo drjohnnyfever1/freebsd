@@ -33,10 +33,6 @@ public:
 
   void SetIncludeArguments(bool);
 
-  bool GetIncludeRecognizedArguments(const lldb::SBTarget &) const;
-
-  void SetIncludeRecognizedArguments(bool);
-
   bool GetIncludeLocals() const;
 
   void SetIncludeLocals(bool);

@@ -79,8 +79,7 @@ unsigned X86WinCOFFObjectWriter::getRelocType(MCContext &Ctx,
     case FK_SecRel_4:
       return COFF::IMAGE_REL_AMD64_SECREL;
     default:
-      Ctx.reportError(Fixup.getLoc(), "unsupported relocation type");
-      return COFF::IMAGE_REL_AMD64_ADDR32;
+      llvm_unreachable("unsupported relocation type");
     }
   } else if (getMachine() == COFF::IMAGE_FILE_MACHINE_I386) {
     switch (FixupKind) {
@@ -101,8 +100,7 @@ unsigned X86WinCOFFObjectWriter::getRelocType(MCContext &Ctx,
     case FK_SecRel_4:
       return COFF::IMAGE_REL_I386_SECREL;
     default:
-      Ctx.reportError(Fixup.getLoc(), "unsupported relocation type");
-      return COFF::IMAGE_REL_I386_DIR32;
+      llvm_unreachable("unsupported relocation type");
     }
   } else
     llvm_unreachable("Unsupported COFF machine type.");

@@ -9,8 +9,9 @@
 
 #include "lldb/Core/Value.h"
 
-#include "lldb/Core/Address.h"
+#include "lldb/Core/Address.h"  // for Address
 #include "lldb/Core/Module.h"
+#include "lldb/Core/State.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -20,21 +21,20 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/ConstString.h" // for ConstString
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/Endian.h"
-#include "lldb/Utility/FileSpec.h"
-#include "lldb/Utility/State.h"
+#include "lldb/Utility/Endian.h"   // for InlHostByteOrder
+#include "lldb/Utility/FileSpec.h" // for FileSpec
 #include "lldb/Utility/Stream.h"
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-forward.h"
-#include "lldb/lldb-types.h"
+#include "lldb/lldb-defines.h" // for LLDB_INVALID_ADDRESS
+#include "lldb/lldb-forward.h" // for DataBufferSP, ModuleSP
+#include "lldb/lldb-types.h"   // for addr_t
 
-#include <memory>
-#include <string>
+#include <memory> // for make_shared
+#include <string> // for string
 
-#include <inttypes.h>
+#include <inttypes.h> // for PRIx64
 
 using namespace lldb;
 using namespace lldb_private;
@@ -224,9 +224,8 @@ uint64_t Value::GetValueByteSize(Status *error_ptr, ExecutionContext *exe_ctx) {
   {
     const CompilerType &ast_type = GetCompilerType();
     if (ast_type.IsValid())
-      if (llvm::Optional<uint64_t> size = ast_type.GetByteSize(
-              exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr))
-        byte_size = *size;
+      byte_size = ast_type.GetByteSize(
+          exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr);
   } break;
   }
 
@@ -345,9 +344,10 @@ Status Value::GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
 
     uint32_t limit_byte_size = UINT32_MAX;
 
-    if (llvm::Optional<uint64_t> size = ast_type.GetByteSize(
-            exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr))
-      limit_byte_size = *size;
+    if (ast_type.IsValid()) {
+      limit_byte_size = ast_type.GetByteSize(
+          exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr);
+    }
 
     if (limit_byte_size <= m_value.GetByteSize()) {
       if (m_value.GetData(data, limit_byte_size))

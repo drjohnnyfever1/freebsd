@@ -208,6 +208,9 @@ public:
                         int *BytesAdded = nullptr) const override;
   bool analyzeCompare(const MachineInstr &MI, unsigned &SrcReg,
                       unsigned &SrcReg2, int &Mask, int &Value) const override;
+  bool optimizeCompareInstr(MachineInstr &CmpInstr, unsigned SrcReg,
+                            unsigned SrcReg2, int Mask, int Value,
+                            const MachineRegisterInfo *MRI) const override;
   bool canInsertSelect(const MachineBasicBlock&, ArrayRef<MachineOperand> Cond,
                        unsigned, unsigned, int&, int&, int&) const override;
   void insertSelect(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,

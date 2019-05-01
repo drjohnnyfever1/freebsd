@@ -425,9 +425,7 @@ bool Parser::isStartOfTemplateTypeParameter() {
     }
   }
 
-  // 'typedef' is a reasonably-common typo/thinko for 'typename', and is
-  // ill-formed otherwise.
-  if (Tok.isNot(tok::kw_typename) && Tok.isNot(tok::kw_typedef))
+  if (Tok.isNot(tok::kw_typename))
     return false;
 
   // C++ [temp.param]p2:
@@ -448,13 +446,6 @@ bool Parser::isStartOfTemplateTypeParameter() {
   case tok::greater:
   case tok::greatergreater:
   case tok::ellipsis:
-    return true;
-
-  case tok::kw_typename:
-  case tok::kw_typedef:
-  case tok::kw_class:
-    // These indicate that a comma was missed after a type parameter, not that
-    // we have found a non-type parameter.
     return true;
 
   default:
@@ -478,24 +469,25 @@ bool Parser::isStartOfTemplateTypeParameter() {
 ///         'template' '<' template-parameter-list '>' 'class' identifier[opt]
 ///               = id-expression
 NamedDecl *Parser::ParseTemplateParameter(unsigned Depth, unsigned Position) {
-  if (isStartOfTemplateTypeParameter()) {
-    // Is there just a typo in the input code? ('typedef' instead of 'typename')
-    if (Tok.is(tok::kw_typedef)) {
-      Diag(Tok.getLocation(), diag::err_expected_template_parameter);
-
-      Diag(Tok.getLocation(), diag::note_meant_to_use_typename)
-          << FixItHint::CreateReplacement(CharSourceRange::getCharRange(
-                                              Tok.getLocation(), Tok.getEndLoc()),
-                                          "typename");
-
-      Tok.setKind(tok::kw_typename);
-    }
-
+  if (isStartOfTemplateTypeParameter())
     return ParseTypeParameter(Depth, Position);
-  }
 
   if (Tok.is(tok::kw_template))
     return ParseTemplateTemplateParameter(Depth, Position);
+
+  // Is there just a typo in the input code? ('typedef' instead of 'typename')
+  if (Tok.is(tok::kw_typedef)) {
+    Diag(Tok.getLocation(), diag::err_expected_template_parameter);
+
+    Diag(Tok.getLocation(), diag::note_meant_to_use_typename)
+        << FixItHint::CreateReplacement(CharSourceRange::getCharRange(
+                                            Tok.getLocation(), Tok.getEndLoc()),
+                                        "typename");
+
+    Tok.setKind(tok::kw_typename);
+
+    return ParseTypeParameter(Depth, Position);
+  }
 
   // If it's none of the above, then it must be a parameter declaration.
   // NOTE: This will pick up errors in the closure of the template parameter
@@ -946,9 +938,7 @@ Parser::ParseTemplateIdAfterTemplateName(bool ConsumeLastToken,
   bool Invalid = false;
   {
     GreaterThanIsOperatorScope G(GreaterThanIsOperator, false);
-    if (!Tok.isOneOf(tok::greater, tok::greatergreater,
-                     tok::greatergreatergreater, tok::greaterequal,
-                     tok::greatergreaterequal))
+    if (Tok.isNot(tok::greater) && Tok.isNot(tok::greatergreater))
       Invalid = ParseTemplateArgumentList(TemplateArgs);
 
     if (Invalid) {
@@ -1381,37 +1371,26 @@ void Parser::ParseLateTemplatedFuncDef(LateParsedTemplate &LPT) {
 
   SmallVector<ParseScope*, 4> TemplateParamScopeStack;
 
-  // Get the list of DeclContexts to reenter. For inline methods, we only want
-  // to push the DeclContext of the outermost class. This matches the way the
-  // parser normally parses bodies of inline methods when the outermost class is
-  // complete.
-  struct ContainingDC {
-    ContainingDC(DeclContext *DC, bool ShouldPush) : Pair(DC, ShouldPush) {}
-    llvm::PointerIntPair<DeclContext *, 1, bool> Pair;
-    DeclContext *getDC() { return Pair.getPointer(); }
-    bool shouldPushDC() { return Pair.getInt(); }
-  };
-  SmallVector<ContainingDC, 4> DeclContextsToReenter;
+  // Get the list of DeclContexts to reenter.
+  SmallVector<DeclContext*, 4> DeclContextsToReenter;
   DeclContext *DD = FunD;
-  DeclContext *NextContaining = Actions.getContainingDC(DD);
   while (DD && !DD->isTranslationUnit()) {
-    bool ShouldPush = DD == NextContaining;
-    DeclContextsToReenter.push_back({DD, ShouldPush});
-    if (ShouldPush)
-      NextContaining = Actions.getContainingDC(DD);
+    DeclContextsToReenter.push_back(DD);
     DD = DD->getLexicalParent();
   }
 
   // Reenter template scopes from outermost to innermost.
-  for (ContainingDC CDC : reverse(DeclContextsToReenter)) {
-    TemplateParamScopeStack.push_back(
-        new ParseScope(this, Scope::TemplateParamScope));
-    unsigned NumParamLists = Actions.ActOnReenterTemplateScope(
-        getCurScope(), cast<Decl>(CDC.getDC()));
+  SmallVectorImpl<DeclContext *>::reverse_iterator II =
+      DeclContextsToReenter.rbegin();
+  for (; II != DeclContextsToReenter.rend(); ++II) {
+    TemplateParamScopeStack.push_back(new ParseScope(this,
+          Scope::TemplateParamScope));
+    unsigned NumParamLists =
+      Actions.ActOnReenterTemplateScope(getCurScope(), cast<Decl>(*II));
     CurTemplateDepthTracker.addDepth(NumParamLists);
-    if (CDC.shouldPushDC()) {
+    if (*II != FunD) {
       TemplateParamScopeStack.push_back(new ParseScope(this, Scope::DeclScope));
-      Actions.PushDeclContext(Actions.getCurScope(), CDC.getDC());
+      Actions.PushDeclContext(Actions.getCurScope(), *II);
     }
   }
 

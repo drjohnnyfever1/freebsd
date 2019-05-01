@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/ThreadPlanStepInstruction.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
@@ -53,19 +57,11 @@ void ThreadPlanStepInstruction::SetUpState() {
 
 void ThreadPlanStepInstruction::GetDescription(Stream *s,
                                                lldb::DescriptionLevel level) {
-  auto PrintFailureIfAny = [&]() {
-    if (m_status.Success())
-      return;
-    s->Printf(" failed (%s)", m_status.AsCString());
-  };
-
   if (level == lldb::eDescriptionLevelBrief) {
     if (m_step_over)
       s->Printf("instruction step over");
     else
       s->Printf("instruction step into");
-
-    PrintFailureIfAny();
   } else {
     s->Printf("Stepping one instruction past ");
     s->Address(m_instruction_addr, sizeof(addr_t));
@@ -76,8 +72,6 @@ void ThreadPlanStepInstruction::GetDescription(Stream *s,
       s->Printf(" stepping over calls");
     else
       s->Printf(" stepping into calls");
-
-    PrintFailureIfAny();
   }
 }
 
@@ -198,8 +192,7 @@ bool ThreadPlanStepInstruction::ShouldStop(Event *event_ptr) {
           // for now it is safer to run others.
           const bool stop_others = false;
           m_thread.QueueThreadPlanForStepOutNoShouldStop(
-              false, nullptr, true, stop_others, eVoteNo, eVoteNoOpinion, 0,
-              m_status);
+              false, nullptr, true, stop_others, eVoteNo, eVoteNoOpinion, 0);
           return false;
         } else {
           if (log) {

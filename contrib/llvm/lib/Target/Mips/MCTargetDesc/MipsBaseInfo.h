@@ -89,10 +89,7 @@ namespace MipsII {
     MO_GOT_HI16,
     MO_GOT_LO16,
     MO_CALL_HI16,
-    MO_CALL_LO16,
-
-    /// Helper operand used to generate R_MIPS_JALR
-    MO_JALR
+    MO_CALL_LO16
   };
 
   enum {

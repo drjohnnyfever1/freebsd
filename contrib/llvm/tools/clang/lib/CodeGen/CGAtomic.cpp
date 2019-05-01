@@ -18,7 +18,7 @@
 #include "TargetInfo.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
-#include "clang/Frontend/FrontendDiagnostic.h"
+#include "clang/Sema/SemaDiagnostic.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Intrinsics.h"
@@ -765,15 +765,11 @@ RValue CodeGenFunction::EmitAtomicExpr(AtomicExpr *E) {
   std::tie(sizeChars, alignChars) = getContext().getTypeInfoInChars(AtomicTy);
   uint64_t Size = sizeChars.getQuantity();
   unsigned MaxInlineWidthInBits = getTarget().getMaxAtomicInlineWidth();
+  bool UseLibcall = ((Ptr.getAlignment() % sizeChars) != 0 ||
+                     getContext().toBits(sizeChars) > MaxInlineWidthInBits);
 
-  bool Oversized = getContext().toBits(sizeChars) > MaxInlineWidthInBits;
-  bool Misaligned = (Ptr.getAlignment() % sizeChars) != 0;
-  bool UseLibcall = Misaligned | Oversized;
-
-  if (UseLibcall) {
-    CGM.getDiags().Report(E->getBeginLoc(), diag::warn_atomic_op_misaligned)
-        << !Oversized;
-  }
+  if (UseLibcall)
+    CGM.getDiags().Report(E->getLocStart(), diag::warn_atomic_op_misaligned);
 
   llvm::Value *Order = EmitScalarExpr(E->getOrder());
   llvm::Value *Scope =
@@ -927,15 +923,6 @@ RValue CodeGenFunction::EmitAtomicExpr(AtomicExpr *E) {
       UseOptimizedLibcall = true;
       break;
 
-    case AtomicExpr::AO__atomic_load:
-    case AtomicExpr::AO__atomic_store:
-    case AtomicExpr::AO__atomic_exchange:
-    case AtomicExpr::AO__atomic_compare_exchange:
-      // Use the generic version if we don't know that the operand will be
-      // suitably aligned for the optimized version.
-      if (Misaligned)
-        break;
-      LLVM_FALLTHROUGH;
     case AtomicExpr::AO__c11_atomic_load:
     case AtomicExpr::AO__c11_atomic_store:
     case AtomicExpr::AO__c11_atomic_exchange:
@@ -947,11 +934,14 @@ RValue CodeGenFunction::EmitAtomicExpr(AtomicExpr *E) {
     case AtomicExpr::AO__opencl_atomic_compare_exchange_weak:
     case AtomicExpr::AO__opencl_atomic_compare_exchange_strong:
     case AtomicExpr::AO__atomic_load_n:
+    case AtomicExpr::AO__atomic_load:
     case AtomicExpr::AO__atomic_store_n:
+    case AtomicExpr::AO__atomic_store:
     case AtomicExpr::AO__atomic_exchange_n:
+    case AtomicExpr::AO__atomic_exchange:
     case AtomicExpr::AO__atomic_compare_exchange_n:
+    case AtomicExpr::AO__atomic_compare_exchange:
       // Only use optimized library calls for sizes for which they exist.
-      // FIXME: Size == 16 optimized library functions exist too.
       if (Size == 1 || Size == 2 || Size == 4 || Size == 8)
         UseOptimizedLibcall = true;
       break;

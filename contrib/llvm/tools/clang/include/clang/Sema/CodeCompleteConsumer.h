@@ -17,7 +17,6 @@
 #include "clang-c/Index.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/LLVM.h"
-#include "clang/Lex/MacroInfo.h"
 #include "clang/Sema/CodeCompleteOptions.h"
 #include "clang/Sema/DeclSpec.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -272,15 +271,11 @@ public:
     CCC_Type,
 
     /// Code completion occurred where a new name is expected.
-    CCC_NewName,
+    CCC_Name,
 
-    /// Code completion occurred where both a new name and an existing symbol is
-    /// permissible.
-    CCC_SymbolOrNewName,
-
-    /// Code completion occurred where an existing name(such as type, function
-    /// or variable) is expected.
-    CCC_Symbol,
+    /// Code completion occurred where a new name is expected and a
+    /// qualified name is permissible.
+    CCC_PotentiallyQualifiedName,
 
     /// Code completion occurred where an macro is being defined.
     CCC_MacroName,
@@ -326,9 +321,6 @@ public:
 
     /// Code completion where an Objective-C category name is expected.
     CCC_ObjCCategoryName,
-
-    /// Code completion inside the filename part of a #include directive.
-    CCC_IncludedFile,
 
     /// An unknown context, in which we are recovering from a parsing
     /// error and don't know which completions we should give.
@@ -825,9 +817,6 @@ public:
   /// Whether this result is hidden by another name.
   bool Hidden : 1;
 
-  /// Whether this is a class member from base class.
-  bool InBaseClass : 1;
-
   /// Whether this result was found via lookup into a base class.
   bool QualifierIsInformative : 1;
 
@@ -854,11 +843,6 @@ public:
   /// corresponding `using decl::qualified::name;` nearby.
   const UsingShadowDecl *ShadowDecl = nullptr;
 
-  /// If the result is RK_Macro, this can store the information about the macro
-  /// definition. This should be set in most cases but can be missing when
-  /// the macro has been undefined.
-  const MacroInfo *MacroDefInfo = nullptr;
-
   /// Build a result that refers to a declaration.
   CodeCompletionResult(const NamedDecl *Declaration, unsigned Priority,
                        NestedNameSpecifier *Qualifier = nullptr,
@@ -866,7 +850,7 @@ public:
                        bool Accessible = true,
                        std::vector<FixItHint> FixIts = std::vector<FixItHint>())
       : Declaration(Declaration), Priority(Priority), Kind(RK_Declaration),
-        FixIts(std::move(FixIts)), Hidden(false), InBaseClass(false),
+        FixIts(std::move(FixIts)), Hidden(false),
         QualifierIsInformative(QualifierIsInformative),
         StartsNestedNameSpecifier(false), AllParametersAreInformative(false),
         DeclaringEntity(false), Qualifier(Qualifier) {
@@ -877,38 +861,35 @@ public:
   /// Build a result that refers to a keyword or symbol.
   CodeCompletionResult(const char *Keyword, unsigned Priority = CCP_Keyword)
       : Keyword(Keyword), Priority(Priority), Kind(RK_Keyword),
-        CursorKind(CXCursor_NotImplemented), Hidden(false), InBaseClass(false),
+        CursorKind(CXCursor_NotImplemented), Hidden(false),
         QualifierIsInformative(false), StartsNestedNameSpecifier(false),
         AllParametersAreInformative(false), DeclaringEntity(false) {}
 
   /// Build a result that refers to a macro.
   CodeCompletionResult(const IdentifierInfo *Macro,
-                       const MacroInfo *MI = nullptr,
                        unsigned Priority = CCP_Macro)
       : Macro(Macro), Priority(Priority), Kind(RK_Macro),
-        CursorKind(CXCursor_MacroDefinition), Hidden(false), InBaseClass(false),
+        CursorKind(CXCursor_MacroDefinition), Hidden(false),
         QualifierIsInformative(false), StartsNestedNameSpecifier(false),
-        AllParametersAreInformative(false), DeclaringEntity(false),
-        MacroDefInfo(MI) {}
+        AllParametersAreInformative(false), DeclaringEntity(false) {}
 
   /// Build a result that refers to a pattern.
-  CodeCompletionResult(
-      CodeCompletionString *Pattern, unsigned Priority = CCP_CodePattern,
-      CXCursorKind CursorKind = CXCursor_NotImplemented,
-      CXAvailabilityKind Availability = CXAvailability_Available,
-      const NamedDecl *D = nullptr)
+  CodeCompletionResult(CodeCompletionString *Pattern,
+                       unsigned Priority = CCP_CodePattern,
+                       CXCursorKind CursorKind = CXCursor_NotImplemented,
+                   CXAvailabilityKind Availability = CXAvailability_Available,
+                       const NamedDecl *D = nullptr)
       : Declaration(D), Pattern(Pattern), Priority(Priority), Kind(RK_Pattern),
         CursorKind(CursorKind), Availability(Availability), Hidden(false),
-        InBaseClass(false), QualifierIsInformative(false),
-        StartsNestedNameSpecifier(false), AllParametersAreInformative(false),
-        DeclaringEntity(false) {}
+        QualifierIsInformative(false), StartsNestedNameSpecifier(false),
+        AllParametersAreInformative(false), DeclaringEntity(false) {}
 
   /// Build a result that refers to a pattern with an associated
   /// declaration.
   CodeCompletionResult(CodeCompletionString *Pattern, const NamedDecl *D,
                        unsigned Priority)
       : Declaration(D), Pattern(Pattern), Priority(Priority), Kind(RK_Pattern),
-        Hidden(false), InBaseClass(false), QualifierIsInformative(false),
+        Hidden(false), QualifierIsInformative(false),
         StartsNestedNameSpecifier(false), AllParametersAreInformative(false),
         DeclaringEntity(false) {
     computeCursorKindAndAvailability();
@@ -953,16 +934,6 @@ public:
   CreateCodeCompletionStringForMacro(Preprocessor &PP,
                                      CodeCompletionAllocator &Allocator,
                                      CodeCompletionTUInfo &CCTUInfo);
-
-  CodeCompletionString *createCodeCompletionStringForDecl(
-      Preprocessor &PP, ASTContext &Ctx, CodeCompletionBuilder &Result,
-      bool IncludeBriefComments, const CodeCompletionContext &CCContext,
-      PrintingPolicy &Policy);
-
-  CodeCompletionString *createCodeCompletionStringForOverride(
-      Preprocessor &PP, ASTContext &Ctx, CodeCompletionBuilder &Result,
-      bool IncludeBriefComments, const CodeCompletionContext &CCContext,
-      PrintingPolicy &Policy);
 
   /// Retrieve the name that should be used to order a result.
   ///
@@ -1143,13 +1114,9 @@ public:
   /// \param Candidates an array of overload candidates.
   ///
   /// \param NumCandidates the number of overload candidates
-  ///
-  /// \param OpenParLoc location of the opening parenthesis of the argument
-  ///        list.
   virtual void ProcessOverloadCandidates(Sema &S, unsigned CurrentArg,
                                          OverloadCandidate *Candidates,
-                                         unsigned NumCandidates,
-                                         SourceLocation OpenParLoc) {}
+                                         unsigned NumCandidates) {}
   //@}
 
   /// Retrieve the allocator that will be used to allocate
@@ -1199,8 +1166,7 @@ public:
 
   void ProcessOverloadCandidates(Sema &S, unsigned CurrentArg,
                                  OverloadCandidate *Candidates,
-                                 unsigned NumCandidates,
-                                 SourceLocation OpenParLoc) override;
+                                 unsigned NumCandidates) override;
 
   bool isResultFilteredOut(StringRef Filter, CodeCompletionResult Results) override;
 

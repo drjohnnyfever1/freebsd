@@ -19,6 +19,7 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LazyValueInfo.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -27,7 +28,6 @@
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/DomTreeUpdater.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
@@ -44,7 +44,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <utility>
 
@@ -273,11 +272,10 @@ static bool processMemAccess(Instruction *I, LazyValueInfo *LVI) {
 /// information is sufficient to prove this comparison. Even for local
 /// conditions, this can sometimes prove conditions instcombine can't by
 /// exploiting range information.
-static bool processCmp(CmpInst *Cmp, LazyValueInfo *LVI) {
-  Value *Op0 = Cmp->getOperand(0);
-  auto *C = dyn_cast<Constant>(Cmp->getOperand(1));
-  if (!C)
-    return false;
+static bool processCmp(CmpInst *C, LazyValueInfo *LVI) {
+  Value *Op0 = C->getOperand(0);
+  Constant *Op1 = dyn_cast<Constant>(C->getOperand(1));
+  if (!Op1) return false;
 
   // As a policy choice, we choose not to waste compile time on anything where
   // the comparison is testing local values.  While LVI can sometimes reason
@@ -285,18 +283,20 @@ static bool processCmp(CmpInst *Cmp, LazyValueInfo *LVI) {
   // the block local query for uses from terminator instructions, but that's
   // handled in the code for each terminator.
   auto *I = dyn_cast<Instruction>(Op0);
-  if (I && I->getParent() == Cmp->getParent())
+  if (I && I->getParent() == C->getParent())
     return false;
 
   LazyValueInfo::Tristate Result =
-      LVI->getPredicateAt(Cmp->getPredicate(), Op0, C, Cmp);
-  if (Result == LazyValueInfo::Unknown)
-    return false;
+    LVI->getPredicateAt(C->getPredicate(), Op0, Op1, C);
+  if (Result == LazyValueInfo::Unknown) return false;
 
   ++NumCmps;
-  Constant *TorF = ConstantInt::get(Type::getInt1Ty(Cmp->getContext()), Result);
-  Cmp->replaceAllUsesWith(TorF);
-  Cmp->eraseFromParent();
+  if (Result == LazyValueInfo::True)
+    C->replaceAllUsesWith(ConstantInt::getTrue(C->getContext()));
+  else
+    C->replaceAllUsesWith(ConstantInt::getFalse(C->getContext()));
+  C->eraseFromParent();
+
   return true;
 }
 
@@ -307,9 +307,7 @@ static bool processCmp(CmpInst *Cmp, LazyValueInfo *LVI) {
 /// that cannot fire no matter what the incoming edge can safely be removed. If
 /// a case fires on every incoming edge then the entire switch can be removed
 /// and replaced with a branch to the case destination.
-static bool processSwitch(SwitchInst *SI, LazyValueInfo *LVI,
-                          DominatorTree *DT) {
-  DomTreeUpdater DTU(*DT, DomTreeUpdater::UpdateStrategy::Lazy);
+static bool processSwitch(SwitchInst *SI, LazyValueInfo *LVI, DominatorTree *DT) {
   Value *Cond = SI->getCondition();
   BasicBlock *BB = SI->getParent();
 
@@ -374,7 +372,7 @@ static bool processSwitch(SwitchInst *SI, LazyValueInfo *LVI,
       ++NumDeadCases;
       Changed = true;
       if (--SuccessorsCount[Succ] == 0)
-        DTU.deleteEdge(BB, Succ);
+        DT->deleteEdge(BB, Succ);
       continue;
     }
     if (State == LazyValueInfo::True) {
@@ -391,11 +389,15 @@ static bool processSwitch(SwitchInst *SI, LazyValueInfo *LVI,
     ++CI;
   }
 
-  if (Changed)
+  if (Changed) {
     // If the switch has been simplified to the point where it can be replaced
     // by a branch then do so now.
+    DeferredDominance DDT(*DT);
     ConstantFoldTerminator(BB, /*DeleteDeadConditions = */ false,
-                           /*TLI = */ nullptr, &DTU);
+                           /*TLI = */ nullptr, &DDT);
+    DDT.flush();
+  }
+
   return Changed;
 }
 
@@ -430,21 +432,23 @@ static bool willNotOverflow(IntrinsicInst *II, LazyValueInfo *LVI) {
 }
 
 static void processOverflowIntrinsic(IntrinsicInst *II) {
-  IRBuilder<> B(II);
   Value *NewOp = nullptr;
   switch (II->getIntrinsicID()) {
   default:
     llvm_unreachable("Unexpected instruction.");
   case Intrinsic::uadd_with_overflow:
   case Intrinsic::sadd_with_overflow:
-    NewOp = B.CreateAdd(II->getOperand(0), II->getOperand(1), II->getName());
+    NewOp = BinaryOperator::CreateAdd(II->getOperand(0), II->getOperand(1),
+                                      II->getName(), II);
     break;
   case Intrinsic::usub_with_overflow:
   case Intrinsic::ssub_with_overflow:
-    NewOp = B.CreateSub(II->getOperand(0), II->getOperand(1), II->getName());
+    NewOp = BinaryOperator::CreateSub(II->getOperand(0), II->getOperand(1),
+                                      II->getName(), II);
     break;
   }
   ++NumOverflows;
+  IRBuilder<> B(II);
   Value *NewI = B.CreateInsertValue(UndefValue::get(II->getType()), NewOp, 0);
   NewI = B.CreateInsertValue(NewI, ConstantInt::getFalse(II->getContext()), 1);
   II->replaceAllUsesWith(NewI);
@@ -526,17 +530,17 @@ static bool processUDivOrURem(BinaryOperator *Instr, LazyValueInfo *LVI) {
     return false;
 
   ++NumUDivs;
-  IRBuilder<> B{Instr};
   auto *TruncTy = Type::getIntNTy(Instr->getContext(), NewWidth);
-  auto *LHS = B.CreateTruncOrBitCast(Instr->getOperand(0), TruncTy,
-                                     Instr->getName() + ".lhs.trunc");
-  auto *RHS = B.CreateTruncOrBitCast(Instr->getOperand(1), TruncTy,
-                                     Instr->getName() + ".rhs.trunc");
-  auto *BO = B.CreateBinOp(Instr->getOpcode(), LHS, RHS, Instr->getName());
-  auto *Zext = B.CreateZExt(BO, Instr->getType(), Instr->getName() + ".zext");
-  if (auto *BinOp = dyn_cast<BinaryOperator>(BO))
-    if (BinOp->getOpcode() == Instruction::UDiv)
-      BinOp->setIsExact(Instr->isExact());
+  auto *LHS = CastInst::Create(Instruction::Trunc, Instr->getOperand(0), TruncTy,
+                               Instr->getName() + ".lhs.trunc", Instr);
+  auto *RHS = CastInst::Create(Instruction::Trunc, Instr->getOperand(1), TruncTy,
+                               Instr->getName() + ".rhs.trunc", Instr);
+  auto *BO =
+      BinaryOperator::Create(Instr->getOpcode(), LHS, RHS, Instr->getName(), Instr);
+  auto *Zext = CastInst::Create(Instruction::ZExt, BO, Instr->getType(),
+                                Instr->getName() + ".zext", Instr);
+  if (BO->getOpcode() == Instruction::UDiv)
+    BO->setIsExact(Instr->isExact());
 
   Instr->replaceAllUsesWith(Zext);
   Instr->eraseFromParent();
@@ -550,7 +554,6 @@ static bool processSRem(BinaryOperator *SDI, LazyValueInfo *LVI) {
   ++NumSRems;
   auto *BO = BinaryOperator::CreateURem(SDI->getOperand(0), SDI->getOperand(1),
                                         SDI->getName(), SDI);
-  BO->setDebugLoc(SDI->getDebugLoc());
   SDI->replaceAllUsesWith(BO);
   SDI->eraseFromParent();
 
@@ -572,7 +575,6 @@ static bool processSDiv(BinaryOperator *SDI, LazyValueInfo *LVI) {
   ++NumSDivs;
   auto *BO = BinaryOperator::CreateUDiv(SDI->getOperand(0), SDI->getOperand(1),
                                         SDI->getName(), SDI);
-  BO->setDebugLoc(SDI->getDebugLoc());
   BO->setIsExact(SDI->isExact());
   SDI->replaceAllUsesWith(BO);
   SDI->eraseFromParent();
@@ -595,7 +597,6 @@ static bool processAShr(BinaryOperator *SDI, LazyValueInfo *LVI) {
   ++NumAShrs;
   auto *BO = BinaryOperator::CreateLShr(SDI->getOperand(0), SDI->getOperand(1),
                                         SDI->getName(), SDI);
-  BO->setDebugLoc(SDI->getDebugLoc());
   BO->setIsExact(SDI->isExact());
   SDI->replaceAllUsesWith(BO);
   SDI->eraseFromParent();

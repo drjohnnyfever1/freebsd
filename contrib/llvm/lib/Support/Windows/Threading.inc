@@ -14,7 +14,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 
-#include "WindowsSupport.h"
+#include "Windows/WindowsSupport.h"
 #include <process.h>
 
 // Windows will at times define MemoryFence.

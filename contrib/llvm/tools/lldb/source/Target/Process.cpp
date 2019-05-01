@@ -7,19 +7,25 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <atomic>
 #include <mutex>
 
+// Other libraries and framework includes
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Threading.h"
 
+// Project includes
 #include "Plugins/Process/Utility/InferiorCallPOSIX.h"
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
 #include "lldb/Core/Debugger.h"
+#include "lldb/Core/Event.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/IRDynamicChecks.h"
@@ -61,11 +67,9 @@
 #include "lldb/Target/ThreadPlan.h"
 #include "lldb/Target/ThreadPlanBase.h"
 #include "lldb/Target/UnixSignals.h"
-#include "lldb/Utility/Event.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/NameMatches.h"
 #include "lldb/Utility/SelectHelper.h"
-#include "lldb/Utility/State.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -112,38 +116,39 @@ public:
   }
 };
 
-static constexpr PropertyDefinition g_properties[] = {
+static PropertyDefinition g_properties[] = {
     {"disable-memory-cache", OptionValue::eTypeBoolean, false,
-     DISABLE_MEM_CACHE_DEFAULT, nullptr, {},
+     DISABLE_MEM_CACHE_DEFAULT, nullptr, nullptr,
      "Disable reading and caching of memory in fixed-size units."},
     {"extra-startup-command", OptionValue::eTypeArray, false,
-     OptionValue::eTypeString, nullptr, {},
+     OptionValue::eTypeString, nullptr, nullptr,
      "A list containing extra commands understood by the particular process "
      "plugin used.  "
      "For instance, to turn on debugserver logging set this to "
      "\"QSetLogging:bitmask=LOG_DEFAULT;\""},
     {"ignore-breakpoints-in-expressions", OptionValue::eTypeBoolean, true, true,
-     nullptr, {},
+     nullptr, nullptr,
      "If true, breakpoints will be ignored during expression evaluation."},
     {"unwind-on-error-in-expressions", OptionValue::eTypeBoolean, true, true,
-     nullptr, {}, "If true, errors in expression evaluation will unwind "
-                  "the stack back to the state before the call."},
+     nullptr, nullptr, "If true, errors in expression evaluation will unwind "
+                       "the stack back to the state before the call."},
     {"python-os-plugin-path", OptionValue::eTypeFileSpec, false, true, nullptr,
-     {}, "A path to a python OS plug-in module file that contains a "
-         "OperatingSystemPlugIn class."},
+     nullptr, "A path to a python OS plug-in module file that contains a "
+              "OperatingSystemPlugIn class."},
     {"stop-on-sharedlibrary-events", OptionValue::eTypeBoolean, true, false,
-     nullptr, {},
+     nullptr, nullptr,
      "If true, stop when a shared library is loaded or unloaded."},
     {"detach-keeps-stopped", OptionValue::eTypeBoolean, true, false, nullptr,
-     {}, "If true, detach will attempt to keep the process stopped."},
+     nullptr, "If true, detach will attempt to keep the process stopped."},
     {"memory-cache-line-size", OptionValue::eTypeUInt64, false, 512, nullptr,
-     {}, "The memory cache line size"},
+     nullptr, "The memory cache line size"},
     {"optimization-warnings", OptionValue::eTypeBoolean, false, true, nullptr,
-     {}, "If true, warn when stopped in code that is optimized where "
-         "stepping and variable availability may not behave as expected."},
+     nullptr, "If true, warn when stopped in code that is optimized where "
+              "stepping and variable availability may not behave as expected."},
     {"stop-on-exec", OptionValue::eTypeBoolean, true, true,
-     nullptr, {},
-     "If true, stop when a shared library is loaded or unloaded."}};
+     nullptr, nullptr,
+     "If true, stop when a shared library is loaded or unloaded."},
+    {nullptr, OptionValue::eTypeInvalid, false, 0, nullptr, nullptr, nullptr}};
 
 enum {
   ePropertyDisableMemCache,
@@ -426,7 +431,7 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
   case 'i': // STDIN for read only
   {
     FileAction action;
-    if (action.Open(STDIN_FILENO, FileSpec(option_arg), true, false))
+    if (action.Open(STDIN_FILENO, FileSpec{option_arg, false}, true, false))
       launch_info.AppendFileAction(action);
     break;
   }
@@ -434,7 +439,7 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
   case 'o': // Open STDOUT for write only
   {
     FileAction action;
-    if (action.Open(STDOUT_FILENO, FileSpec(option_arg), false, true))
+    if (action.Open(STDOUT_FILENO, FileSpec{option_arg, false}, false, true))
       launch_info.AppendFileAction(action);
     break;
   }
@@ -442,7 +447,7 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
   case 'e': // STDERR for write only
   {
     FileAction action;
-    if (action.Open(STDERR_FILENO, FileSpec(option_arg), false, true))
+    if (action.Open(STDERR_FILENO, FileSpec{option_arg, false}, false, true))
       launch_info.AppendFileAction(action);
     break;
   }
@@ -454,7 +459,7 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
   case 'n': // Disable STDIO
   {
     FileAction action;
-    const FileSpec dev_null(FileSystem::DEV_NULL);
+    const FileSpec dev_null{FileSystem::DEV_NULL, false};
     if (action.Open(STDIN_FILENO, dev_null, true, false))
       launch_info.AppendFileAction(action);
     if (action.Open(STDOUT_FILENO, dev_null, false, true))
@@ -465,7 +470,7 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
   }
 
   case 'w':
-    launch_info.SetWorkingDirectory(FileSpec(option_arg));
+    launch_info.SetWorkingDirectory(FileSpec{option_arg, false});
     break;
 
   case 't': // Open process in new terminal window
@@ -511,7 +516,7 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
 
   case 'c':
     if (!option_arg.empty())
-      launch_info.SetShell(FileSpec(option_arg));
+      launch_info.SetShell(FileSpec(option_arg, false));
     else
       launch_info.SetShell(HostInfo::GetDefaultShell());
     break;
@@ -528,52 +533,52 @@ Status ProcessLaunchCommandOptions::SetOptionValue(
   return error;
 }
 
-static constexpr OptionDefinition g_process_launch_options[] = {
+static OptionDefinition g_process_launch_options[] = {
     {LLDB_OPT_SET_ALL, false, "stop-at-entry", 's', OptionParser::eNoArgument,
-     nullptr, {}, 0, eArgTypeNone,
+     nullptr, nullptr, 0, eArgTypeNone,
      "Stop at the entry point of the program when launching a process."},
     {LLDB_OPT_SET_ALL, false, "disable-aslr", 'A',
-     OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeBoolean,
+     OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeBoolean,
      "Set whether to disable address space layout randomization when launching "
      "a process."},
     {LLDB_OPT_SET_ALL, false, "plugin", 'p', OptionParser::eRequiredArgument,
-     nullptr, {}, 0, eArgTypePlugin,
+     nullptr, nullptr, 0, eArgTypePlugin,
      "Name of the process plugin you want to use."},
     {LLDB_OPT_SET_ALL, false, "working-dir", 'w',
-     OptionParser::eRequiredArgument, nullptr, {}, 0,
+     OptionParser::eRequiredArgument, nullptr, nullptr, 0,
      eArgTypeDirectoryName,
      "Set the current working directory to <path> when running the inferior."},
     {LLDB_OPT_SET_ALL, false, "arch", 'a', OptionParser::eRequiredArgument,
-     nullptr, {}, 0, eArgTypeArchitecture,
+     nullptr, nullptr, 0, eArgTypeArchitecture,
      "Set the architecture for the process to launch when ambiguous."},
     {LLDB_OPT_SET_ALL, false, "environment", 'v',
-     OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeNone,
+     OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeNone,
      "Specify an environment variable name/value string (--environment "
      "NAME=VALUE). Can be specified multiple times for subsequent environment "
      "entries."},
     {LLDB_OPT_SET_1 | LLDB_OPT_SET_2 | LLDB_OPT_SET_3, false, "shell", 'c',
-     OptionParser::eOptionalArgument, nullptr, {}, 0, eArgTypeFilename,
+     OptionParser::eOptionalArgument, nullptr, nullptr, 0, eArgTypeFilename,
      "Run the process in a shell (not supported on all platforms)."},
 
     {LLDB_OPT_SET_1, false, "stdin", 'i', OptionParser::eRequiredArgument,
-     nullptr, {}, 0, eArgTypeFilename,
+     nullptr, nullptr, 0, eArgTypeFilename,
      "Redirect stdin for the process to <filename>."},
     {LLDB_OPT_SET_1, false, "stdout", 'o', OptionParser::eRequiredArgument,
-     nullptr, {}, 0, eArgTypeFilename,
+     nullptr, nullptr, 0, eArgTypeFilename,
      "Redirect stdout for the process to <filename>."},
     {LLDB_OPT_SET_1, false, "stderr", 'e', OptionParser::eRequiredArgument,
-     nullptr, {}, 0, eArgTypeFilename,
+     nullptr, nullptr, 0, eArgTypeFilename,
      "Redirect stderr for the process to <filename>."},
 
     {LLDB_OPT_SET_2, false, "tty", 't', OptionParser::eNoArgument, nullptr,
-     {}, 0, eArgTypeNone,
+     nullptr, 0, eArgTypeNone,
      "Start the process in a terminal (not supported on all platforms)."},
 
     {LLDB_OPT_SET_3, false, "no-stdio", 'n', OptionParser::eNoArgument, nullptr,
-     {}, 0, eArgTypeNone,
+     nullptr, 0, eArgTypeNone,
      "Do not set up for terminal I/O to go to running process."},
     {LLDB_OPT_SET_4, false, "shell-expand-args", 'X',
-     OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeBoolean,
+     OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeBoolean,
      "Set whether to shell expand arguments to the process when launching."},
 };
 
@@ -1724,10 +1729,6 @@ void Process::SetRunningUserExpression(bool on) {
   m_mod_id.SetRunningUserExpression(on);
 }
 
-void Process::SetRunningUtilityFunction(bool on) {
-  m_mod_id.SetRunningUtilityFunction(on);
-}
-
 addr_t Process::GetImageInfoAddress() { return LLDB_INVALID_ADDRESS; }
 
 const lldb::ABISP &Process::GetABI() {
@@ -1920,7 +1921,7 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
           owner->SetBreakpointSite(bp_site_sp);
           return m_breakpoint_site_list.Add(bp_site_sp);
         } else {
-          if (show_error || use_hardware) {
+          if (show_error) {
             // Report error for setting breakpoint...
             GetTarget().GetDebugger().GetErrorFile()->Printf(
                 "warning: failed to set breakpoint site at 0x%" PRIx64
@@ -2730,7 +2731,7 @@ Status Process::Launch(ProcessLaunchInfo &launch_info) {
                                       sizeof(local_exec_file_path));
     exe_module->GetPlatformFileSpec().GetPath(platform_exec_file_path,
                                               sizeof(platform_exec_file_path));
-    if (FileSystem::Instance().Exists(exe_module->GetFileSpec())) {
+    if (exe_module->GetFileSpec().Exists()) {
       // Install anything that might need to be installed prior to launching.
       // For host systems, this will do nothing, but if we are connected to a
       // remote platform it will install any needed binaries
@@ -3210,8 +3211,7 @@ void Process::CompleteAttach() {
     }
   }
   if (new_executable_module_sp) {
-    GetTarget().SetExecutableModule(new_executable_module_sp,
-                                    eLoadDependentsNo);
+    GetTarget().SetExecutableModule(new_executable_module_sp, false);
     if (log) {
       ModuleSP exe_module_sp = GetTarget().GetExecutableModule();
       log->Printf(
@@ -3291,11 +3291,6 @@ Status Process::PrivateResume() {
           m_thread_list.DidResume();
           if (log)
             log->Printf("Process thinks the process has resumed.");
-        } else {
-          if (log)
-            log->Printf(
-                "Process::PrivateResume() DoResume failed.");
-          return error;
         }
       }
     } else {
@@ -4690,12 +4685,7 @@ bool Process::PushProcessIOHandler() {
       log->Printf("Process::%s pushing IO handler", __FUNCTION__);
 
     io_handler_sp->SetIsDone(false);
-    // If we evaluate an utility function, then we don't cancel the current
-    // IOHandler. Our IOHandler is non-interactive and shouldn't disturb the
-    // existing IOHandler that potentially provides the user interface (e.g.
-    // the IOHandler for Editline).
-    bool cancel_top_handler = !m_mod_id.IsRunningUtilityFunction();
-    GetTarget().GetDebugger().PushIOHandler(io_handler_sp, cancel_top_handler);
+    GetTarget().GetDebugger().PushIOHandler(io_handler_sp);
     return true;
   }
   return false;
@@ -4884,11 +4874,6 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
 
   thread_plan_sp->SetIsMasterPlan(true);
   thread_plan_sp->SetOkayToDiscard(false);
-
-  // If we are running some utility expression for LLDB, we now have to mark
-  // this in the ProcesModID of this process. This RAII takes care of marking
-  // and reverting the mark it once we are done running the expression.
-  UtilityFunctionScope util_scope(options.IsForUtilityExpr() ? this : nullptr);
 
   if (m_private_state.GetValue() != eStateStopped) {
     diagnostic_manager.PutString(
@@ -5857,7 +5842,7 @@ void Process::ModulesDidLoad(ModuleList &module_list) {
   // that loaded.
 
   // Iterate over a copy of this language runtime list in case the language
-  // runtime ModulesDidLoad somehow causes the language runtime to be
+  // runtime ModulesDidLoad somehow causes the language riuntime to be
   // unloaded.
   LanguageRuntimeCollection language_runtimes(m_language_runtimes);
   for (const auto &pair : language_runtimes) {
@@ -6035,7 +6020,7 @@ Process::AdvanceAddressToNextBranchInstruction(Address default_stop_addr,
 }
 
 Status
-Process::GetMemoryRegions(lldb_private::MemoryRegionInfos &region_list) {
+Process::GetMemoryRegions(std::vector<lldb::MemoryRegionInfoSP> &region_list) {
 
   Status error;
 
@@ -6043,17 +6028,17 @@ Process::GetMemoryRegions(lldb_private::MemoryRegionInfos &region_list) {
 
   region_list.clear();
   do {
-    lldb_private::MemoryRegionInfo region_info;
-    error = GetMemoryRegionInfo(range_end, region_info);
+    lldb::MemoryRegionInfoSP region_info(new lldb_private::MemoryRegionInfo());
+    error = GetMemoryRegionInfo(range_end, *region_info);
     // GetMemoryRegionInfo should only return an error if it is unimplemented.
     if (error.Fail()) {
       region_list.clear();
       break;
     }
 
-    range_end = region_info.GetRange().GetRangeEnd();
-    if (region_info.GetMapped() == MemoryRegionInfo::eYes) {
-      region_list.push_back(std::move(region_info));
+    range_end = region_info->GetRange().GetRangeEnd();
+    if (region_info->GetMapped() == MemoryRegionInfo::eYes) {
+      region_list.push_back(region_info);
     }
   } while (range_end != LLDB_INVALID_ADDRESS);
 
@@ -6110,7 +6095,7 @@ void Process::MapSupportedStructuredDataPlugins(
   // For each StructuredDataPlugin, if the plugin handles any of the types in
   // the supported_type_names, map that type name to that plugin. Stop when
   // we've consumed all the type names.
-  // FIXME: should we return an error if there are type names nobody
+  // FIXME: should we return an error if there are type names nobody 
   // supports?
   for (uint32_t plugin_index = 0; !const_type_names.empty(); plugin_index++) {
     auto create_instance =
@@ -6118,7 +6103,7 @@ void Process::MapSupportedStructuredDataPlugins(
                plugin_index);
     if (!create_instance)
       break;
-
+      
     // Create the plugin.
     StructuredDataPluginSP plugin_sp = (*create_instance)(*this);
     if (!plugin_sp) {

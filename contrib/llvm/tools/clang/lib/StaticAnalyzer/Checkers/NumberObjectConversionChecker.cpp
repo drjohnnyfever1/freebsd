@@ -26,7 +26,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
@@ -77,7 +77,7 @@ void Callback::run(const MatchFinder::MatchResult &Result) {
     // to zero literals in non-pedantic mode.
     // FIXME: Introduce an AST matcher to implement the macro-related logic?
     bool MacroIndicatesWeShouldSkipTheCheck = false;
-    SourceLocation Loc = CheckIfNull->getBeginLoc();
+    SourceLocation Loc = CheckIfNull->getLocStart();
     if (Loc.isMacroID()) {
       StringRef MacroName = Lexer::getImmediateMacroName(
           Loc, ACtx.getSourceManager(), ACtx.getLangOpts());
@@ -87,10 +87,9 @@ void Callback::run(const MatchFinder::MatchResult &Result) {
         MacroIndicatesWeShouldSkipTheCheck = true;
     }
     if (!MacroIndicatesWeShouldSkipTheCheck) {
-      Expr::EvalResult EVResult;
+      llvm::APSInt Result;
       if (CheckIfNull->IgnoreParenCasts()->EvaluateAsInt(
-              EVResult, ACtx, Expr::SE_AllowSideEffects)) {
-        llvm::APSInt Result = EVResult.Val.getInt();
+              Result, ACtx, Expr::SE_AllowSideEffects)) {
         if (Result == 0) {
           if (!C->Pedantic)
             return;
@@ -347,5 +346,5 @@ void ento::registerNumberObjectConversionChecker(CheckerManager &Mgr) {
   NumberObjectConversionChecker *Chk =
       Mgr.registerChecker<NumberObjectConversionChecker>();
   Chk->Pedantic =
-      Mgr.getAnalyzerOptions().getCheckerBooleanOption("Pedantic", false, Chk);
+      Mgr.getAnalyzerOptions().getBooleanOption("Pedantic", false, Chk);
 }

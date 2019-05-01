@@ -26,6 +26,7 @@ class ModulePass;
 class Pass;
 class GetElementPtrInst;
 class PassInfo;
+class TerminatorInst;
 class TargetLowering;
 class TargetMachine;
 
@@ -183,12 +184,11 @@ Pass *createLoopInstSimplifyPass();
 //
 // LoopUnroll - This pass is a simple loop unrolling pass.
 //
-Pass *createLoopUnrollPass(int OptLevel = 2, bool OnlyWhenForced = false,
-                           int Threshold = -1, int Count = -1,
+Pass *createLoopUnrollPass(int OptLevel = 2, int Threshold = -1, int Count = -1,
                            int AllowPartial = -1, int Runtime = -1,
                            int UpperBound = -1, int AllowPeeling = -1);
 // Create an unrolling pass for full unrolling that uses exact trip count only.
-Pass *createSimpleLoopUnrollPass(int OptLevel = 2, bool OnlyWhenForced = false);
+Pass *createSimpleLoopUnrollPass(int OptLevel = 2);
 
 //===----------------------------------------------------------------------===//
 //
@@ -394,6 +394,12 @@ FunctionPass *createPartiallyInlineLibCallsPass();
 
 //===----------------------------------------------------------------------===//
 //
+// ScalarizerPass - Converts vector operations into scalar operations
+//
+FunctionPass *createScalarizerPass();
+
+//===----------------------------------------------------------------------===//
+//
 // SeparateConstOffsetFromGEP - Split GEPs for better CSE
 //
 FunctionPass *createSeparateConstOffsetFromGEPPass(bool LowerGEP = false);
@@ -471,7 +477,6 @@ FunctionPass *createLoopDataPrefetchPass();
 
 ///===---------------------------------------------------------------------===//
 ModulePass *createNameAnonGlobalPass();
-ModulePass *createCanonicalizeAliasesPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -486,13 +491,6 @@ FunctionPass *createLibCallsShrinkWrapPass();
 // primarily to help other loop passes.
 //
 Pass *createLoopSimplifyCFGPass();
-
-//===----------------------------------------------------------------------===//
-//
-// WarnMissedTransformations - This pass emits warnings for leftover forced
-// transformations.
-//
-Pass *createWarnMissedTransformationsPass();
 } // End llvm namespace
 
 #endif

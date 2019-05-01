@@ -13,7 +13,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
-#include "llvm/DebugInfo/DWARF/DWARFObject.h"
 #include <cstdint>
 #include <vector>
 
@@ -68,8 +67,7 @@ private:
   bool GnuStyle;
 
 public:
-  DWARFDebugPubTable(const DWARFObject &Obj, const DWARFSection &Sec,
-                     bool LittleEndian, bool GnuStyle);
+  DWARFDebugPubTable(StringRef Data, bool LittleEndian, bool GnuStyle);
 
   void dump(raw_ostream &OS) const;
 

@@ -280,10 +280,9 @@ protected:
   friend class MemorySSAUpdater;
 
   MemoryUseOrDef(LLVMContext &C, MemoryAccess *DMA, unsigned Vty,
-                 DeleteValueTy DeleteValue, Instruction *MI, BasicBlock *BB,
-                 unsigned NumOperands)
-      : MemoryAccess(C, Vty, DeleteValue, BB, NumOperands),
-        MemoryInstruction(MI), OptimizedAccessAlias(MayAlias) {
+                 DeleteValueTy DeleteValue, Instruction *MI, BasicBlock *BB)
+      : MemoryAccess(C, Vty, DeleteValue, BB, 1), MemoryInstruction(MI),
+        OptimizedAccessAlias(MayAlias) {
     setDefiningAccess(DMA);
   }
 
@@ -309,6 +308,11 @@ private:
   Optional<AliasResult> OptimizedAccessAlias;
 };
 
+template <>
+struct OperandTraits<MemoryUseOrDef>
+    : public FixedNumOperandTraits<MemoryUseOrDef, 1> {};
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(MemoryUseOrDef, MemoryAccess)
+
 /// Represents read-only accesses to memory
 ///
 /// In particular, the set of Instructions that will be represented by
@@ -319,8 +323,7 @@ public:
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(MemoryAccess);
 
   MemoryUse(LLVMContext &C, MemoryAccess *DMA, Instruction *MI, BasicBlock *BB)
-      : MemoryUseOrDef(C, DMA, MemoryUseVal, deleteMe, MI, BB,
-                       /*NumOperands=*/1) {}
+      : MemoryUseOrDef(C, DMA, MemoryUseVal, deleteMe, MI, BB) {}
 
   // allocate space for exactly one operand
   void *operator new(size_t s) { return User::operator new(s, 1); }
@@ -378,33 +381,31 @@ public:
 
   MemoryDef(LLVMContext &C, MemoryAccess *DMA, Instruction *MI, BasicBlock *BB,
             unsigned Ver)
-      : MemoryUseOrDef(C, DMA, MemoryDefVal, deleteMe, MI, BB,
-                       /*NumOperands=*/2),
-        ID(Ver) {}
+      : MemoryUseOrDef(C, DMA, MemoryDefVal, deleteMe, MI, BB), ID(Ver) {}
 
-  // allocate space for exactly two operands
-  void *operator new(size_t s) { return User::operator new(s, 2); }
+  // allocate space for exactly one operand
+  void *operator new(size_t s) { return User::operator new(s, 1); }
 
   static bool classof(const Value *MA) {
     return MA->getValueID() == MemoryDefVal;
   }
 
   void setOptimized(MemoryAccess *MA) {
-    setOperand(1, MA);
-    OptimizedID = MA->getID();
+    Optimized = MA;
+    OptimizedID = getDefiningAccess()->getID();
   }
 
   MemoryAccess *getOptimized() const {
-    return cast_or_null<MemoryAccess>(getOperand(1));
+    return cast_or_null<MemoryAccess>(Optimized);
   }
 
   bool isOptimized() const {
-    return getOptimized() && OptimizedID == getOptimized()->getID();
+    return getOptimized() && getDefiningAccess() &&
+           OptimizedID == getDefiningAccess()->getID();
   }
 
   void resetOptimized() {
     OptimizedID = INVALID_MEMORYACCESS_ID;
-    setOperand(1, nullptr);
   }
 
   void print(raw_ostream &OS) const;
@@ -416,33 +417,12 @@ private:
 
   const unsigned ID;
   unsigned OptimizedID = INVALID_MEMORYACCESS_ID;
+  WeakVH Optimized;
 };
 
 template <>
-struct OperandTraits<MemoryDef> : public FixedNumOperandTraits<MemoryDef, 2> {};
+struct OperandTraits<MemoryDef> : public FixedNumOperandTraits<MemoryDef, 1> {};
 DEFINE_TRANSPARENT_OPERAND_ACCESSORS(MemoryDef, MemoryAccess)
-
-template <>
-struct OperandTraits<MemoryUseOrDef> {
-  static Use *op_begin(MemoryUseOrDef *MUD) {
-    if (auto *MU = dyn_cast<MemoryUse>(MUD))
-      return OperandTraits<MemoryUse>::op_begin(MU);
-    return OperandTraits<MemoryDef>::op_begin(cast<MemoryDef>(MUD));
-  }
-
-  static Use *op_end(MemoryUseOrDef *MUD) {
-    if (auto *MU = dyn_cast<MemoryUse>(MUD))
-      return OperandTraits<MemoryUse>::op_end(MU);
-    return OperandTraits<MemoryDef>::op_end(cast<MemoryDef>(MUD));
-  }
-
-  static unsigned operands(const MemoryUseOrDef *MUD) {
-    if (const auto *MU = dyn_cast<MemoryUse>(MUD))
-      return OperandTraits<MemoryUse>::operands(MU);
-    return OperandTraits<MemoryDef>::operands(cast<MemoryDef>(MUD));
-  }
-};
-DEFINE_TRANSPARENT_OPERAND_ACCESSORS(MemoryUseOrDef, MemoryAccess)
 
 /// Represents phi nodes for memory accesses.
 ///
@@ -704,19 +684,13 @@ public:
   ~MemorySSA();
 
   MemorySSAWalker *getWalker();
-  MemorySSAWalker *getSkipSelfWalker();
 
   /// Given a memory Mod/Ref'ing instruction, get the MemorySSA
   /// access associated with it. If passed a basic block gets the memory phi
   /// node that exists for that block, if there is one. Otherwise, this will get
   /// a MemoryUseOrDef.
-  MemoryUseOrDef *getMemoryAccess(const Instruction *I) const {
-    return cast_or_null<MemoryUseOrDef>(ValueToMemoryAccess.lookup(I));
-  }
-
-  MemoryPhi *getMemoryAccess(const BasicBlock *BB) const {
-    return cast_or_null<MemoryPhi>(ValueToMemoryAccess.lookup(cast<Value>(BB)));
-  }
+  MemoryUseOrDef *getMemoryAccess(const Instruction *) const;
+  MemoryPhi *getMemoryAccess(const BasicBlock *BB) const;
 
   void dump() const;
   void print(raw_ostream &) const;
@@ -776,9 +750,6 @@ public:
   /// all uses, uses appear in the right places).  This is used by unit tests.
   void verifyMemorySSA() const;
 
-  /// Check clobber sanity for an access.
-  void checkClobberSanityAccess(const MemoryAccess *MA) const;
-
   /// Used in various insertion functions to specify whether we are talking
   /// about the beginning or end of a block.
   enum InsertionPlace { Beginning, End };
@@ -793,7 +764,6 @@ protected:
   void verifyDomination(Function &F) const;
   void verifyOrdering(Function &F) const;
   void verifyDominationNumbers(const Function &F) const;
-  void verifyClobberSanity(const Function &F) const;
 
   // This is used by the use optimizer and updater.
   AccessList *getWritableBlockAccesses(const BasicBlock *BB) const {
@@ -826,20 +796,16 @@ protected:
                                InsertionPlace);
   void insertIntoListsBefore(MemoryAccess *, const BasicBlock *,
                              AccessList::iterator);
-  MemoryUseOrDef *createDefinedAccess(Instruction *, MemoryAccess *,
-                                      const MemoryUseOrDef *Template = nullptr);
+  MemoryUseOrDef *createDefinedAccess(Instruction *, MemoryAccess *);
 
 private:
-  class ClobberWalkerBase;
   class CachingWalker;
-  class SkipSelfWalker;
   class OptimizeUses;
 
   CachingWalker *getWalkerImpl();
   void buildMemorySSA();
   void optimizeUses();
 
-  void prepareForMoveTo(MemoryAccess *, BasicBlock *);
   void verifyUseInDefs(MemoryAccess *, MemoryAccess *) const;
 
   using AccessMap = DenseMap<const BasicBlock *, std::unique_ptr<AccessList>>;
@@ -850,8 +816,7 @@ private:
   void markUnreachableAsLiveOnEntry(BasicBlock *BB);
   bool dominatesUse(const MemoryAccess *, const MemoryAccess *) const;
   MemoryPhi *createMemoryPhi(BasicBlock *BB);
-  MemoryUseOrDef *createNewAccess(Instruction *,
-                                  const MemoryUseOrDef *Template = nullptr);
+  MemoryUseOrDef *createNewAccess(Instruction *);
   MemoryAccess *findDominatingDef(BasicBlock *, enum InsertionPlace);
   void placePHINodes(const SmallPtrSetImpl<BasicBlock *> &);
   MemoryAccess *renameBlock(BasicBlock *, MemoryAccess *, bool);
@@ -886,9 +851,7 @@ private:
   mutable DenseMap<const MemoryAccess *, unsigned long> BlockNumbering;
 
   // Memory SSA building info
-  std::unique_ptr<ClobberWalkerBase> WalkerBase;
   std::unique_ptr<CachingWalker> Walker;
-  std::unique_ptr<SkipSelfWalker> SkipWalker;
   unsigned NextID;
 };
 

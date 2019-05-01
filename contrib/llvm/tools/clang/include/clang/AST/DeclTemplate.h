@@ -751,7 +751,6 @@ class RedeclarableTemplateDecl : public TemplateDecl,
     return getMostRecentDecl();
   }
 
-  void anchor() override;
 protected:
   template <typename EntryType> struct SpecEntryTraits {
     using DeclType = EntryType;
@@ -1093,9 +1092,6 @@ public:
   /// we need to perform substitutions inside the definition of a function
   /// template.
   ArrayRef<TemplateArgument> getInjectedTemplateArgs();
-
-  /// Merge \p Prev with our RedeclarableTemplateDecl::Common.
-  void mergePrevDecl(FunctionTemplateDecl *Prev);
 
   /// Create a function template node.
   static FunctionTemplateDecl *Create(ASTContext &C, DeclContext *DC,

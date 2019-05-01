@@ -52,6 +52,10 @@ using namespace llvm;
 
 #define DEBUG_TYPE "x86-avoid-SFB"
 
+namespace llvm {
+void initializeX86AvoidSFBPassPass(PassRegistry &);
+} // end namespace llvm
+
 static cl::opt<bool> DisableX86AvoidStoreForwardBlocks(
     "x86-disable-avoid-SFB", cl::Hidden,
     cl::desc("X86: Disable Store Forwarding Blocks fixup."), cl::init(false));
@@ -586,7 +590,7 @@ void X86AvoidSFBPass::breakBlockedCopies(
       StDisp2 += OverlapDelta;
       Size2 -= OverlapDelta;
     }
-    Size1 = LdDisp2 - LdDisp1;
+    Size1 = std::abs(std::abs(LdDisp2) - std::abs(LdDisp1));
 
     // Build a copy for the point until the current blocking store's
     // displacement.
@@ -641,22 +645,21 @@ removeRedundantBlockingStores(DisplacementSizeMap &BlockingStoresDispSizeMap) {
   if (BlockingStoresDispSizeMap.size() <= 1)
     return;
 
-  SmallVector<std::pair<int64_t, unsigned>, 0> DispSizeStack;
-  for (auto DispSizePair : BlockingStoresDispSizeMap) {
-    int64_t CurrDisp = DispSizePair.first;
-    unsigned CurrSize = DispSizePair.second;
-    while (DispSizeStack.size()) {
-      int64_t PrevDisp = DispSizeStack.back().first;
-      unsigned PrevSize = DispSizeStack.back().second;
-      if (CurrDisp + CurrSize > PrevDisp + PrevSize)
-        break;
-      DispSizeStack.pop_back();
+  int64_t PrevDisp = BlockingStoresDispSizeMap.begin()->first;
+  unsigned PrevSize = BlockingStoresDispSizeMap.begin()->second;
+  SmallVector<int64_t, 2> ForRemoval;
+  for (auto DispSizePair = std::next(BlockingStoresDispSizeMap.begin());
+       DispSizePair != BlockingStoresDispSizeMap.end(); ++DispSizePair) {
+    int64_t CurrDisp = DispSizePair->first;
+    unsigned CurrSize = DispSizePair->second;
+    if (CurrDisp + CurrSize <= PrevDisp + PrevSize) {
+      ForRemoval.push_back(PrevDisp);
     }
-    DispSizeStack.push_back(DispSizePair);
+    PrevDisp = CurrDisp;
+    PrevSize = CurrSize;
   }
-  BlockingStoresDispSizeMap.clear();
-  for (auto Disp : DispSizeStack)
-    BlockingStoresDispSizeMap.insert(Disp);
+  for (auto Disp : ForRemoval)
+    BlockingStoresDispSizeMap.erase(Disp);
 }
 
 bool X86AvoidSFBPass::runOnMachineFunction(MachineFunction &MF) {

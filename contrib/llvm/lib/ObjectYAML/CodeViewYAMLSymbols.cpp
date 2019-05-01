@@ -108,7 +108,7 @@ void ScalarBitSetTraits<ExportFlags>::bitset(IO &io, ExportFlags &Flags) {
 }
 
 void ScalarBitSetTraits<PublicSymFlags>::bitset(IO &io, PublicSymFlags &Flags) {
-  auto FlagNames = getPublicSymFlagNames();
+  auto FlagNames = getProcSymFlagNames();
   for (const auto &E : FlagNames) {
     io.bitSetCase(Flags, E.Name.str().c_str(),
                   static_cast<PublicSymFlags>(E.Value));

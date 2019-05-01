@@ -9,6 +9,10 @@
 
 #include "lldb/DataFormatters/ValueObjectPrinter.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -129,13 +133,13 @@ bool ValueObjectPrinter::GetMostSpecializedValue() {
     }
 
     if (m_valobj->IsSynthetic()) {
-      if (!m_options.m_use_synthetic) {
+      if (m_options.m_use_synthetic == false) {
         ValueObject *non_synthetic = m_valobj->GetNonSyntheticValue().get();
         if (non_synthetic)
           m_valobj = non_synthetic;
       }
     } else {
-      if (m_options.m_use_synthetic) {
+      if (m_options.m_use_synthetic == true) {
         ValueObject *synthetic = m_valobj->GetSyntheticValue().get();
         if (synthetic)
           m_valobj = synthetic;
@@ -166,7 +170,7 @@ const char *ValueObjectPrinter::GetRootNameForDisplay(const char *if_fail) {
 bool ValueObjectPrinter::ShouldPrintValueObject() {
   if (m_should_print == eLazyBoolCalculate)
     m_should_print =
-        (!m_options.m_flat_output || m_type_flags.Test(eTypeHasValue))
+        (m_options.m_flat_output == false || m_type_flags.Test(eTypeHasValue))
             ? eLazyBoolYes
             : eLazyBoolNo;
   return m_should_print == eLazyBoolYes;
@@ -326,7 +330,7 @@ bool ValueObjectPrinter::CheckScopeIfNeeded() {
 }
 
 TypeSummaryImpl *ValueObjectPrinter::GetSummaryFormatter(bool null_if_omitted) {
-  if (!m_summary_formatter.second) {
+  if (m_summary_formatter.second == false) {
     TypeSummaryImpl *entry = m_options.m_summary_sp
                                  ? m_options.m_summary_sp.get()
                                  : m_valobj->GetSummaryFormat().get();
@@ -458,7 +462,7 @@ bool ValueObjectPrinter::PrintObjectDescriptionIfNeeded(bool value_printed,
         else
             m_stream->Printf("%s\n", object_desc);        
         return true;
-      } else if (!value_printed && !summary_printed)
+      } else if (value_printed == false && summary_printed == false)
         return true;
       else
         return false;
@@ -625,7 +629,7 @@ bool ValueObjectPrinter::ShouldPrintEmptyBrackets(bool value_printed,
   if (!IsAggregate())
     return false;
 
-  if (!m_options.m_reveal_empty_aggregates) {
+  if (m_options.m_reveal_empty_aggregates == false) {
     if (value_printed || summary_printed)
       return false;
   }

@@ -10,6 +10,10 @@
 #ifndef liblldb_BreakpointResolver_h_
 #define liblldb_BreakpointResolver_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Core/Address.h"
 #include "lldb/Core/SearchFilter.h"
@@ -154,7 +158,6 @@ public:
     AddressResolver,      // This is an instance of BreakpointResolverAddress
     NameResolver,         // This is an instance of BreakpointResolverName
     FileRegexResolver,
-    PythonResolver,
     ExceptionResolver,
     LastKnownResolverType = ExceptionResolver,
     UnknownResolver
@@ -197,23 +200,17 @@ protected:
     Inlines,
     LanguageName,
     LineNumber,
-    Column,
     ModuleName,
     NameMaskArray,
     Offset,
-    PythonClassName,
     RegexString,
-    ScriptArgs,
     SectionName,
-    SearchDepth,
     SkipPrologue,
     SymbolNameArray,
     LastOptionName
   };
   static const char
       *g_option_names[static_cast<uint32_t>(OptionNames::LastOptionName)];
-  
-  virtual void NotifyBreakpointSet() {};
 
 public:
   static const char *GetKey(OptionNames enum_value) {
@@ -227,11 +224,8 @@ protected:
   /// number that matches, and then filter down the matching addresses to
   /// unique entries, and skip the prologue if asked to do so, and then set
   /// breakpoint locations in this breakpoint for all the resultant addresses.
-  /// When \p column is nonzero the \p line and \p column args are used to
-  /// filter the results to find the first breakpoint >= (line, column).
   void SetSCMatchesByLine(SearchFilter &filter, SymbolContextList &sc_list,
-                          bool skip_prologue, llvm::StringRef log_ident,
-                          uint32_t line = 0, uint32_t column = 0);
+                          bool skip_prologue, llvm::StringRef log_ident);
   void SetSCMatchesByLine(SearchFilter &, SymbolContextList &, bool,
                           const char *) = delete;
 
@@ -243,10 +237,6 @@ protected:
                             // breakpoints we set.
 
 private:
-  /// Helper for \p SetSCMatchesByLine.
-  void AddLocation(SearchFilter &filter, const SymbolContext &sc,
-                   bool skip_prologue, llvm::StringRef log_ident);
-
   // Subclass identifier (for llvm isa/dyn_cast)
   const unsigned char SubclassID;
   DISALLOW_COPY_AND_ASSIGN(BreakpointResolver);

@@ -297,26 +297,20 @@ FunctionType::FunctionType(Type *Result, ArrayRef<Type*> Params,
 FunctionType *FunctionType::get(Type *ReturnType,
                                 ArrayRef<Type*> Params, bool isVarArg) {
   LLVMContextImpl *pImpl = ReturnType->getContext().pImpl;
-  const FunctionTypeKeyInfo::KeyTy Key(ReturnType, Params, isVarArg);
+  FunctionTypeKeyInfo::KeyTy Key(ReturnType, Params, isVarArg);
+  auto I = pImpl->FunctionTypes.find_as(Key);
   FunctionType *FT;
-  // Since we only want to allocate a fresh function type in case none is found
-  // and we don't want to perform two lookups (one for checking if existent and
-  // one for inserting the newly allocated one), here we instead lookup based on
-  // Key and update the reference to the function type in-place to a newly
-  // allocated one if not found.
-  auto Insertion = pImpl->FunctionTypes.insert_as(nullptr, Key);
-  if (Insertion.second) {
-    // The function type was not found. Allocate one and update FunctionTypes
-    // in-place.
+
+  if (I == pImpl->FunctionTypes.end()) {
     FT = (FunctionType *)pImpl->TypeAllocator.Allocate(
         sizeof(FunctionType) + sizeof(Type *) * (Params.size() + 1),
         alignof(FunctionType));
     new (FT) FunctionType(ReturnType, Params, isVarArg);
-    *Insertion.first = FT;
+    pImpl->FunctionTypes.insert(FT);
   } else {
-    // The function type was found. Just return it.
-    FT = *Insertion.first;
+    FT = *I;
   }
+
   return FT;
 }
 
@@ -342,25 +336,18 @@ bool FunctionType::isValidArgumentType(Type *ArgTy) {
 StructType *StructType::get(LLVMContext &Context, ArrayRef<Type*> ETypes,
                             bool isPacked) {
   LLVMContextImpl *pImpl = Context.pImpl;
-  const AnonStructTypeKeyInfo::KeyTy Key(ETypes, isPacked);
-
+  AnonStructTypeKeyInfo::KeyTy Key(ETypes, isPacked);
+  auto I = pImpl->AnonStructTypes.find_as(Key);
   StructType *ST;
-  // Since we only want to allocate a fresh struct type in case none is found
-  // and we don't want to perform two lookups (one for checking if existent and
-  // one for inserting the newly allocated one), here we instead lookup based on
-  // Key and update the reference to the struct type in-place to a newly
-  // allocated one if not found.
-  auto Insertion = pImpl->AnonStructTypes.insert_as(nullptr, Key);
-  if (Insertion.second) {
-    // The struct type was not found. Allocate one and update AnonStructTypes
-    // in-place.
+
+  if (I == pImpl->AnonStructTypes.end()) {
+    // Value not found.  Create a new type!
     ST = new (Context.pImpl->TypeAllocator) StructType(Context);
     ST->setSubclassData(SCDB_IsLiteral);  // Literal struct.
     ST->setBody(ETypes, isPacked);
-    *Insertion.first = ST;
+    Context.pImpl->AnonStructTypes.insert(ST);
   } else {
-    // The struct type was found. Just return it.
-    ST = *Insertion.first;
+    ST = *I;
   }
 
   return ST;

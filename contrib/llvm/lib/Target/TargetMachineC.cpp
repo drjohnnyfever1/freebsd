@@ -115,15 +115,6 @@ LLVMTargetMachineRef LLVMCreateTargetMachine(LLVMTargetRef T,
     case LLVMRelocDynamicNoPic:
       RM = Reloc::DynamicNoPIC;
       break;
-    case LLVMRelocROPI:
-      RM = Reloc::ROPI;
-      break;
-    case LLVMRelocRWPI:
-      RM = Reloc::RWPI;
-      break;
-    case LLVMRelocROPI_RWPI:
-      RM = Reloc::ROPI_RWPI;
-      break;
     default:
       break;
   }

@@ -45,8 +45,6 @@ public:
 
   StringRef getExecutorName() const override { return ExecutorName; }
 
-  bool isSingleProcess() const override { return true; }
-
   using ToolExecutor::execute;
 
   llvm::Error
@@ -71,8 +69,6 @@ private:
   llvm::StringMap<std::string> OverlayFiles;
   unsigned ThreadCount;
 };
-
-extern llvm::cl::opt<std::string> Filter;
 
 } // end namespace tooling
 } // end namespace clang

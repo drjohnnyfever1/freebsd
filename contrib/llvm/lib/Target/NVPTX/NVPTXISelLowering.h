@@ -51,7 +51,6 @@ enum NodeType : unsigned {
   CallSeqBegin,
   CallSeqEnd,
   CallPrototype,
-  ProxyReg,
   FUN_SHFL_CLAMP,
   FUN_SHFR_CLAMP,
   MUL_WIDE_SIGNED,
@@ -512,7 +511,7 @@ public:
   }
 
   TargetLoweringBase::LegalizeTypeAction
-  getPreferredVectorAction(MVT VT) const override;
+  getPreferredVectorAction(EVT VT) const override;
 
   // Get the degree of precision we want from 32-bit floating point division
   // operations.

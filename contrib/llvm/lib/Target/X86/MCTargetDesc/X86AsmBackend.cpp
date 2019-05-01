@@ -540,6 +540,7 @@ protected:
     unsigned InstrOffset = 0;
     unsigned StackAdjust = 0;
     unsigned StackSize = 0;
+    unsigned PrevStackSize = 0;
     unsigned NumDefCFAOffsets = 0;
 
     for (unsigned i = 0, e = Instrs.size(); i != e; ++i) {
@@ -587,6 +588,7 @@ protected:
         //  L0:
         //     .cfi_def_cfa_offset 80
         //
+        PrevStackSize = StackSize;
         StackSize = std::abs(Inst.getOffset()) / StackDivide;
         ++NumDefCFAOffsets;
         break;
@@ -633,6 +635,16 @@ protected:
       CompactUnwindEncoding |= (StackAdjust & 0xFF) << 16;
       CompactUnwindEncoding |= RegEnc & CU::UNWIND_BP_FRAME_REGISTERS;
     } else {
+      // If the amount of the stack allocation is the size of a register, then
+      // we "push" the RAX/EAX register onto the stack instead of adjusting the
+      // stack pointer with a SUB instruction. We don't support the push of the
+      // RAX/EAX register with compact unwind. So we check for that situation
+      // here.
+      if ((NumDefCFAOffsets == SavedRegIdx + 1 &&
+           StackSize - PrevStackSize == 1) ||
+          (Instrs.size() == 1 && NumDefCFAOffsets == 1 && StackSize == 2))
+        return CU::UNWIND_MODE_DWARF;
+
       SubtractInstrIdx += InstrOffset;
       ++StackAdjust;
 

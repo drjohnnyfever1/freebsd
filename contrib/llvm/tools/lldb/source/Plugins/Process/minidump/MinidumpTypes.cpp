@@ -7,8 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Project includes
 #include "MinidumpTypes.h"
 
+// Other libraries and framework includes
 // C includes
 // C++ includes
 
@@ -242,8 +244,6 @@ MinidumpMemoryInfo::ParseMemoryInfoList(llvm::ArrayRef<uint8_t> &data) {
     return {};
 
   std::vector<const MinidumpMemoryInfo *> result;
-  result.reserve(header->num_of_entries);
-
   for (uint64_t i = 0; i < header->num_of_entries; ++i) {
     result.push_back(reinterpret_cast<const MinidumpMemoryInfo *>(
         data.data() + i * header->size_of_entry));

@@ -137,17 +137,62 @@ public:
 /// the above methods are setMenu:, menu, replaceSubview:with:, and defaultMenu.
 ///
 class ObjCMethodDecl : public NamedDecl, public DeclContext {
-  // This class stores some data in DeclContext::ObjCMethodDeclBits
-  // to save some space. Use the provided accessors to access it.
-
 public:
   enum ImplementationControl { None, Required, Optional };
 
 private:
-  /// Return type of this method.
+  // The conventional meaning of this method; an ObjCMethodFamily.
+  // This is not serialized; instead, it is computed on demand and
+  // cached.
+  mutable unsigned Family : ObjCMethodFamilyBitWidth;
+
+  /// instance (true) or class (false) method.
+  unsigned IsInstance : 1;
+  unsigned IsVariadic : 1;
+
+  /// True if this method is the getter or setter for an explicit property.
+  unsigned IsPropertyAccessor : 1;
+
+  // Method has a definition.
+  unsigned IsDefined : 1;
+
+  /// Method redeclaration in the same interface.
+  unsigned IsRedeclaration : 1;
+
+  /// Is redeclared in the same interface.
+  mutable unsigned HasRedeclaration : 1;
+
+  // NOTE: VC++ treats enums as signed, avoid using ImplementationControl enum
+  /// \@required/\@optional
+  unsigned DeclImplementation : 2;
+
+  // NOTE: VC++ treats enums as signed, avoid using the ObjCDeclQualifier enum
+  /// in, inout, etc.
+  unsigned objcDeclQualifier : 7;
+
+  /// Indicates whether this method has a related result type.
+  unsigned RelatedResultType : 1;
+
+  /// Whether the locations of the selector identifiers are in a
+  /// "standard" position, a enum SelectorLocationsKind.
+  unsigned SelLocsKind : 2;
+
+  /// Whether this method overrides any other in the class hierarchy.
+  ///
+  /// A method is said to override any method in the class's
+  /// base classes, its protocols, or its categories' protocols, that has
+  /// the same selector and is of the same kind (class or instance).
+  /// A method in an implementation is not considered as overriding the same
+  /// method in the interface or its categories.
+  unsigned IsOverriding : 1;
+
+  /// Indicates if the method was a definition but its body was skipped.
+  unsigned HasSkippedBody : 1;
+
+  // Return type of this method.
   QualType MethodDeclType;
 
-  /// Type source information for the return type.
+  // Type source information for the return type.
   TypeSourceInfo *ReturnTInfo;
 
   /// Array of ParmVarDecls for the formal parameters of this method
@@ -158,7 +203,7 @@ private:
   /// List of attributes for this method declaration.
   SourceLocation DeclEndLoc; // the location of the ';' or '{'.
 
-  /// The following are only used for method definitions, null otherwise.
+  // The following are only used for method definitions, null otherwise.
   LazyDeclStmtPtr Body;
 
   /// SelfDecl - Decl for the implicit self parameter. This is lazily
@@ -175,14 +220,21 @@ private:
                  bool isVariadic = false, bool isPropertyAccessor = false,
                  bool isImplicitlyDeclared = false, bool isDefined = false,
                  ImplementationControl impControl = None,
-                 bool HasRelatedResultType = false);
-
-  SelectorLocationsKind getSelLocsKind() const {
-    return static_cast<SelectorLocationsKind>(ObjCMethodDeclBits.SelLocsKind);
+                 bool HasRelatedResultType = false)
+      : NamedDecl(ObjCMethod, contextDecl, beginLoc, SelInfo),
+        DeclContext(ObjCMethod), Family(InvalidObjCMethodFamily),
+        IsInstance(isInstance), IsVariadic(isVariadic),
+        IsPropertyAccessor(isPropertyAccessor), IsDefined(isDefined),
+        IsRedeclaration(0), HasRedeclaration(0), DeclImplementation(impControl),
+        objcDeclQualifier(OBJC_TQ_None),
+        RelatedResultType(HasRelatedResultType),
+        SelLocsKind(SelLoc_StandardNoSpace), IsOverriding(0), HasSkippedBody(0),
+        MethodDeclType(T), ReturnTInfo(ReturnTInfo), DeclEndLoc(endLoc) {
+    setImplicit(isImplicitlyDeclared);
   }
 
-  void setSelLocsKind(SelectorLocationsKind Kind) {
-    ObjCMethodDeclBits.SelLocsKind = Kind;
+  SelectorLocationsKind getSelLocsKind() const {
+    return (SelectorLocationsKind)SelLocsKind;
   }
 
   bool hasStandardSelLocs() const {
@@ -192,10 +244,10 @@ private:
   /// Get a pointer to the stored selector identifiers locations array.
   /// No locations will be stored if HasStandardSelLocs is true.
   SourceLocation *getStoredSelLocs() {
-    return reinterpret_cast<SourceLocation *>(getParams() + NumParams);
+    return reinterpret_cast<SourceLocation*>(getParams() + NumParams);
   }
   const SourceLocation *getStoredSelLocs() const {
-    return reinterpret_cast<const SourceLocation *>(getParams() + NumParams);
+    return reinterpret_cast<const SourceLocation*>(getParams() + NumParams);
   }
 
   /// Get a pointer to the stored selector identifiers locations array.
@@ -245,34 +297,20 @@ public:
   }
 
   ObjCDeclQualifier getObjCDeclQualifier() const {
-    return static_cast<ObjCDeclQualifier>(ObjCMethodDeclBits.objcDeclQualifier);
+    return ObjCDeclQualifier(objcDeclQualifier);
   }
-
-  void setObjCDeclQualifier(ObjCDeclQualifier QV) {
-    ObjCMethodDeclBits.objcDeclQualifier = QV;
-  }
+  void setObjCDeclQualifier(ObjCDeclQualifier QV) { objcDeclQualifier = QV; }
 
   /// Determine whether this method has a result type that is related
   /// to the message receiver's type.
-  bool hasRelatedResultType() const {
-    return ObjCMethodDeclBits.RelatedResultType;
-  }
+  bool hasRelatedResultType() const { return RelatedResultType; }
 
   /// Note whether this method has a related result type.
-  void setRelatedResultType(bool RRT = true) {
-    ObjCMethodDeclBits.RelatedResultType = RRT;
-  }
+  void SetRelatedResultType(bool RRT = true) { RelatedResultType = RRT; }
 
   /// True if this is a method redeclaration in the same interface.
-  bool isRedeclaration() const { return ObjCMethodDeclBits.IsRedeclaration; }
-  void setIsRedeclaration(bool RD) { ObjCMethodDeclBits.IsRedeclaration = RD; }
+  bool isRedeclaration() const { return IsRedeclaration; }
   void setAsRedeclaration(const ObjCMethodDecl *PrevMethod);
-
-  /// True if redeclared in the same interface.
-  bool hasRedeclaration() const { return ObjCMethodDeclBits.HasRedeclaration; }
-  void setHasRedeclaration(bool HRD) const {
-    ObjCMethodDeclBits.HasRedeclaration = HRD;
-  }
 
   /// Returns the location where the declarator ends. It will be
   /// the location of ';' for a method declaration and the location of '{'
@@ -280,15 +318,17 @@ public:
   SourceLocation getDeclaratorEndLoc() const { return DeclEndLoc; }
 
   // Location information, modeled after the Stmt API.
+  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const LLVM_READONLY { return getLocation(); }
+  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
   SourceLocation getEndLoc() const LLVM_READONLY;
   SourceRange getSourceRange() const override LLVM_READONLY {
-    return SourceRange(getLocation(), getEndLoc());
+    return SourceRange(getLocation(), getLocEnd());
   }
 
   SourceLocation getSelectorStartLoc() const {
     if (isImplicit())
-      return getBeginLoc();
+      return getLocStart();
     return getSelectorLoc(0);
   }
 
@@ -369,14 +409,6 @@ public:
                               NumParams);
   }
 
-  ParmVarDecl *getParamDecl(unsigned Idx) {
-    assert(Idx < NumParams && "Index out of bounds!");
-    return getParams()[Idx];
-  }
-  const ParmVarDecl *getParamDecl(unsigned Idx) const {
-    return const_cast<ObjCMethodDecl *>(this)->getParamDecl(Idx);
-  }
-
   /// Sets the method's parameters and selector source locations.
   /// If the method is implicit (not coming from source) \p SelLocs is
   /// ignored.
@@ -419,26 +451,18 @@ public:
   /// Determines the family of this method.
   ObjCMethodFamily getMethodFamily() const;
 
-  bool isInstanceMethod() const { return ObjCMethodDeclBits.IsInstance; }
-  void setInstanceMethod(bool isInst) {
-    ObjCMethodDeclBits.IsInstance = isInst;
-  }
+  bool isInstanceMethod() const { return IsInstance; }
+  void setInstanceMethod(bool isInst) { IsInstance = isInst; }
+  bool isVariadic() const { return IsVariadic; }
+  void setVariadic(bool isVar) { IsVariadic = isVar; }
 
-  bool isVariadic() const { return ObjCMethodDeclBits.IsVariadic; }
-  void setVariadic(bool isVar) { ObjCMethodDeclBits.IsVariadic = isVar; }
+  bool isClassMethod() const { return !IsInstance; }
 
-  bool isClassMethod() const { return !isInstanceMethod(); }
+  bool isPropertyAccessor() const { return IsPropertyAccessor; }
+  void setPropertyAccessor(bool isAccessor) { IsPropertyAccessor = isAccessor; }
 
-  bool isPropertyAccessor() const {
-    return ObjCMethodDeclBits.IsPropertyAccessor;
-  }
-
-  void setPropertyAccessor(bool isAccessor) {
-    ObjCMethodDeclBits.IsPropertyAccessor = isAccessor;
-  }
-
-  bool isDefined() const { return ObjCMethodDeclBits.IsDefined; }
-  void setDefined(bool isDefined) { ObjCMethodDeclBits.IsDefined = isDefined; }
+  bool isDefined() const { return IsDefined; }
+  void setDefined(bool isDefined) { IsDefined = isDefined; }
 
   /// Whether this method overrides any other in the class hierarchy.
   ///
@@ -447,8 +471,8 @@ public:
   /// the same selector and is of the same kind (class or instance).
   /// A method in an implementation is not considered as overriding the same
   /// method in the interface or its categories.
-  bool isOverriding() const { return ObjCMethodDeclBits.IsOverriding; }
-  void setOverriding(bool IsOver) { ObjCMethodDeclBits.IsOverriding = IsOver; }
+  bool isOverriding() const { return IsOverriding; }
+  void setOverriding(bool isOverriding) { IsOverriding = isOverriding; }
 
   /// Return overridden methods for the given \p Method.
   ///
@@ -462,10 +486,8 @@ public:
                      SmallVectorImpl<const ObjCMethodDecl *> &Overridden) const;
 
   /// True if the method was a definition but its body was skipped.
-  bool hasSkippedBody() const { return ObjCMethodDeclBits.HasSkippedBody; }
-  void setHasSkippedBody(bool Skipped = true) {
-    ObjCMethodDeclBits.HasSkippedBody = Skipped;
-  }
+  bool hasSkippedBody() const { return HasSkippedBody; }
+  void setHasSkippedBody(bool Skipped = true) { HasSkippedBody = Skipped; }
 
   /// Returns the property associated with this method's selector.
   ///
@@ -476,11 +498,11 @@ public:
 
   // Related to protocols declared in  \@protocol
   void setDeclImplementation(ImplementationControl ic) {
-    ObjCMethodDeclBits.DeclImplementation = ic;
+    DeclImplementation = ic;
   }
 
   ImplementationControl getImplementationControl() const {
-    return ImplementationControl(ObjCMethodDeclBits.DeclImplementation);
+    return ImplementationControl(DeclImplementation);
   }
 
   bool isOptional() const {
@@ -513,9 +535,6 @@ public:
 
   /// Returns whether this specific method is a definition.
   bool isThisDeclarationADefinition() const { return hasBody(); }
-
-  /// Is this method defined in the NSObject base class?
-  bool definedInNSObject(const ASTContext &) const;
 
   // Implement isa/cast/dyncast/etc.
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
@@ -967,8 +986,7 @@ public:
 /// ObjCProtocolDecl, and ObjCImplDecl.
 ///
 class ObjCContainerDecl : public NamedDecl, public DeclContext {
-  // This class stores some data in DeclContext::ObjCContainerDeclBits
-  // to save some space. Use the provided accessors to access it.
+  SourceLocation AtStart;
 
   // These two locations in the range mark the end of the method container.
   // The first points to the '@' token, and the second to the 'end' token.
@@ -977,8 +995,10 @@ class ObjCContainerDecl : public NamedDecl, public DeclContext {
   void anchor() override;
 
 public:
-  ObjCContainerDecl(Kind DK, DeclContext *DC, IdentifierInfo *Id,
-                    SourceLocation nameLoc, SourceLocation atStartLoc);
+  ObjCContainerDecl(Kind DK, DeclContext *DC,
+                    IdentifierInfo *Id, SourceLocation nameLoc,
+                    SourceLocation atStartLoc)
+      : NamedDecl(DK, DC, nameLoc, Id), DeclContext(DK), AtStart(atStartLoc) {}
 
   // Iterator access to instance/class properties.
   using prop_iterator = specific_decl_iterator<ObjCPropertyDecl>;
@@ -1112,19 +1132,20 @@ public:
   virtual void collectPropertiesToImplement(PropertyMap &PM,
                                             PropertyDeclOrder &PO) const {}
 
-  SourceLocation getAtStartLoc() const { return ObjCContainerDeclBits.AtStart; }
-
-  void setAtStartLoc(SourceLocation Loc) {
-    ObjCContainerDeclBits.AtStart = Loc;
-  }
+  SourceLocation getAtStartLoc() const { return AtStart; }
+  void setAtStartLoc(SourceLocation Loc) { AtStart = Loc; }
 
   // Marks the end of the container.
-  SourceRange getAtEndRange() const { return AtEnd; }
+  SourceRange getAtEndRange() const {
+    return AtEnd;
+  }
 
-  void setAtEndRange(SourceRange atEnd) { AtEnd = atEnd; }
+  void setAtEndRange(SourceRange atEnd) {
+    AtEnd = atEnd;
+  }
 
   SourceRange getSourceRange() const override LLVM_READONLY {
-    return SourceRange(getAtStartLoc(), getAtEndRange().getEnd());
+    return SourceRange(AtStart, getAtEndRange().getEnd());
   }
 
   // Implement isa/cast/dyncast/etc.
@@ -2812,6 +2833,7 @@ public:
 
   SourceRange getSourceRange() const override LLVM_READONLY;
 
+  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const LLVM_READONLY { return AtLoc; }
   void setAtLoc(SourceLocation Loc) { AtLoc = Loc; }
 

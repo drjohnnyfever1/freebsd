@@ -65,6 +65,7 @@ public:
                                   // "at_pc".  This should be set
     // in SetOptionValue if anything the selects a location is set.
     lldb::addr_t symbol_containing_addr;
+    static OptionDefinition g_option_table[];
   };
 
   CommandObjectDisassemble(CommandInterpreter &interpreter);

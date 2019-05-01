@@ -23,8 +23,6 @@ public:
 
   SBBreakpoint(const lldb::SBBreakpoint &rhs);
 
-  SBBreakpoint(const lldb::BreakpointSP &bp_sp);
-
   ~SBBreakpoint();
 
   const lldb::SBBreakpoint &operator=(const lldb::SBBreakpoint &rhs);
@@ -129,17 +127,13 @@ public:
   static uint32_t
   GetNumBreakpointLocationsFromEvent(const lldb::SBEvent &event_sp);
 
-  bool IsHardware() const;
-
-  // Can only be called from a ScriptedBreakpointResolver...
-  SBError
-  AddLocation(SBAddress &address);
-  
 private:
   friend class SBBreakpointList;
   friend class SBBreakpointLocation;
   friend class SBBreakpointName;
   friend class SBTarget;
+
+  SBBreakpoint(const lldb::BreakpointSP &bp_sp);
 
   lldb::BreakpointSP GetSP() const;
 

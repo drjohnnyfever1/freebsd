@@ -131,9 +131,6 @@ protected:
   void printPSBHintOp(const MCInst *MI, unsigned OpNum,
                       const MCSubtargetInfo &STI, raw_ostream &O);
 
-  void printBTIHintOp(const MCInst *MI, unsigned OpNum,
-                      const MCSubtargetInfo &STI, raw_ostream &O);
-
   void printFPImmOperand(const MCInst *MI, unsigned OpNum,
                          const MCSubtargetInfo &STI, raw_ostream &O);
 

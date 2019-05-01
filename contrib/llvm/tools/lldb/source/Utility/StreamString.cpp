@@ -24,15 +24,12 @@ void StreamString::Flush() {
   // Nothing to do when flushing a buffer based stream...
 }
 
-size_t StreamString::WriteImpl(const void *s, size_t length) {
+size_t StreamString::Write(const void *s, size_t length) {
   m_packet.append(reinterpret_cast<const char *>(s), length);
   return length;
 }
 
-void StreamString::Clear() {
-  m_packet.clear();
-  m_bytes_written = 0;
-}
+void StreamString::Clear() { m_packet.clear(); }
 
 bool StreamString::Empty() const { return GetSize() == 0; }
 

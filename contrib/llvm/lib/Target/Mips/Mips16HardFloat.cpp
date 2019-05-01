@@ -74,18 +74,16 @@ static FPReturnVariant whichFPReturnVariant(Type *T) {
     return FRet;
   case Type::DoubleTyID:
     return DRet;
-  case Type::StructTyID: {
-    StructType *ST = cast<StructType>(T);
-    if (ST->getNumElements() != 2)
+  case Type::StructTyID:
+    if (T->getStructNumElements() != 2)
       break;
-    if ((ST->getElementType(0)->isFloatTy()) &&
-        (ST->getElementType(1)->isFloatTy()))
+    if ((T->getContainedType(0)->isFloatTy()) &&
+        (T->getContainedType(1)->isFloatTy()))
       return CFRet;
-    if ((ST->getElementType(0)->isDoubleTy()) &&
-        (ST->getElementType(1)->isDoubleTy()))
+    if ((T->getContainedType(0)->isDoubleTy()) &&
+        (T->getContainedType(1)->isDoubleTy()))
       return CDRet;
     break;
-  }
   default:
     break;
   }

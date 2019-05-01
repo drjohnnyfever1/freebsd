@@ -153,7 +153,7 @@ static bool isExpandedFromConfigurationMacro(const Stmt *S,
   // value comes from a macro, but we can do much better.  This is likely
   // to be over conservative.  This logic is factored into a separate function
   // so that we can refine it later.
-  SourceLocation L = S->getBeginLoc();
+  SourceLocation L = S->getLocStart();
   if (L.isMacroID()) {
     SourceManager &SM = PP.getSourceManager();
     if (IgnoreYES_NO) {
@@ -200,7 +200,7 @@ static bool isConfigurationValue(const Stmt *S,
 
   // Special case looking for the sigil '()' around an integer literal.
   if (const ParenExpr *PE = dyn_cast<ParenExpr>(S))
-    if (!PE->getBeginLoc().isMacroID())
+    if (!PE->getLocStart().isMacroID())
       return isConfigurationValue(PE->getSubExpr(), PP, SilenceableCondVal,
                                   IncludeIntegers, true);
 
@@ -219,7 +219,7 @@ static bool isConfigurationValue(const Stmt *S,
       return isConfigurationValue(cast<DeclRefExpr>(S)->getDecl(), PP);
     case Stmt::ObjCBoolLiteralExprClass:
       IgnoreYES_NO = true;
-      LLVM_FALLTHROUGH;
+      // Fallthrough.
     case Stmt::CXXBoolLiteralExprClass:
     case Stmt::IntegerLiteralClass: {
       const Expr *E = cast<Expr>(S);
@@ -446,7 +446,7 @@ bool DeadCodeScan::isDeadCodeRoot(const clang::CFGBlock *Block) {
 }
 
 static bool isValidDeadStmt(const Stmt *S) {
-  if (S->getBeginLoc().isInvalid())
+  if (S->getLocStart().isInvalid())
     return false;
   if (const BinaryOperator *BO = dyn_cast<BinaryOperator>(S))
     return BO->getOpcode() != BO_Comma;
@@ -474,9 +474,9 @@ const Stmt *DeadCodeScan::findDeadCode(const clang::CFGBlock *Block) {
 
 static int SrcCmp(const std::pair<const CFGBlock *, const Stmt *> *p1,
                   const std::pair<const CFGBlock *, const Stmt *> *p2) {
-  if (p1->second->getBeginLoc() < p2->second->getBeginLoc())
+  if (p1->second->getLocStart() < p2->second->getLocStart())
     return -1;
-  if (p2->second->getBeginLoc() < p1->second->getBeginLoc())
+  if (p2->second->getLocStart() < p1->second->getLocStart())
     return 1;
   return 0;
 }
@@ -509,7 +509,7 @@ unsigned DeadCodeScan::scanBackwards(const clang::CFGBlock *Start,
     }
 
     // Specially handle macro-expanded code.
-    if (S->getBeginLoc().isMacroID()) {
+    if (S->getLocStart().isMacroID()) {
       count += scanMaybeReachableFromBlock(Block, PP, Reachable);
       continue;
     }
@@ -592,7 +592,7 @@ static SourceLocation GetUnreachableLoc(const Stmt *S,
     case Expr::CXXFunctionalCastExprClass: {
       const CXXFunctionalCastExpr *CE = cast <CXXFunctionalCastExpr>(S);
       R1 = CE->getSubExpr()->getSourceRange();
-      return CE->getBeginLoc();
+      return CE->getLocStart();
     }
     case Stmt::CXXTryStmtClass: {
       return cast<CXXTryStmt>(S)->getHandler(0)->getCatchLoc();
@@ -605,7 +605,7 @@ static SourceLocation GetUnreachableLoc(const Stmt *S,
     default: ;
   }
   R1 = S->getSourceRange();
-  return S->getBeginLoc();
+  return S->getLocStart();
 }
 
 void DeadCodeScan::reportDeadCode(const CFGBlock *B,
@@ -631,12 +631,12 @@ void DeadCodeScan::reportDeadCode(const CFGBlock *B,
     // a for/for-range loop.  This is the block that contains
     // the increment code.
     if (const Stmt *LoopTarget = B->getLoopTarget()) {
-      SourceLocation Loc = LoopTarget->getBeginLoc();
+      SourceLocation Loc = LoopTarget->getLocStart();
       SourceRange R1(Loc, Loc), R2;
 
       if (const ForStmt *FS = dyn_cast<ForStmt>(LoopTarget)) {
         const Expr *Inc = FS->getInc();
-        Loc = Inc->getBeginLoc();
+        Loc = Inc->getLocStart();
         R2 = Inc->getSourceRange();
       }
 

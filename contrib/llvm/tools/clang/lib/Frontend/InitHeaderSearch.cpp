@@ -260,7 +260,6 @@ void InitHeaderSearch::AddDefaultCIncludePaths(const llvm::Triple &triple,
 
   switch (os) {
   case llvm::Triple::Linux:
-  case llvm::Triple::Hurd:
   case llvm::Triple::Solaris:
     llvm_unreachable("Include management is handled in the driver.");
 
@@ -413,7 +412,6 @@ void InitHeaderSearch::AddDefaultCPlusPlusIncludePaths(
 
   switch (os) {
   case llvm::Triple::Linux:
-  case llvm::Triple::Hurd:
   case llvm::Triple::Solaris:
     llvm_unreachable("Include management is handled in the driver.");
     break;
@@ -433,6 +431,14 @@ void InitHeaderSearch::AddDefaultCPlusPlusIncludePaths(
   case llvm::Triple::DragonFly:
     AddPath("/usr/include/c++/5.0", CXXSystem, false);
     break;
+  case llvm::Triple::OpenBSD: {
+    std::string t = triple.getTriple();
+    if (t.substr(0, 6) == "x86_64")
+      t.replace(0, 6, "amd64");
+    AddGnuCPlusPlusIncludePaths("/usr/include/g++",
+                                t, "", "", triple);
+    break;
+  }
   case llvm::Triple::Minix:
     AddGnuCPlusPlusIncludePaths("/usr/gnu/include/c++/4.4.3",
                                 "", "", "", triple);
@@ -454,7 +460,6 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
     break; // Everything else continues to use this routine's logic.
 
   case llvm::Triple::Linux:
-  case llvm::Triple::Hurd:
   case llvm::Triple::Solaris:
     return;
 
@@ -468,6 +473,22 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
   if (Lang.CPlusPlus && !Lang.AsmPreprocessor &&
       HSOpts.UseStandardCXXIncludes && HSOpts.UseStandardSystemIncludes) {
     if (HSOpts.UseLibcxx) {
+      if (triple.isOSDarwin()) {
+        // On Darwin, libc++ may be installed alongside the compiler in
+        // include/c++/v1.
+        if (!HSOpts.ResourceDir.empty()) {
+          // Remove version from foo/lib/clang/version
+          StringRef NoVer = llvm::sys::path::parent_path(HSOpts.ResourceDir);
+          // Remove clang from foo/lib/clang
+          StringRef Lib = llvm::sys::path::parent_path(NoVer);
+          // Remove lib from foo/lib
+          SmallString<128> P = llvm::sys::path::parent_path(Lib);
+
+          // Get foo/include/c++/v1
+          llvm::sys::path::append(P, "include", "c++", "v1");
+          AddUnmappedPath(P, CXXSystem, false);
+        }
+      }
       AddPath("/usr/include/c++/v1", CXXSystem, false);
     } else {
       AddDefaultCPlusPlusIncludePaths(Lang, triple, HSOpts);
@@ -595,11 +616,11 @@ void InitHeaderSearch::Realize(const LangOptions &Lang) {
 
   for (auto &Include : IncludePath)
     if (Include.first == System || Include.first == ExternCSystem ||
-        (!Lang.ObjC && !Lang.CPlusPlus && Include.first == CSystem) ||
-        (/*FIXME !Lang.ObjC && */ Lang.CPlusPlus &&
+        (!Lang.ObjC1 && !Lang.CPlusPlus && Include.first == CSystem) ||
+        (/*FIXME !Lang.ObjC1 && */ Lang.CPlusPlus &&
          Include.first == CXXSystem) ||
-        (Lang.ObjC && !Lang.CPlusPlus && Include.first == ObjCSystem) ||
-        (Lang.ObjC && Lang.CPlusPlus && Include.first == ObjCXXSystem))
+        (Lang.ObjC1 && !Lang.CPlusPlus && Include.first == ObjCSystem) ||
+        (Lang.ObjC1 && Lang.CPlusPlus && Include.first == ObjCXXSystem))
       SearchList.push_back(Include.second);
 
   for (auto &Include : IncludePath)

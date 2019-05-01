@@ -90,12 +90,6 @@ public:
   bool GetTopLevel();
 
   void SetTopLevel(bool b = true);
-  
-  // Gets whether we will JIT an expression if it cannot be interpreted
-  bool GetAllowJIT();
-  
-  // Sets whether we will JIT an expression if it cannot be interpreted
-  void SetAllowJIT(bool allow);
 
 protected:
   SBExpressionOptions(

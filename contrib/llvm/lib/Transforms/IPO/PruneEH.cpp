@@ -107,7 +107,7 @@ static bool runImpl(CallGraphSCC &SCC, CallGraph &CG) {
         continue;
 
       for (const BasicBlock &BB : *F) {
-        const Instruction *TI = BB.getTerminator();
+        const TerminatorInst *TI = BB.getTerminator();
         if (CheckUnwind && TI->mayThrow()) {
           SCCMightUnwind = true;
         } else if (CheckReturn && isa<ReturnInst>(TI)) {
@@ -255,7 +255,7 @@ static void DeleteBasicBlock(BasicBlock *BB, CallGraph &CG) {
   }
 
   if (TokenInst) {
-    if (!TokenInst->isTerminator())
+    if (!isa<TerminatorInst>(TokenInst))
       changeToUnreachable(TokenInst->getNextNode(), /*UseLLVMTrap=*/false);
   } else {
     // Get the list of successors of this block.

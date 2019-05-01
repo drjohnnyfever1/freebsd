@@ -37,6 +37,7 @@
 namespace llvm {
 
 class AssumptionCache;
+class CallSite;
 class DominatorTree;
 class Function;
 class Instruction;
@@ -303,7 +304,7 @@ private:
     /// The maximum size of the dereferences of the pointer.
     ///
     /// May be UnknownSize if the sizes are unknown.
-    LocationSize Size = LocationSize::unknown();
+    LocationSize Size = MemoryLocation::UnknownSize;
     /// The AA tags associated with dereferences of the pointer.
     ///
     /// The members may be null if there are no tags or conflicting tags.
@@ -397,7 +398,7 @@ public:
   /// invalidated on the next non-local query or when an instruction is
   /// removed.  Clients must copy this data if they want it around longer than
   /// that.
-  const NonLocalDepInfo &getNonLocalCallDependency(CallBase *QueryCall);
+  const NonLocalDepInfo &getNonLocalCallDependency(CallSite QueryCS);
 
   /// Perform a full dependency query for an access to the QueryInst's
   /// specified memory location, returning the set of instructions that either
@@ -481,9 +482,9 @@ public:
   void releaseMemory();
 
 private:
-  MemDepResult getCallDependencyFrom(CallBase *Call, bool isReadOnlyCall,
-                                     BasicBlock::iterator ScanIt,
-                                     BasicBlock *BB);
+  MemDepResult getCallSiteDependencyFrom(CallSite C, bool isReadOnlyCall,
+                                         BasicBlock::iterator ScanIt,
+                                         BasicBlock *BB);
   bool getNonLocalPointerDepFromBB(Instruction *QueryInst,
                                    const PHITransAddr &Pointer,
                                    const MemoryLocation &Loc, bool isLoad,

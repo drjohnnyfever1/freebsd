@@ -35,8 +35,7 @@ using namespace clang;
 using namespace driver;
 
 Command::Command(const Action &Source, const Tool &Creator,
-                 const char *Executable,
-                 const llvm::opt::ArgStringList &Arguments,
+                 const char *Executable, const ArgStringList &Arguments,
                  ArrayRef<InputInfo> Inputs)
     : Source(Source), Creator(Creator), Executable(Executable),
       Arguments(Arguments) {
@@ -316,12 +315,6 @@ void Command::setEnvironment(llvm::ArrayRef<const char *> NewEnvironment) {
 
 int Command::Execute(ArrayRef<llvm::Optional<StringRef>> Redirects,
                      std::string *ErrMsg, bool *ExecutionFailed) const {
-  if (PrintInputFilenames) {
-    for (const char *Arg : InputFilenames)
-      llvm::outs() << llvm::sys::path::filename(Arg) << "\n";
-    llvm::outs().flush();
-  }
-
   SmallVector<const char*, 128> Argv;
 
   Optional<ArrayRef<StringRef>> Env;
@@ -373,7 +366,7 @@ int Command::Execute(ArrayRef<llvm::Optional<StringRef>> Redirects,
 
 FallbackCommand::FallbackCommand(const Action &Source_, const Tool &Creator_,
                                  const char *Executable_,
-                                 const llvm::opt::ArgStringList &Arguments_,
+                                 const ArgStringList &Arguments_,
                                  ArrayRef<InputInfo> Inputs,
                                  std::unique_ptr<Command> Fallback_)
     : Command(Source_, Creator_, Executable_, Arguments_, Inputs),
@@ -412,9 +405,11 @@ int FallbackCommand::Execute(ArrayRef<llvm::Optional<StringRef>> Redirects,
   return SecondaryStatus;
 }
 
-ForceSuccessCommand::ForceSuccessCommand(
-    const Action &Source_, const Tool &Creator_, const char *Executable_,
-    const llvm::opt::ArgStringList &Arguments_, ArrayRef<InputInfo> Inputs)
+ForceSuccessCommand::ForceSuccessCommand(const Action &Source_,
+                                         const Tool &Creator_,
+                                         const char *Executable_,
+                                         const ArgStringList &Arguments_,
+                                         ArrayRef<InputInfo> Inputs)
     : Command(Source_, Creator_, Executable_, Arguments_, Inputs) {}
 
 void ForceSuccessCommand::Print(raw_ostream &OS, const char *Terminator,

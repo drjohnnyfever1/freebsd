@@ -23,24 +23,24 @@ namespace llvm {
 class Module;
 namespace orc {
 
-class IRTransformLayer : public IRLayer {
+class IRTransformLayer2 : public IRLayer {
 public:
-  using TransformFunction = std::function<Expected<ThreadSafeModule>(
-      ThreadSafeModule, const MaterializationResponsibility &R)>;
 
-  IRTransformLayer(ExecutionSession &ES, IRLayer &BaseLayer,
-                   TransformFunction Transform = identityTransform);
+  using TransformFunction =
+    std::function<Expected<std::unique_ptr<Module>>(std::unique_ptr<Module>)>;
+
+  IRTransformLayer2(ExecutionSession &ES, IRLayer &BaseLayer,
+                    TransformFunction Transform = identityTransform);
 
   void setTransform(TransformFunction Transform) {
     this->Transform = std::move(Transform);
   }
 
-  void emit(MaterializationResponsibility R, ThreadSafeModule TSM) override;
+  void emit(MaterializationResponsibility R, VModuleKey K,
+            std::unique_ptr<Module> M) override;
 
-  static ThreadSafeModule
-  identityTransform(ThreadSafeModule TSM,
-                    const MaterializationResponsibility &R) {
-    return TSM;
+  static std::unique_ptr<Module> identityTransform(std::unique_ptr<Module> M) {
+    return M;
   }
 
 private:
@@ -53,11 +53,11 @@ private:
 ///   This layer applies a user supplied transform to each module that is added,
 /// then adds the transformed module to the layer below.
 template <typename BaseLayerT, typename TransformFtor>
-class LegacyIRTransformLayer {
+class IRTransformLayer {
 public:
 
-  /// Construct an LegacyIRTransformLayer with the given BaseLayer
-  LegacyIRTransformLayer(BaseLayerT &BaseLayer,
+  /// Construct an IRTransformLayer with the given BaseLayer
+  IRTransformLayer(BaseLayerT &BaseLayer,
                    TransformFtor Transform = TransformFtor())
     : BaseLayer(BaseLayer), Transform(std::move(Transform)) {}
 

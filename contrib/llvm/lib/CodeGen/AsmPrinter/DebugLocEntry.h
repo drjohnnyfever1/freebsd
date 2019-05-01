@@ -139,7 +139,7 @@ public:
   // Sort the pieces by offset.
   // Remove any duplicate entries by dropping all but the first.
   void sortUniqueValues() {
-    llvm::sort(Values);
+    llvm::sort(Values.begin(), Values.end());
     Values.erase(
         std::unique(
             Values.begin(), Values.end(), [](const Value &A, const Value &B) {

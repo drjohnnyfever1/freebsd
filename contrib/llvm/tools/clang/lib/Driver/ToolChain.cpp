@@ -13,6 +13,7 @@
 #include "ToolChains/Clang.h"
 #include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/Sanitizers.h"
+#include "clang/Basic/VirtualFileSystem.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Driver.h"
@@ -38,7 +39,6 @@
 #include "llvm/Support/TargetParser.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/VersionTuple.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -74,17 +74,10 @@ ToolChain::ToolChain(const Driver &D, const llvm::Triple &T,
                      const ArgList &Args)
     : D(D), Triple(T), Args(Args), CachedRTTIArg(GetRTTIArgument(Args)),
       CachedRTTIMode(CalculateRTTIMode(Args, Triple, CachedRTTIArg)) {
-  SmallString<128> P;
-
-  P.assign(D.ResourceDir);
+  SmallString<128> P(D.ResourceDir);
   llvm::sys::path::append(P, D.getTargetTriple(), "lib");
   if (getVFS().exists(P))
-    getLibraryPaths().push_back(P.str());
-
-  P.assign(D.ResourceDir);
-  llvm::sys::path::append(P, Triple.str(), "lib");
-  if (getVFS().exists(P))
-    getLibraryPaths().push_back(P.str());
+    getFilePaths().push_back(P.str());
 
   std::string CandidateLibPath = getArchSpecificLibPath();
   if (getVFS().exists(CandidateLibPath))
@@ -99,9 +92,7 @@ void ToolChain::setTripleEnvironment(llvm::Triple::EnvironmentType Env) {
 
 ToolChain::~ToolChain() = default;
 
-llvm::vfs::FileSystem &ToolChain::getVFS() const {
-  return getDriver().getVFS();
-}
+vfs::FileSystem &ToolChain::getVFS() const { return getDriver().getVFS(); }
 
 bool ToolChain::useIntegratedAs() const {
   return Args.hasFlag(options::OPT_fintegrated_as,
@@ -304,7 +295,6 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
 
   case Action::CompileJobClass:
   case Action::PrecompileJobClass:
-  case Action::HeaderModulePrecompileJobClass:
   case Action::PreprocessJobClass:
   case Action::AnalyzeJobClass:
   case Action::MigrateJobClass:
@@ -369,16 +359,15 @@ std::string ToolChain::getCompilerRT(const ArgList &Args, StringRef Component,
       TT.isWindowsMSVCEnvironment() || TT.isWindowsItaniumEnvironment();
 
   const char *Prefix = IsITANMSVCWindows ? "" : "lib";
-  const char *Suffix = Shared ? (Triple.isOSWindows() ? ".lib" : ".so")
+  const char *Suffix = Shared ? (Triple.isOSWindows() ? ".dll" : ".so")
                               : (IsITANMSVCWindows ? ".lib" : ".a");
-  if (Shared && Triple.isWindowsGNUEnvironment())
-    Suffix = ".dll.a";
 
-  for (const auto &LibPath : getLibraryPaths()) {
-    SmallString<128> P(LibPath);
+  const Driver &D = getDriver();
+  SmallString<128> P(D.ResourceDir);
+  llvm::sys::path::append(P, D.getTargetTriple(), "lib");
+  if (getVFS().exists(P)) {
     llvm::sys::path::append(P, Prefix + Twine("clang_rt.") + Component + Suffix);
-    if (getVFS().exists(P))
-      return P.str();
+    return P.str();
   }
 
   StringRef Arch = getArchNameForCompilerRTLib(*this, Args);
@@ -403,21 +392,17 @@ std::string ToolChain::getArchSpecificLibPath() const {
 }
 
 bool ToolChain::needsProfileRT(const ArgList &Args) {
-  if (needsGCovInstrumentation(Args) ||
+  if (Args.hasFlag(options::OPT_fprofile_arcs, options::OPT_fno_profile_arcs,
+                   false) ||
       Args.hasArg(options::OPT_fprofile_generate) ||
       Args.hasArg(options::OPT_fprofile_generate_EQ) ||
       Args.hasArg(options::OPT_fprofile_instr_generate) ||
       Args.hasArg(options::OPT_fprofile_instr_generate_EQ) ||
-      Args.hasArg(options::OPT_fcreate_profile))
+      Args.hasArg(options::OPT_fcreate_profile) ||
+      Args.hasArg(options::OPT_coverage))
     return true;
 
   return false;
-}
-
-bool ToolChain::needsGCovInstrumentation(const llvm::opt::ArgList &Args) {
-  return Args.hasFlag(options::OPT_fprofile_arcs, options::OPT_fno_profile_arcs,
-                      false) ||
-         Args.hasArg(options::OPT_coverage);
 }
 
 Tool *ToolChain::SelectTool(const JobAction &JA) const {
@@ -604,7 +589,7 @@ std::string ToolChain::ComputeLLVMTriple(const ArgList &Args,
 
     // Check to see if an explicit choice to use thumb has been made via
     // -mthumb. For assembler files we must check for -mthumb in the options
-    // passed to the assembler via -Wa or -Xassembler.
+    // passed to the assember via -Wa or -Xassembler.
     bool IsThumb = false;
     if (InputType != types::TY_PP_Asm)
       IsThumb = Args.hasFlag(options::OPT_mthumb, options::OPT_mno_thumb,
@@ -777,10 +762,6 @@ void ToolChain::AddCXXStdlibLibArgs(const ArgList &Args,
 
 void ToolChain::AddFilePathLibArgs(const ArgList &Args,
                                    ArgStringList &CmdArgs) const {
-  for (const auto &LibPath : getLibraryPaths())
-    if(LibPath.length() > 0)
-      CmdArgs.push_back(Args.MakeArgString(StringRef("-L") + LibPath));
-
   for (const auto &LibPath : getFilePaths())
     if(LibPath.length() > 0)
       CmdArgs.push_back(Args.MakeArgString(StringRef("-L") + LibPath));

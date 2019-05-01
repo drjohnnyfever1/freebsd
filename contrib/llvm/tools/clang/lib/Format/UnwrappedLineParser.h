@@ -126,7 +126,6 @@ private:
   void parseObjCInterfaceOrImplementation();
   bool parseObjCProtocol();
   void parseJavaScriptEs6ImportExport();
-  void parseStatementMacro();
   bool tryToParseLambda();
   bool tryToParseLambdaIntroducer();
   void tryToParseJSFunction();

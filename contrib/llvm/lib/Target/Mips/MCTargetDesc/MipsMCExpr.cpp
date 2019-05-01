@@ -43,11 +43,6 @@ void MipsMCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
   case MEK_Special:
     llvm_unreachable("MEK_None and MEK_Special are invalid");
     break;
-  case MEK_DTPREL:
-    // MEK_DTPREL is used for marking TLS DIEExpr only
-    // and contains a regular sub-expression.
-    getSubExpr()->print(OS, MAI, true);
-    return;
   case MEK_CALL_HI16:
     OS << "%call_hi";
     break;
@@ -162,10 +157,6 @@ MipsMCExpr::evaluateAsRelocatableImpl(MCValue &Res,
     case MEK_None:
     case MEK_Special:
       llvm_unreachable("MEK_None and MEK_Special are invalid");
-    case MEK_DTPREL:
-      // MEK_DTPREL is used for marking TLS DIEExpr only
-      // and contains a regular sub-expression.
-      return getSubExpr()->evaluateAsRelocatable(Res, Layout, Fixup);
     case MEK_DTPREL_HI:
     case MEK_DTPREL_LO:
     case MEK_GOT:
@@ -275,7 +266,6 @@ void MipsMCExpr::fixELFSymbolsInTLSFixups(MCAssembler &Asm) const {
     if (const MipsMCExpr *E = dyn_cast<const MipsMCExpr>(getSubExpr()))
       E->fixELFSymbolsInTLSFixups(Asm);
     break;
-  case MEK_DTPREL:
   case MEK_DTPREL_HI:
   case MEK_DTPREL_LO:
   case MEK_TLSLDM:

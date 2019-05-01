@@ -12,9 +12,6 @@
 // ASan-private header for error reporting functions.
 //===----------------------------------------------------------------------===//
 
-#ifndef ASAN_REPORT_H
-#define ASAN_REPORT_H
-
 #include "asan_allocator.h"
 #include "asan_internal.h"
 #include "asan_thread.h"
@@ -95,4 +92,3 @@ void ReportMacCfReallocUnknown(uptr addr, uptr zone_ptr,
                                BufferedStackTrace *stack);
 
 }  // namespace __asan
-#endif  // ASAN_REPORT_H

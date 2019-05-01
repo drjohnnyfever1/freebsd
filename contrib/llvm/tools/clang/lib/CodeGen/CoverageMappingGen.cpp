@@ -67,6 +67,7 @@ public:
 
   void setStartLoc(SourceLocation Loc) { LocStart = Loc; }
 
+  SourceLocation getStartLoc() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const {
     assert(LocStart && "Region has no start location");
     return *LocStart;
@@ -116,7 +117,7 @@ struct SpellingRegion {
   }
 
   SpellingRegion(SourceManager &SM, SourceMappingRegion &R)
-      : SpellingRegion(SM, R.getBeginLoc(), R.getEndLoc()) {}
+      : SpellingRegion(SM, R.getStartLoc(), R.getEndLoc()) {}
 
   /// Check if the start and end locations appear in source order, i.e
   /// top->bottom, left->right.
@@ -204,7 +205,7 @@ public:
 
   /// Get the start of \c S ignoring macro arguments and builtin macros.
   SourceLocation getStart(const Stmt *S) {
-    SourceLocation Loc = S->getBeginLoc();
+    SourceLocation Loc = S->getLocStart();
     while (SM.isMacroArgExpansion(Loc) || isInBuiltin(Loc))
       Loc = SM.getImmediateExpansionRange(Loc).getBegin();
     return Loc;
@@ -212,7 +213,7 @@ public:
 
   /// Get the end of \c S ignoring macro arguments and builtin macros.
   SourceLocation getEnd(const Stmt *S) {
-    SourceLocation Loc = S->getEndLoc();
+    SourceLocation Loc = S->getLocEnd();
     while (SM.isMacroArgExpansion(Loc) || isInBuiltin(Loc))
       Loc = SM.getImmediateExpansionRange(Loc).getBegin();
     return getPreciseTokenLocEnd(Loc);
@@ -229,7 +230,7 @@ public:
     llvm::SmallSet<FileID, 8> Visited;
     SmallVector<std::pair<SourceLocation, unsigned>, 8> FileLocs;
     for (const auto &Region : SourceRegions) {
-      SourceLocation Loc = Region.getBeginLoc();
+      SourceLocation Loc = Region.getStartLoc();
       FileID File = SM.getFileID(Loc);
       if (!Visited.insert(File).second)
         continue;
@@ -311,7 +312,7 @@ public:
     for (const auto &Region : SourceRegions) {
       assert(Region.hasEndLoc() && "incomplete region");
 
-      SourceLocation LocStart = Region.getBeginLoc();
+      SourceLocation LocStart = Region.getStartLoc();
       assert(SM.getFileID(LocStart).isValid() && "region in invalid file");
 
       // Ignore regions from system headers.
@@ -502,7 +503,7 @@ struct CounterCoverageMappingBuilder
     DeferredRegion = None;
 
     // If the region ends in an expansion, find the expansion site.
-    FileID StartFile = SM.getFileID(DR.getBeginLoc());
+    FileID StartFile = SM.getFileID(DR.getStartLoc());
     if (SM.getFileID(DeferredEndLoc) != StartFile) {
       if (isNestedIn(DeferredEndLoc, StartFile)) {
         do {
@@ -515,12 +516,12 @@ struct CounterCoverageMappingBuilder
 
     // The parent of this deferred region ends where the containing decl ends,
     // so the region isn't useful.
-    if (DR.getBeginLoc() == DeferredEndLoc)
+    if (DR.getStartLoc() == DeferredEndLoc)
       return Index;
 
     // If we're visiting statements in non-source order (e.g switch cases or
     // a loop condition) we can't construct a sensible deferred region.
-    if (!SpellingRegion(SM, DR.getBeginLoc(), DeferredEndLoc).isInSourceOrder())
+    if (!SpellingRegion(SM, DR.getStartLoc(), DeferredEndLoc).isInSourceOrder())
       return Index;
 
     DR.setGap(true);
@@ -571,7 +572,7 @@ struct CounterCoverageMappingBuilder
     while (RegionStack.size() > ParentIndex) {
       SourceMappingRegion &Region = RegionStack.back();
       if (Region.hasStartLoc()) {
-        SourceLocation StartLoc = Region.getBeginLoc();
+        SourceLocation StartLoc = Region.getStartLoc();
         SourceLocation EndLoc = Region.hasEndLoc()
                                     ? Region.getEndLoc()
                                     : RegionStack[ParentIndex].getEndLoc();
@@ -619,7 +620,7 @@ struct CounterCoverageMappingBuilder
             EndLoc == getEndOfFileOrMacro(EndLoc))
           MostRecentLocation = getIncludeOrExpansionLoc(EndLoc);
 
-        assert(SM.isWrittenInSameFile(Region.getBeginLoc(), EndLoc));
+        assert(SM.isWrittenInSameFile(Region.getStartLoc(), EndLoc));
         assert(SpellingRegion(SM, Region).isInSourceOrder());
         SourceRegions.push_back(Region);
 
@@ -656,21 +657,18 @@ struct CounterCoverageMappingBuilder
     return RegionStack.back();
   }
 
-  /// Propagate counts through the children of \p S if \p VisitChildren is true.
-  /// Otherwise, only emit a count for \p S itself.
-  Counter propagateCounts(Counter TopCount, const Stmt *S,
-                          bool VisitChildren = true) {
+  /// Propagate counts through the children of \c S.
+  Counter propagateCounts(Counter TopCount, const Stmt *S) {
     SourceLocation StartLoc = getStart(S);
     SourceLocation EndLoc = getEnd(S);
     size_t Index = pushRegion(TopCount, StartLoc, EndLoc);
-    if (VisitChildren)
-      Visit(S);
+    Visit(S);
     Counter ExitCount = getRegion().getCounter();
     popRegions(Index);
 
     // The statement may be spanned by an expansion. Make sure we handle a file
     // exit out of this expansion before moving to the next statement.
-    if (SM.isBeforeInTranslationUnit(StartLoc, S->getBeginLoc()))
+    if (SM.isBeforeInTranslationUnit(StartLoc, S->getLocStart()))
       MostRecentLocation = EndLoc;
 
     return ExitCount;
@@ -682,7 +680,7 @@ struct CounterCoverageMappingBuilder
     return SourceRegions.rend() !=
            std::find_if(SourceRegions.rbegin(), SourceRegions.rend(),
                         [&](const SourceMappingRegion &Region) {
-                          return Region.getBeginLoc() == StartLoc &&
+                          return Region.getStartLoc() == StartLoc &&
                                  Region.getEndLoc() == EndLoc;
                         });
   }
@@ -734,7 +732,7 @@ struct CounterCoverageMappingBuilder
     for (SourceMappingRegion &I : llvm::reverse(RegionStack)) {
       if (!I.hasStartLoc())
         continue;
-      SourceLocation Loc = I.getBeginLoc();
+      SourceLocation Loc = I.getStartLoc();
       if (!isNestedIn(Loc, ParentFile)) {
         ParentCounter = I.getCounter();
         break;
@@ -860,7 +858,7 @@ struct CounterCoverageMappingBuilder
   }
 
   void VisitStmt(const Stmt *S) {
-    if (S->getBeginLoc().isValid())
+    if (S->getLocStart().isValid())
       extendRegion(S);
     for (const Stmt *Child : S->children())
       if (Child)
@@ -877,16 +875,7 @@ struct CounterCoverageMappingBuilder
     if (Body && SM.isInSystemHeader(SM.getSpellingLoc(getStart(Body))))
       return;
 
-    // Do not visit the artificial children nodes of defaulted methods. The
-    // lexer may not be able to report back precise token end locations for
-    // these children nodes (llvm.org/PR39822), and moreover users will not be
-    // able to see coverage for them.
-    bool Defaulted = false;
-    if (auto *Method = dyn_cast<CXXMethodDecl>(D))
-      Defaulted = Method->isDefaulted();
-
-    propagateCounts(getRegionCounter(Body), Body,
-                    /*VisitChildren=*/!Defaulted);
+    propagateCounts(getRegionCounter(Body), Body);
     assert(RegionStack.empty() && "Regions entered but never exited");
 
     // Discard the last uncompleted deferred region in a decl, if one exists.
@@ -1047,8 +1036,6 @@ struct CounterCoverageMappingBuilder
 
   void VisitCXXForRangeStmt(const CXXForRangeStmt *S) {
     extendRegion(S);
-    if (S->getInit())
-      Visit(S->getInit());
     Visit(S->getLoopVarStmt());
     Visit(S->getRangeStmt());
 
@@ -1154,7 +1141,7 @@ struct CounterCoverageMappingBuilder
     Counter Count = addCounters(Parent.getCounter(), getRegionCounter(S));
     // Reuse the existing region if it starts at our label. This is typical of
     // the first case in a switch.
-    if (Parent.hasStartLoc() && Parent.getBeginLoc() == getStart(S))
+    if (Parent.hasStartLoc() && Parent.getStartLoc() == getStart(S))
       Parent.setCounter(Count);
     else
       pushRegion(Count, getStart(S));

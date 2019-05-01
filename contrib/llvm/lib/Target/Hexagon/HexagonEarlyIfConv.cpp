@@ -731,7 +731,9 @@ void HexagonEarlyIfConversion::predicateInstr(MachineBasicBlock *ToB,
       MIB.add(MO);
 
     // Set memory references.
-    MIB.cloneMemRefs(*MI);
+    MachineInstr::mmo_iterator MMOBegin = MI->memoperands_begin();
+    MachineInstr::mmo_iterator MMOEnd = MI->memoperands_end();
+    MIB.setMemRefs(MMOBegin, MMOEnd);
 
     MI->eraseFromParent();
     return;

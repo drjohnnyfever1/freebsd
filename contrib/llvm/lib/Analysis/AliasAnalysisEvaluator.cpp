@@ -66,10 +66,11 @@ static inline void PrintModRefResults(const char *Msg, bool P, Instruction *I,
   }
 }
 
-static inline void PrintModRefResults(const char *Msg, bool P, CallBase *CallA,
-                                      CallBase *CallB, Module *M) {
+static inline void PrintModRefResults(const char *Msg, bool P, CallSite CSA,
+                                      CallSite CSB, Module *M) {
   if (PrintAll || P) {
-    errs() << "  " << Msg << ": " << *CallA << " <-> " << *CallB << '\n';
+    errs() << "  " << Msg << ": " << *CSA.getInstruction() << " <-> "
+           << *CSB.getInstruction() << '\n';
   }
 }
 
@@ -97,7 +98,7 @@ void AAEvaluator::runInternal(Function &F, AAResults &AA) {
   ++FunctionCount;
 
   SetVector<Value *> Pointers;
-  SmallSetVector<CallBase *, 16> Calls;
+  SmallSetVector<CallSite, 16> CallSites;
   SetVector<Value *> Loads;
   SetVector<Value *> Stores;
 
@@ -113,16 +114,16 @@ void AAEvaluator::runInternal(Function &F, AAResults &AA) {
     if (EvalAAMD && isa<StoreInst>(&*I))
       Stores.insert(&*I);
     Instruction &Inst = *I;
-    if (auto *Call = dyn_cast<CallBase>(&Inst)) {
-      Value *Callee = Call->getCalledValue();
+    if (auto CS = CallSite(&Inst)) {
+      Value *Callee = CS.getCalledValue();
       // Skip actual functions for direct function calls.
       if (!isa<Function>(Callee) && isInterestingPointer(Callee))
         Pointers.insert(Callee);
       // Consider formals.
-      for (Use &DataOp : Call->data_ops())
+      for (Use &DataOp : CS.data_ops())
         if (isInterestingPointer(DataOp))
           Pointers.insert(DataOp);
-      Calls.insert(Call);
+      CallSites.insert(CS);
     } else {
       // Consider all operands.
       for (Instruction::op_iterator OI = Inst.op_begin(), OE = Inst.op_end();
@@ -135,21 +136,19 @@ void AAEvaluator::runInternal(Function &F, AAResults &AA) {
   if (PrintAll || PrintNoAlias || PrintMayAlias || PrintPartialAlias ||
       PrintMustAlias || PrintNoModRef || PrintMod || PrintRef || PrintModRef)
     errs() << "Function: " << F.getName() << ": " << Pointers.size()
-           << " pointers, " << Calls.size() << " call sites\n";
+           << " pointers, " << CallSites.size() << " call sites\n";
 
   // iterate over the worklist, and run the full (n^2)/2 disambiguations
   for (SetVector<Value *>::iterator I1 = Pointers.begin(), E = Pointers.end();
        I1 != E; ++I1) {
-    auto I1Size = LocationSize::unknown();
+    uint64_t I1Size = MemoryLocation::UnknownSize;
     Type *I1ElTy = cast<PointerType>((*I1)->getType())->getElementType();
-    if (I1ElTy->isSized())
-      I1Size = LocationSize::precise(DL.getTypeStoreSize(I1ElTy));
+    if (I1ElTy->isSized()) I1Size = DL.getTypeStoreSize(I1ElTy);
 
     for (SetVector<Value *>::iterator I2 = Pointers.begin(); I2 != I1; ++I2) {
-      auto I2Size = LocationSize::unknown();
-      Type *I2ElTy = cast<PointerType>((*I2)->getType())->getElementType();
-      if (I2ElTy->isSized())
-        I2Size = LocationSize::precise(DL.getTypeStoreSize(I2ElTy));
+      uint64_t I2Size = MemoryLocation::UnknownSize;
+      Type *I2ElTy =cast<PointerType>((*I2)->getType())->getElementType();
+      if (I2ElTy->isSized()) I2Size = DL.getTypeStoreSize(I2ElTy);
 
       AliasResult AR = AA.alias(*I1, I1Size, *I2, I2Size);
       switch (AR) {
@@ -229,48 +228,49 @@ void AAEvaluator::runInternal(Function &F, AAResults &AA) {
   }
 
   // Mod/ref alias analysis: compare all pairs of calls and values
-  for (CallBase *Call : Calls) {
-    for (auto Pointer : Pointers) {
-      auto Size = LocationSize::unknown();
-      Type *ElTy = cast<PointerType>(Pointer->getType())->getElementType();
-      if (ElTy->isSized())
-        Size = LocationSize::precise(DL.getTypeStoreSize(ElTy));
+  for (CallSite C : CallSites) {
+    Instruction *I = C.getInstruction();
 
-      switch (AA.getModRefInfo(Call, Pointer, Size)) {
+    for (auto Pointer : Pointers) {
+      uint64_t Size = MemoryLocation::UnknownSize;
+      Type *ElTy = cast<PointerType>(Pointer->getType())->getElementType();
+      if (ElTy->isSized()) Size = DL.getTypeStoreSize(ElTy);
+
+      switch (AA.getModRefInfo(C, Pointer, Size)) {
       case ModRefInfo::NoModRef:
-        PrintModRefResults("NoModRef", PrintNoModRef, Call, Pointer,
+        PrintModRefResults("NoModRef", PrintNoModRef, I, Pointer,
                            F.getParent());
         ++NoModRefCount;
         break;
       case ModRefInfo::Mod:
-        PrintModRefResults("Just Mod", PrintMod, Call, Pointer, F.getParent());
+        PrintModRefResults("Just Mod", PrintMod, I, Pointer, F.getParent());
         ++ModCount;
         break;
       case ModRefInfo::Ref:
-        PrintModRefResults("Just Ref", PrintRef, Call, Pointer, F.getParent());
+        PrintModRefResults("Just Ref", PrintRef, I, Pointer, F.getParent());
         ++RefCount;
         break;
       case ModRefInfo::ModRef:
-        PrintModRefResults("Both ModRef", PrintModRef, Call, Pointer,
+        PrintModRefResults("Both ModRef", PrintModRef, I, Pointer,
                            F.getParent());
         ++ModRefCount;
         break;
       case ModRefInfo::Must:
-        PrintModRefResults("Must", PrintMust, Call, Pointer, F.getParent());
+        PrintModRefResults("Must", PrintMust, I, Pointer, F.getParent());
         ++MustCount;
         break;
       case ModRefInfo::MustMod:
-        PrintModRefResults("Just Mod (MustAlias)", PrintMustMod, Call, Pointer,
+        PrintModRefResults("Just Mod (MustAlias)", PrintMustMod, I, Pointer,
                            F.getParent());
         ++MustModCount;
         break;
       case ModRefInfo::MustRef:
-        PrintModRefResults("Just Ref (MustAlias)", PrintMustRef, Call, Pointer,
+        PrintModRefResults("Just Ref (MustAlias)", PrintMustRef, I, Pointer,
                            F.getParent());
         ++MustRefCount;
         break;
       case ModRefInfo::MustModRef:
-        PrintModRefResults("Both ModRef (MustAlias)", PrintMustModRef, Call,
+        PrintModRefResults("Both ModRef (MustAlias)", PrintMustModRef, I,
                            Pointer, F.getParent());
         ++MustModRefCount;
         break;
@@ -279,46 +279,44 @@ void AAEvaluator::runInternal(Function &F, AAResults &AA) {
   }
 
   // Mod/ref alias analysis: compare all pairs of calls
-  for (CallBase *CallA : Calls) {
-    for (CallBase *CallB : Calls) {
-      if (CallA == CallB)
+  for (auto C = CallSites.begin(), Ce = CallSites.end(); C != Ce; ++C) {
+    for (auto D = CallSites.begin(); D != Ce; ++D) {
+      if (D == C)
         continue;
-      switch (AA.getModRefInfo(CallA, CallB)) {
+      switch (AA.getModRefInfo(*C, *D)) {
       case ModRefInfo::NoModRef:
-        PrintModRefResults("NoModRef", PrintNoModRef, CallA, CallB,
-                           F.getParent());
+        PrintModRefResults("NoModRef", PrintNoModRef, *C, *D, F.getParent());
         ++NoModRefCount;
         break;
       case ModRefInfo::Mod:
-        PrintModRefResults("Just Mod", PrintMod, CallA, CallB, F.getParent());
+        PrintModRefResults("Just Mod", PrintMod, *C, *D, F.getParent());
         ++ModCount;
         break;
       case ModRefInfo::Ref:
-        PrintModRefResults("Just Ref", PrintRef, CallA, CallB, F.getParent());
+        PrintModRefResults("Just Ref", PrintRef, *C, *D, F.getParent());
         ++RefCount;
         break;
       case ModRefInfo::ModRef:
-        PrintModRefResults("Both ModRef", PrintModRef, CallA, CallB,
-                           F.getParent());
+        PrintModRefResults("Both ModRef", PrintModRef, *C, *D, F.getParent());
         ++ModRefCount;
         break;
       case ModRefInfo::Must:
-        PrintModRefResults("Must", PrintMust, CallA, CallB, F.getParent());
+        PrintModRefResults("Must", PrintMust, *C, *D, F.getParent());
         ++MustCount;
         break;
       case ModRefInfo::MustMod:
-        PrintModRefResults("Just Mod (MustAlias)", PrintMustMod, CallA, CallB,
+        PrintModRefResults("Just Mod (MustAlias)", PrintMustMod, *C, *D,
                            F.getParent());
         ++MustModCount;
         break;
       case ModRefInfo::MustRef:
-        PrintModRefResults("Just Ref (MustAlias)", PrintMustRef, CallA, CallB,
+        PrintModRefResults("Just Ref (MustAlias)", PrintMustRef, *C, *D,
                            F.getParent());
         ++MustRefCount;
         break;
       case ModRefInfo::MustModRef:
-        PrintModRefResults("Both ModRef (MustAlias)", PrintMustModRef, CallA,
-                           CallB, F.getParent());
+        PrintModRefResults("Both ModRef (MustAlias)", PrintMustModRef, *C, *D,
+                           F.getParent());
         ++MustModRefCount;
         break;
       }

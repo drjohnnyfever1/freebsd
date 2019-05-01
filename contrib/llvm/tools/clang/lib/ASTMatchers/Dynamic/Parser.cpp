@@ -110,10 +110,6 @@ private:
     }
 
     switch (Code[0]) {
-    case '#':
-      Result.Kind = TokenInfo::TK_Eof;
-      Result.Text = "";
-      return Result;
     case ',':
       Result.Kind = TokenInfo::TK_Comma;
       Result.Text = Code.substr(0, 1);
@@ -343,27 +339,8 @@ bool Parser::parseIdentifierPrefixImpl(VariantValue *Value) {
     if (const VariantValue NamedValue =
             NamedValues ? NamedValues->lookup(NameToken.Text)
                         : VariantValue()) {
-
-      if (Tokenizer->nextTokenKind() != TokenInfo::TK_Period) {
-        *Value = NamedValue;
-        return true;
-      }
-
-      std::string BindID;
-      if (!parseBindID(BindID))
-        return false;
-
-      assert(NamedValue.isMatcher());
-      llvm::Optional<DynTypedMatcher> Result =
-          NamedValue.getMatcher().getSingleMatcher();
-      if (Result.hasValue()) {
-        llvm::Optional<DynTypedMatcher> Bound = Result->tryBind(BindID);
-        if (Bound.hasValue()) {
-          *Value = VariantMatcher::SingleMatcher(*Bound);
-          return true;
-        }
-      }
-      return false;
+      *Value = NamedValue;
+      return true;
     }
     // If the syntax is correct and the name is not a matcher either, report
     // unknown named value.
@@ -380,43 +357,6 @@ bool Parser::parseIdentifierPrefixImpl(VariantValue *Value) {
 
   // Parse as a matcher expression.
   return parseMatcherExpressionImpl(NameToken, Value);
-}
-
-bool Parser::parseBindID(std::string &BindID) {
-  // Parse .bind("foo")
-  assert(Tokenizer->peekNextToken().Kind == TokenInfo::TK_Period);
-  Tokenizer->consumeNextToken(); // consume the period.
-  const TokenInfo BindToken = Tokenizer->consumeNextToken();
-  if (BindToken.Kind == TokenInfo::TK_CodeCompletion) {
-    addCompletion(BindToken, MatcherCompletion("bind(\"", "bind", 1));
-    return false;
-  }
-
-  const TokenInfo OpenToken = Tokenizer->consumeNextToken();
-  const TokenInfo IDToken = Tokenizer->consumeNextToken();
-  const TokenInfo CloseToken = Tokenizer->consumeNextToken();
-
-  // TODO: We could use different error codes for each/some to be more
-  //       explicit about the syntax error.
-  if (BindToken.Kind != TokenInfo::TK_Ident ||
-      BindToken.Text != TokenInfo::ID_Bind) {
-    Error->addError(BindToken.Range, Error->ET_ParserMalformedBindExpr);
-    return false;
-  }
-  if (OpenToken.Kind != TokenInfo::TK_OpenParen) {
-    Error->addError(OpenToken.Range, Error->ET_ParserMalformedBindExpr);
-    return false;
-  }
-  if (IDToken.Kind != TokenInfo::TK_Literal || !IDToken.Value.isString()) {
-    Error->addError(IDToken.Range, Error->ET_ParserMalformedBindExpr);
-    return false;
-  }
-  if (CloseToken.Kind != TokenInfo::TK_CloseParen) {
-    Error->addError(CloseToken.Range, Error->ET_ParserMalformedBindExpr);
-    return false;
-  }
-  BindID = IDToken.Value.getString();
-  return true;
 }
 
 /// Parse and validate a matcher expression.
@@ -485,8 +425,38 @@ bool Parser::parseMatcherExpressionImpl(const TokenInfo &NameToken,
 
   std::string BindID;
   if (Tokenizer->peekNextToken().Kind == TokenInfo::TK_Period) {
-    if (!parseBindID(BindID))
+    // Parse .bind("foo")
+    Tokenizer->consumeNextToken();  // consume the period.
+    const TokenInfo BindToken = Tokenizer->consumeNextToken();
+    if (BindToken.Kind == TokenInfo::TK_CodeCompletion) {
+      addCompletion(BindToken, MatcherCompletion("bind(\"", "bind", 1));
       return false;
+    }
+
+    const TokenInfo OpenToken = Tokenizer->consumeNextToken();
+    const TokenInfo IDToken = Tokenizer->consumeNextToken();
+    const TokenInfo CloseToken = Tokenizer->consumeNextToken();
+
+    // TODO: We could use different error codes for each/some to be more
+    //       explicit about the syntax error.
+    if (BindToken.Kind != TokenInfo::TK_Ident ||
+        BindToken.Text != TokenInfo::ID_Bind) {
+      Error->addError(BindToken.Range, Error->ET_ParserMalformedBindExpr);
+      return false;
+    }
+    if (OpenToken.Kind != TokenInfo::TK_OpenParen) {
+      Error->addError(OpenToken.Range, Error->ET_ParserMalformedBindExpr);
+      return false;
+    }
+    if (IDToken.Kind != TokenInfo::TK_Literal || !IDToken.Value.isString()) {
+      Error->addError(IDToken.Range, Error->ET_ParserMalformedBindExpr);
+      return false;
+    }
+    if (CloseToken.Kind != TokenInfo::TK_CloseParen) {
+      Error->addError(CloseToken.Range, Error->ET_ParserMalformedBindExpr);
+      return false;
+    }
+    BindID = IDToken.Value.getString();
   }
 
   if (!Ctor)
@@ -649,12 +619,12 @@ Parser::completeExpression(StringRef Code, unsigned CompletionOffset, Sema *S,
   P.parseExpressionImpl(&Dummy);
 
   // Sort by specificity, then by name.
-  llvm::sort(P.Completions,
+  llvm::sort(P.Completions.begin(), P.Completions.end(),
              [](const MatcherCompletion &A, const MatcherCompletion &B) {
-               if (A.Specificity != B.Specificity)
-                 return A.Specificity > B.Specificity;
-               return A.TypedText < B.TypedText;
-             });
+    if (A.Specificity != B.Specificity)
+      return A.Specificity > B.Specificity;
+    return A.TypedText < B.TypedText;
+  });
 
   return P.Completions;
 }

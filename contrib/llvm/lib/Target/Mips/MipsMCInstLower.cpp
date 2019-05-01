@@ -117,8 +117,6 @@ MCOperand MipsMCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   case MipsII::MO_CALL_LO16:
     TargetKind = MipsMCExpr::MEK_CALL_LO16;
     break;
-  case MipsII::MO_JALR:
-    return MCOperand();
   }
 
   switch (MOTy) {
@@ -300,16 +298,12 @@ bool MipsMCInstLower::lowerLongBranch(const MachineInstr *MI,
   default:
     return false;
   case Mips::LONG_BRANCH_LUi:
-  case Mips::LONG_BRANCH_LUi2Op:
-  case Mips::LONG_BRANCH_LUi2Op_64:
     lowerLongBranchLUi(MI, OutMI);
     return true;
   case Mips::LONG_BRANCH_ADDiu:
-  case Mips::LONG_BRANCH_ADDiu2Op:
     lowerLongBranchADDiu(MI, OutMI, Mips::ADDiu);
     return true;
   case Mips::LONG_BRANCH_DADDiu:
-  case Mips::LONG_BRANCH_DADDiu2Op:
     lowerLongBranchADDiu(MI, OutMI, Mips::DADDiu);
     return true;
   }

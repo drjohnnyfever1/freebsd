@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/ParentMap.h"
@@ -262,7 +262,7 @@ public:
     currentBlock = block;
 
     // Skip statements in macros.
-    if (S->getBeginLoc().isMacroID())
+    if (S->getLocStart().isMacroID())
       return;
 
     // Only cover dead stores from regular assignments.  ++/-- dead stores
@@ -329,8 +329,9 @@ public:
             return;
 
           if (const Expr *E = V->getInit()) {
-            while (const FullExpr *FE = dyn_cast<FullExpr>(E))
-              E = FE->getSubExpr();
+            while (const ExprWithCleanups *exprClean =
+                    dyn_cast<ExprWithCleanups>(E))
+              E = exprClean->getSubExpr();
 
             // Look through transitive assignments, e.g.:
             // int x = y = 0;

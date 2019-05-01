@@ -16,7 +16,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
-#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
+#include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/ObjectFile.h"
@@ -38,7 +38,7 @@ namespace orc {
 
 /// Simple compile functor: Takes a single IR module and returns an ObjectFile.
 /// This compiler supports a single compilation thread and LLVMContext only.
-/// For multithreaded compilation, use ConcurrentIRCompiler below.
+/// For multithreaded compilation, use MultiThreadedSimpleCompiler below.
 class SimpleCompiler {
 public:
   using CompileResult = std::unique_ptr<MemoryBuffer>;
@@ -105,10 +105,10 @@ private:
 ///
 /// This class creates a new TargetMachine and SimpleCompiler instance for each
 /// compile.
-class ConcurrentIRCompiler {
+class MultiThreadedSimpleCompiler {
 public:
-  ConcurrentIRCompiler(JITTargetMachineBuilder JTMB,
-                       ObjectCache *ObjCache = nullptr)
+  MultiThreadedSimpleCompiler(JITTargetMachineBuilder JTMB,
+                              ObjectCache *ObjCache = nullptr)
       : JTMB(std::move(JTMB)), ObjCache(ObjCache) {}
 
   void setObjectCache(ObjectCache *ObjCache) { this->ObjCache = ObjCache; }

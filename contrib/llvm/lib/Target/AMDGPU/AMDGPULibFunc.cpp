@@ -995,10 +995,8 @@ Function *AMDGPULibFunc::getOrInsertFunction(Module *M,
   } else {
     AttributeList Attr;
     LLVMContext &Ctx = M->getContext();
-    Attr = Attr.addAttribute(Ctx, AttributeList::FunctionIndex,
-                             Attribute::ReadOnly);
-    Attr = Attr.addAttribute(Ctx, AttributeList::FunctionIndex,
-                             Attribute::NoUnwind);
+    Attr.addAttribute(Ctx, AttributeList::FunctionIndex, Attribute::ReadOnly);
+    Attr.addAttribute(Ctx, AttributeList::FunctionIndex, Attribute::NoUnwind);
     C = M->getOrInsertFunction(FuncName, FuncTy, Attr);
   }
 

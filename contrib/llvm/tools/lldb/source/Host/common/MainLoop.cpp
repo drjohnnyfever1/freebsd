@@ -108,14 +108,8 @@ Status MainLoop::RunImpl::Poll() {
   num_events = kevent(loop.m_kqueue, in_events.data(), in_events.size(),
                       out_events, llvm::array_lengthof(out_events), nullptr);
 
-  if (num_events < 0) {
-    if (errno == EINTR) {
-      // in case of EINTR, let the main loop run one iteration
-      // we need to zero num_events to avoid assertions failing
-      num_events = 0;
-    } else
-      return Status(errno, eErrorTypePOSIX);
-  }
+  if (num_events < 0)
+    return Status("kevent() failed with error %d\n", num_events);
   return Status();
 }
 
@@ -315,7 +309,7 @@ MainLoop::RegisterSignal(int signo, const Callback &callback, Status &error) {
   g_signal_flags[signo] = 0;
 
   // Even if using kqueue, the signal handler will still be invoked, so it's
-  // important to replace it with our "benign" handler.
+  // important to replace it with our "bening" handler.
   int ret = sigaction(signo, &new_action, &info.old_action);
   assert(ret == 0 && "sigaction failed");
 
@@ -327,7 +321,7 @@ MainLoop::RegisterSignal(int signo, const Callback &callback, Status &error) {
 #endif
 
   // If we're using kqueue, the signal needs to be unblocked in order to
-  // receive it. If using pselect/ppoll, we need to block it, and later unblock
+  // recieve it. If using pselect/ppoll, we need to block it, and later unblock
   // it as a part of the system call.
   ret = pthread_sigmask(HAVE_SYS_EVENT_H ? SIG_UNBLOCK : SIG_BLOCK,
                         &new_action.sa_mask, &old_set);

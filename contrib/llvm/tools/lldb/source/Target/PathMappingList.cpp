@@ -7,16 +7,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <climits>
 #include <cstring>
 
-#include "lldb/Host/FileSystem.h"
+// Other libraries and framework includes
+// Project includes
+#include "lldb/lldb-private-enumerations.h"
 #include "lldb/Host/PosixApi.h"
 #include "lldb/Target/PathMappingList.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/lldb-private-enumerations.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -34,7 +37,7 @@ namespace {
   ConstString NormalizePath(const ConstString &path) {
     // If we use "path" to construct a FileSpec, it will normalize the path for
     // us. We then grab the string and turn it back into a ConstString.
-    return ConstString(FileSpec(path.GetStringRef()).GetPath());
+    return ConstString(FileSpec(path.GetStringRef(), false).GetPath());
   }
 }
 //----------------------------------------------------------------------
@@ -173,13 +176,13 @@ bool PathMappingList::RemapPath(llvm::StringRef path,
       // We need to figure out if the "path" argument is relative. If it is,
       // then we should remap, else skip this entry.
       if (path_is_relative == eLazyBoolCalculate) {
-        path_is_relative =
-            FileSpec(path).IsRelative() ? eLazyBoolYes : eLazyBoolNo;
+        path_is_relative = FileSpec(path, false).IsRelative() ? eLazyBoolYes :
+        eLazyBoolNo;
       }
       if (!path_is_relative)
         continue;
     }
-    FileSpec remapped(it.second.GetStringRef());
+    FileSpec remapped(it.second.GetStringRef(), false);
     remapped.AppendPathComponent(path);
     new_path = remapped.GetPath();
     return true;
@@ -193,7 +196,7 @@ bool PathMappingList::ReverseRemapPath(const FileSpec &file, FileSpec &fixed) co
   for (const auto &it : m_pairs) {
     if (!path_ref.consume_front(it.second.GetStringRef()))
       continue;
-    fixed.SetFile(it.first.GetStringRef(), FileSpec::Style::native);
+    fixed.SetFile(it.first.GetStringRef(), false, FileSpec::Style::native);
     fixed.AppendPathComponent(path_ref);
     return true;
   }
@@ -213,9 +216,10 @@ bool PathMappingList::FindFile(const FileSpec &orig_spec,
 
         if (orig_path_len >= prefix_len) {
           if (::strncmp(pos->first.GetCString(), orig_path, prefix_len) == 0) {
-            new_spec.SetFile(pos->second.GetCString(), FileSpec::Style::native);
+            new_spec.SetFile(pos->second.GetCString(), false,
+                             FileSpec::Style::native);
             new_spec.AppendPathComponent(orig_path + prefix_len);
-            if (FileSystem::Instance().Exists(new_spec))
+            if (new_spec.Exists())
               return true;
           }
         }

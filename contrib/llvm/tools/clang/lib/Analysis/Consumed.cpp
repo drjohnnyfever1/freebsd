@@ -64,7 +64,7 @@ static SourceLocation getFirstStmtLoc(const CFGBlock *Block) {
   // is not empty.
   for (const auto &B : *Block)
     if (Optional<CFGStmt> CS = B.getAs<CFGStmt>())
-      return CS->getStmt()->getBeginLoc();
+      return CS->getStmt()->getLocStart();
 
   // Block is empty.
   // If we have one successor, return the first statement in that block
@@ -78,12 +78,12 @@ static SourceLocation getLastStmtLoc(const CFGBlock *Block) {
   // Find the source location of the last statement in the block, if the block
   // is not empty.
   if (const Stmt *StmtNode = Block->getTerminator()) {
-    return StmtNode->getBeginLoc();
+    return StmtNode->getLocStart();
   } else {
     for (CFGBlock::const_reverse_iterator BI = Block->rbegin(),
          BE = Block->rend(); BI != BE; ++BI) {
       if (Optional<CFGStmt> CS = BI->getAs<CFGStmt>())
-        return CS->getStmt()->getBeginLoc();
+        return CS->getStmt()->getLocStart();
     }
   }
 
@@ -463,6 +463,7 @@ class ConsumedStmtVisitor : public ConstStmtVisitor<ConsumedStmtVisitor> {
   using InfoEntry = MapType::iterator;
   using ConstInfoEntry = MapType::const_iterator;
 
+  AnalysisDeclContext &AC;
   ConsumedAnalyzer &Analyzer;
   ConsumedStateMap *StateMap;
   MapType PropagationMap;
@@ -514,8 +515,9 @@ public:
   void VisitUnaryOperator(const UnaryOperator *UOp);
   void VisitVarDecl(const VarDecl *Var);
 
-  ConsumedStmtVisitor(ConsumedAnalyzer &Analyzer, ConsumedStateMap *StateMap)
-      : Analyzer(Analyzer), StateMap(StateMap) {}
+  ConsumedStmtVisitor(AnalysisDeclContext &AC, ConsumedAnalyzer &Analyzer,
+                      ConsumedStateMap *StateMap)
+      : AC(AC), Analyzer(Analyzer), StateMap(StateMap) {}
 
   PropagationInfo getInfo(const Expr *StmtNode) const {
     ConstInfoEntry Entry = findInfo(StmtNode);
@@ -772,7 +774,8 @@ void ConsumedStmtVisitor::VisitCXXBindTemporaryExpr(
 void ConsumedStmtVisitor::VisitCXXConstructExpr(const CXXConstructExpr *Call) {
   CXXConstructorDecl *Constructor = Call->getConstructor();
 
-  QualType ThisType = Constructor->getThisType()->getPointeeType();
+  ASTContext &CurrContext = AC.getASTContext();
+  QualType ThisType = Constructor->getThisType(CurrContext)->getPointeeType();
 
   if (!isConsumableType(ThisType))
     return;
@@ -790,7 +793,7 @@ void ConsumedStmtVisitor::VisitCXXConstructExpr(const CXXConstructExpr *Call) {
   } else if (Constructor->isCopyConstructor()) {
     // Copy state from arg.  If setStateOnRead then set arg to CS_Unknown.
     ConsumedState NS =
-      isSetOnReadPtrType(Constructor->getThisType()) ?
+      isSetOnReadPtrType(Constructor->getThisType(CurrContext)) ?
       CS_Unknown : CS_None;
     copyInfo(Call->getArg(0), Call, NS);
   } else {
@@ -890,7 +893,7 @@ void ConsumedStmtVisitor::VisitReturnStmt(const ReturnStmt *Ret) {
     }
   }
 
-  StateMap->checkParamsForReturnTypestate(Ret->getBeginLoc(),
+  StateMap->checkParamsForReturnTypestate(Ret->getLocStart(),
                                           Analyzer.WarningsHandler);
 }
 
@@ -1200,7 +1203,8 @@ void ConsumedAnalyzer::determineExpectedReturnState(AnalysisDeclContext &AC,
                                                     const FunctionDecl *D) {
   QualType ReturnType;
   if (const auto *Constructor = dyn_cast<CXXConstructorDecl>(D)) {
-    ReturnType = Constructor->getThisType()->getPointeeType();
+    ASTContext &CurrContext = AC.getASTContext();
+    ReturnType = Constructor->getThisType(CurrContext)->getPointeeType();
   } else
     ReturnType = D->getCallResultType();
 
@@ -1319,7 +1323,7 @@ void ConsumedAnalyzer::run(AnalysisDeclContext &AC) {
   BlockInfo = ConsumedBlockInfo(CFGraph->getNumBlockIDs(), SortedGraph);
 
   CurrStates = llvm::make_unique<ConsumedStateMap>();
-  ConsumedStmtVisitor Visitor(*this, CurrStates.get());
+  ConsumedStmtVisitor Visitor(AC, *this, CurrStates.get());
 
   // Add all trackable parameters to the state map.
   for (const auto *PI : D->parameters())
@@ -1359,7 +1363,7 @@ void ConsumedAnalyzer::run(AnalysisDeclContext &AC) {
 
       case CFGElement::AutomaticObjectDtor: {
         const CFGAutomaticObjDtor &DTor = B.castAs<CFGAutomaticObjDtor>();
-        SourceLocation Loc = DTor.getTriggerStmt()->getEndLoc();
+        SourceLocation Loc = DTor.getTriggerStmt()->getLocEnd();
         const VarDecl *Var = DTor.getVarDecl();
 
         Visitor.checkCallability(PropagationInfo(Var),

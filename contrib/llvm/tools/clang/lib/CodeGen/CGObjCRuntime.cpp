@@ -205,7 +205,7 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
         // Emit the original filter expression, convert to i32, and return.
         HelperCGF.EmitStmt(FinallyBlock);
 
-        HelperCGF.FinishFunction(FinallyBlock->getEndLoc());
+        HelperCGF.FinishFunction(FinallyBlock->getLocEnd());
 
         llvm::Function *FinallyFunc = HelperCGF.CurFn;
 
@@ -296,7 +296,7 @@ void CGObjCRuntime::EmitInitOfCatchParam(CodeGenFunction &CGF,
   switch (paramDecl->getType().getQualifiers().getObjCLifetime()) {
   case Qualifiers::OCL_Strong:
     exn = CGF.EmitARCRetainNonBlock(exn);
-    LLVM_FALLTHROUGH;
+    // fallthrough
 
   case Qualifiers::OCL_None:
   case Qualifiers::OCL_ExplicitNone:

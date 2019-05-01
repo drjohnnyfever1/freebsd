@@ -12,8 +12,6 @@
  * ===----------------------------------------------------------------------===
  */
 
-#define DOUBLE_PRECISION
-#include "fp_lib.h"
 #include "int_lib.h"
 #include "int_math.h"
 
@@ -23,7 +21,7 @@ COMPILER_RT_ABI Dcomplex
 __divdc3(double __a, double __b, double __c, double __d)
 {
     int __ilogbw = 0;
-    double __logbw = __compiler_rt_logb(crt_fmax(crt_fabs(__c), crt_fabs(__d)));
+    double __logbw = crt_logb(crt_fmax(crt_fabs(__c), crt_fabs(__d)));
     if (crt_isfinite(__logbw))
     {
         __ilogbw = (int)__logbw;

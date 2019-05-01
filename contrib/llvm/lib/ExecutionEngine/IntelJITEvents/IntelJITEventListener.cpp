@@ -47,7 +47,7 @@ class IntelJITEventListener : public JITEventListener {
   typedef DenseMap<const void *, MethodAddressVector>  ObjectMap;
 
   ObjectMap  LoadedObjectMap;
-  std::map<ObjectKey, OwningBinary<ObjectFile>> DebugObjects;
+  std::map<const char*, OwningBinary<ObjectFile>> DebugObjects;
 
 public:
   IntelJITEventListener(IntelJITEventsWrapper* libraryWrapper) {
@@ -57,10 +57,10 @@ public:
   ~IntelJITEventListener() {
   }
 
-  void notifyObjectLoaded(ObjectKey Key, const ObjectFile &Obj,
-                          const RuntimeDyld::LoadedObjectInfo &L) override;
+  void NotifyObjectEmitted(const ObjectFile &Obj,
+                           const RuntimeDyld::LoadedObjectInfo &L) override;
 
-  void notifyFreeingObject(ObjectKey Key) override;
+  void NotifyFreeingObject(const ObjectFile &Obj) override;
 };
 
 static LineNumberInfo DILineInfoToIntelJITFormat(uintptr_t StartAddress,
@@ -96,9 +96,9 @@ static iJIT_Method_Load FunctionDescToIntelJITFormat(
   return Result;
 }
 
-void IntelJITEventListener::notifyObjectLoaded(
-    ObjectKey Key, const ObjectFile &Obj,
-    const RuntimeDyld::LoadedObjectInfo &L) {
+void IntelJITEventListener::NotifyObjectEmitted(
+                                       const ObjectFile &Obj,
+                                       const RuntimeDyld::LoadedObjectInfo &L) {
 
   OwningBinary<ObjectFile> DebugObjOwner = L.getObjectForDebug(Obj);
   const ObjectFile *DebugObj = DebugObjOwner.getBinary();
@@ -188,17 +188,17 @@ void IntelJITEventListener::notifyObjectLoaded(
   // registered function addresses for each loaded object.  We will
   // use the MethodIDs map to get the registered ID for each function.
   LoadedObjectMap[ObjData] = Functions;
-  DebugObjects[Key] = std::move(DebugObjOwner);
+  DebugObjects[Obj.getData().data()] = std::move(DebugObjOwner);
 }
 
-void IntelJITEventListener::notifyFreeingObject(ObjectKey Key) {
+void IntelJITEventListener::NotifyFreeingObject(const ObjectFile &Obj) {
   // This object may not have been registered with the listener. If it wasn't,
   // bail out.
-  if (DebugObjects.find(Key) == DebugObjects.end())
+  if (DebugObjects.find(Obj.getData().data()) == DebugObjects.end())
     return;
 
   // Get the address of the object image for use as a unique identifier
-  const ObjectFile &DebugObj = *DebugObjects[Key].getBinary();
+  const ObjectFile &DebugObj = *DebugObjects[Obj.getData().data()].getBinary();
   const void* ObjData = DebugObj.getData().data();
 
   // Get the object's function list from LoadedObjectMap
@@ -223,7 +223,7 @@ void IntelJITEventListener::notifyFreeingObject(ObjectKey Key) {
 
   // Erase the object from LoadedObjectMap
   LoadedObjectMap.erase(OI);
-  DebugObjects.erase(Key);
+  DebugObjects.erase(Obj.getData().data());
 }
 
 }  // anonymous namespace.

@@ -35,6 +35,33 @@ class ConstantFP;
 class DbgVariable;
 class DwarfCompileUnit;
 
+// Data structure to hold a range for range lists.
+class RangeSpan {
+public:
+  RangeSpan(MCSymbol *S, MCSymbol *E) : Start(S), End(E) {}
+  const MCSymbol *getStart() const { return Start; }
+  const MCSymbol *getEnd() const { return End; }
+  void setEnd(const MCSymbol *E) { End = E; }
+
+private:
+  const MCSymbol *Start, *End;
+};
+
+class RangeSpanList {
+private:
+  // Index for locating within the debug_range section this particular span.
+  MCSymbol *RangeSym;
+  // List of ranges.
+  SmallVector<RangeSpan, 2> Ranges;
+
+public:
+  RangeSpanList(MCSymbol *Sym, SmallVector<RangeSpan, 2> Ranges)
+      : RangeSym(Sym), Ranges(std::move(Ranges)) {}
+  MCSymbol *getSym() const { return RangeSym; }
+  const SmallVectorImpl<RangeSpan> &getRanges() const { return Ranges; }
+  void addRange(RangeSpan Range) { Ranges.push_back(Range); }
+};
+
 //===----------------------------------------------------------------------===//
 /// This dwarf writer support class manages information associated with a
 /// source file.
@@ -48,9 +75,6 @@ protected:
 
   /// Target of Dwarf emission.
   AsmPrinter *Asm;
-
-  /// Emitted at the end of the CU and used to compute the CU Length field.
-  MCSymbol *EndLabel = nullptr;
 
   // Holders for some common dwarf information.
   DwarfDebug *DD;
@@ -85,7 +109,6 @@ protected:
 public:
   // Accessors.
   AsmPrinter* getAsmPrinter() const { return Asm; }
-  MCSymbol *getEndLabel() const { return EndLabel; }
   uint16_t getLanguage() const { return CUNode->getSourceLanguage(); }
   const DICompileUnit *getCUNode() const { return CUNode; }
 
@@ -190,7 +213,6 @@ public:
   void addSourceLine(DIE &Die, const DILocalVariable *V);
   void addSourceLine(DIE &Die, const DIGlobalVariable *G);
   void addSourceLine(DIE &Die, const DISubprogram *SP);
-  void addSourceLine(DIE &Die, const DILabel *L);
   void addSourceLine(DIE &Die, const DIType *Ty);
   void addSourceLine(DIE &Die, const DIObjCProperty *Ty);
 
@@ -275,9 +297,6 @@ public:
 
   /// Add the DW_AT_rnglists_base attribute to the unit DIE.
   void addRnglistsBase();
-
-  /// Add the DW_AT_loclists_base attribute to the unit DIE.
-  void addLoclistsBase();
 
   virtual DwarfCompileUnit &getCU() = 0;
 

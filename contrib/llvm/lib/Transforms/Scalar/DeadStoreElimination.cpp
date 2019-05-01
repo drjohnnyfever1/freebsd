@@ -71,7 +71,7 @@ using namespace llvm;
 
 STATISTIC(NumRedundantStores, "Number of redundant stores deleted");
 STATISTIC(NumFastStores, "Number of stores deleted");
-STATISTIC(NumFastOther, "Number of other instrs removed");
+STATISTIC(NumFastOther , "Number of other instrs removed");
 STATISTIC(NumCompletePartials, "Number of stores dead by later partials");
 STATISTIC(NumModifiedStores, "Number of stores modified");
 
@@ -349,13 +349,10 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
                                    InstOverlapIntervalsTy &IOL,
                                    AliasAnalysis &AA,
                                    const Function *F) {
-  // FIXME: Vet that this works for size upper-bounds. Seems unlikely that we'll
-  // get imprecise values here, though (except for unknown sizes).
-  if (!Later.Size.isPrecise() || !Earlier.Size.isPrecise())
+  // If we don't know the sizes of either access, then we can't do a comparison.
+  if (Later.Size == MemoryLocation::UnknownSize ||
+      Earlier.Size == MemoryLocation::UnknownSize)
     return OW_Unknown;
-
-  const uint64_t LaterSize = Later.Size.getValue();
-  const uint64_t EarlierSize = Earlier.Size.getValue();
 
   const Value *P1 = Earlier.Ptr->stripPointerCasts();
   const Value *P2 = Later.Ptr->stripPointerCasts();
@@ -364,7 +361,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // the later store was larger than the earlier store.
   if (P1 == P2 || AA.isMustAlias(P1, P2)) {
     // Make sure that the Later size is >= the Earlier size.
-    if (LaterSize >= EarlierSize)
+    if (Later.Size >= Earlier.Size)
       return OW_Complete;
   }
 
@@ -382,7 +379,7 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // If the "Later" store is to a recognizable object, get its size.
   uint64_t ObjectSize = getPointerSize(UO2, DL, TLI, F);
   if (ObjectSize != MemoryLocation::UnknownSize)
-    if (ObjectSize == LaterSize && ObjectSize >= EarlierSize)
+    if (ObjectSize == Later.Size && ObjectSize >= Earlier.Size)
       return OW_Complete;
 
   // Okay, we have stores to two completely different pointers.  Try to
@@ -413,8 +410,8 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   //
   // We have to be careful here as *Off is signed while *.Size is unsigned.
   if (EarlierOff >= LaterOff &&
-      LaterSize >= EarlierSize &&
-      uint64_t(EarlierOff - LaterOff) + EarlierSize <= LaterSize)
+      Later.Size >= Earlier.Size &&
+      uint64_t(EarlierOff - LaterOff) + Earlier.Size <= Later.Size)
     return OW_Complete;
 
   // We may now overlap, although the overlap is not complete. There might also
@@ -423,21 +420,21 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // Note: The correctness of this logic depends on the fact that this function
   // is not even called providing DepWrite when there are any intervening reads.
   if (EnablePartialOverwriteTracking &&
-      LaterOff < int64_t(EarlierOff + EarlierSize) &&
-      int64_t(LaterOff + LaterSize) >= EarlierOff) {
+      LaterOff < int64_t(EarlierOff + Earlier.Size) &&
+      int64_t(LaterOff + Later.Size) >= EarlierOff) {
 
     // Insert our part of the overlap into the map.
     auto &IM = IOL[DepWrite];
     LLVM_DEBUG(dbgs() << "DSE: Partial overwrite: Earlier [" << EarlierOff
-                      << ", " << int64_t(EarlierOff + EarlierSize)
+                      << ", " << int64_t(EarlierOff + Earlier.Size)
                       << ") Later [" << LaterOff << ", "
-                      << int64_t(LaterOff + LaterSize) << ")\n");
+                      << int64_t(LaterOff + Later.Size) << ")\n");
 
     // Make sure that we only insert non-overlapping intervals and combine
     // adjacent intervals. The intervals are stored in the map with the ending
     // offset as the key (in the half-open sense) and the starting offset as
     // the value.
-    int64_t LaterIntStart = LaterOff, LaterIntEnd = LaterOff + LaterSize;
+    int64_t LaterIntStart = LaterOff, LaterIntEnd = LaterOff + Later.Size;
 
     // Find any intervals ending at, or after, LaterIntStart which start
     // before LaterIntEnd.
@@ -467,10 +464,10 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
 
     ILI = IM.begin();
     if (ILI->second <= EarlierOff &&
-        ILI->first >= int64_t(EarlierOff + EarlierSize)) {
+        ILI->first >= int64_t(EarlierOff + Earlier.Size)) {
       LLVM_DEBUG(dbgs() << "DSE: Full overwrite from partials: Earlier ["
                         << EarlierOff << ", "
-                        << int64_t(EarlierOff + EarlierSize)
+                        << int64_t(EarlierOff + Earlier.Size)
                         << ") Composite Later [" << ILI->second << ", "
                         << ILI->first << ")\n");
       ++NumCompletePartials;
@@ -481,13 +478,13 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // Check for an earlier store which writes to all the memory locations that
   // the later store writes to.
   if (EnablePartialStoreMerging && LaterOff >= EarlierOff &&
-      int64_t(EarlierOff + EarlierSize) > LaterOff &&
-      uint64_t(LaterOff - EarlierOff) + LaterSize <= EarlierSize) {
+      int64_t(EarlierOff + Earlier.Size) > LaterOff &&
+      uint64_t(LaterOff - EarlierOff) + Later.Size <= Earlier.Size) {
     LLVM_DEBUG(dbgs() << "DSE: Partial overwrite an earlier load ["
                       << EarlierOff << ", "
-                      << int64_t(EarlierOff + EarlierSize)
+                      << int64_t(EarlierOff + Earlier.Size)
                       << ") by a later store [" << LaterOff << ", "
-                      << int64_t(LaterOff + LaterSize) << ")\n");
+                      << int64_t(LaterOff + Later.Size) << ")\n");
     // TODO: Maybe come up with a better name?
     return OW_PartialEarlierWithFullLater;
   }
@@ -501,8 +498,8 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // In this case we may want to trim the size of earlier to avoid generating
   // writes to addresses which will definitely be overwritten later
   if (!EnablePartialOverwriteTracking &&
-      (LaterOff > EarlierOff && LaterOff < int64_t(EarlierOff + EarlierSize) &&
-       int64_t(LaterOff + LaterSize) >= int64_t(EarlierOff + EarlierSize)))
+      (LaterOff > EarlierOff && LaterOff < int64_t(EarlierOff + Earlier.Size) &&
+       int64_t(LaterOff + Later.Size) >= int64_t(EarlierOff + Earlier.Size)))
     return OW_End;
 
   // Finally, we also need to check if the later store overwrites the beginning
@@ -515,8 +512,9 @@ static OverwriteResult isOverwrite(const MemoryLocation &Later,
   // of earlier to avoid generating writes to addresses which will definitely
   // be overwritten later.
   if (!EnablePartialOverwriteTracking &&
-      (LaterOff <= EarlierOff && int64_t(LaterOff + LaterSize) > EarlierOff)) {
-    assert(int64_t(LaterOff + LaterSize) < int64_t(EarlierOff + EarlierSize) &&
+      (LaterOff <= EarlierOff && int64_t(LaterOff + Later.Size) > EarlierOff)) {
+    assert(int64_t(LaterOff + Later.Size) <
+               int64_t(EarlierOff + Earlier.Size) &&
            "Expect to be handled as OW_Complete");
     return OW_Begin;
   }
@@ -643,7 +641,7 @@ static void findUnconditionalPreds(SmallVectorImpl<BasicBlock *> &Blocks,
   for (pred_iterator I = pred_begin(BB), E = pred_end(BB); I != E; ++I) {
     BasicBlock *Pred = *I;
     if (Pred == BB) continue;
-    Instruction *PredTI = Pred->getTerminator();
+    TerminatorInst *PredTI = Pred->getTerminator();
     if (PredTI->getNumSuccessors() != 1)
       continue;
 
@@ -834,7 +832,7 @@ static bool handleEndBlock(BasicBlock &BB, AliasAnalysis *AA,
       continue;
     }
 
-    if (auto *Call = dyn_cast<CallBase>(&*BBI)) {
+    if (auto CS = CallSite(&*BBI)) {
       // Remove allocation function calls from the list of dead stack objects;
       // there can't be any references before the definition.
       if (isAllocLikeFn(&*BBI, TLI))
@@ -842,15 +840,15 @@ static bool handleEndBlock(BasicBlock &BB, AliasAnalysis *AA,
 
       // If this call does not access memory, it can't be loading any of our
       // pointers.
-      if (AA->doesNotAccessMemory(Call))
+      if (AA->doesNotAccessMemory(CS))
         continue;
 
       // If the call might load from any of our allocas, then any store above
       // the call is live.
       DeadStackObjects.remove_if([&](Value *I) {
         // See if the call site touches the value.
-        return isRefSet(AA->getModRefInfo(
-            Call, I, getPointerSize(I, DL, *TLI, BB.getParent())));
+        return isRefSet(AA->getModRefInfo(CS, I, getPointerSize(I, DL, *TLI,
+                                                                BB.getParent())));
       });
 
       // If all of the allocas were clobbered by the call then we're not going
@@ -1004,10 +1002,11 @@ static bool removePartiallyOverlappedStores(AliasAnalysis *AA,
     Instruction *EarlierWrite = OI.first;
     MemoryLocation Loc = getLocForWrite(EarlierWrite);
     assert(isRemovable(EarlierWrite) && "Expect only removable instruction");
+    assert(Loc.Size != MemoryLocation::UnknownSize && "Unexpected mem loc");
 
     const Value *Ptr = Loc.Ptr->stripPointerCasts();
     int64_t EarlierStart = 0;
-    int64_t EarlierSize = int64_t(Loc.Size.getValue());
+    int64_t EarlierSize = int64_t(Loc.Size);
     GetPointerBaseWithConstantOffset(Ptr, EarlierStart, DL);
     OverlapIntervalsTy &IntervalMap = OI.second;
     Changed |=
@@ -1204,9 +1203,8 @@ static bool eliminateDeadStores(BasicBlock &BB, AliasAnalysis *AA,
           assert(!EnablePartialOverwriteTracking && "Do not expect to perform "
                                                     "when partial-overwrite "
                                                     "tracking is enabled");
-          // The overwrite result is known, so these must be known, too.
-          int64_t EarlierSize = DepLoc.Size.getValue();
-          int64_t LaterSize = Loc.Size.getValue();
+          int64_t EarlierSize = DepLoc.Size;
+          int64_t LaterSize = Loc.Size;
           bool IsOverwriteEnd = (OR == OW_End);
           MadeChange |= tryToShorten(DepWrite, DepWriteOffset, EarlierSize,
                                     InstWriteOffset, LaterSize, IsOverwriteEnd);

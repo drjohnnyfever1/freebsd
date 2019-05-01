@@ -218,7 +218,8 @@ computeHeightResources(const MachineBasicBlock *MBB) {
   // The trace tail is done.
   if (!TBI->Succ) {
     TBI->Tail = MBB->getNumber();
-    llvm::copy(PRCycles, ProcResourceHeights.begin() + PROffset);
+    std::copy(PRCycles.begin(), PRCycles.end(),
+              ProcResourceHeights.begin() + PROffset);
     return;
   }
 

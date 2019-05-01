@@ -48,16 +48,6 @@ def : WriteRes<GroupAlone, []> {
   let BeginGroup  = 1;
   let EndGroup    = 1;
 }
-def : WriteRes<GroupAlone2, []> {
-  let NumMicroOps = 6;
-  let BeginGroup  = 1;
-  let EndGroup    = 1;
-}
-def : WriteRes<GroupAlone3, []> {
-  let NumMicroOps = 9;
-  let BeginGroup  = 1;
-  let EndGroup    = 1;
-}
 
 // Incoming latency removed from the register operand which is used together
 // with a memory operand by the instruction.
@@ -141,7 +131,7 @@ def : InstRW<[WLat1, FXb, NormalGr], (instregex "(Call)?B(R)?(Asm.*)?$")>;
 def : InstRW<[WLat1, FXa, EndGroup], (instregex "BRCT(G)?$")>;
 def : InstRW<[WLat1, FXa, FXb, GroupAlone], (instregex "BRCTH$")>;
 def : InstRW<[WLat1, FXa, FXb, GroupAlone], (instregex "BCT(G)?(R)?$")>;
-def : InstRW<[WLat1, FXa2, FXb2, GroupAlone2],
+def : InstRW<[WLat1, FXa2, FXb2, GroupAlone],
              (instregex "B(R)?X(H|L).*$")>;
 
 // Compare and branch
@@ -484,13 +474,13 @@ def : InstRW<[WLat7LSU, RegReadAdv, FXa2, LSU, GroupAlone],
 //===----------------------------------------------------------------------===//
 
 def : InstRW<[WLat20, FXa4, GroupAlone], (instregex "DR$")>;
-def : InstRW<[WLat30, RegReadAdv, FXa4, LSU, GroupAlone2], (instregex "D$")>;
+def : InstRW<[WLat30, RegReadAdv, FXa4, LSU, GroupAlone], (instregex "D$")>;
 def : InstRW<[WLat30, FXa2, GroupAlone], (instregex "DSG(F)?R$")>;
-def : InstRW<[WLat30, RegReadAdv, FXa2, LSU, GroupAlone2],
+def : InstRW<[WLat30, RegReadAdv, FXa2, LSU, GroupAlone],
              (instregex "DSG(F)?$")>;
 def : InstRW<[WLat20, FXa4, GroupAlone], (instregex "DLR$")>;
 def : InstRW<[WLat30, FXa4, GroupAlone], (instregex "DLGR$")>;
-def : InstRW<[WLat30, RegReadAdv, FXa4, LSU, GroupAlone2], (instregex "DL(G)?$")>;
+def : InstRW<[WLat30, RegReadAdv, FXa4, LSU, GroupAlone], (instregex "DL(G)?$")>;
 
 //===----------------------------------------------------------------------===//
 // Shifts
@@ -500,7 +490,7 @@ def : InstRW<[WLat1, FXa, NormalGr], (instregex "SLL(G|K)?$")>;
 def : InstRW<[WLat1, FXa, NormalGr], (instregex "SRL(G|K)?$")>;
 def : InstRW<[WLat1, FXa, NormalGr], (instregex "SRA(G|K)?$")>;
 def : InstRW<[WLat1, FXa, NormalGr], (instregex "SLA(G|K)?$")>;
-def : InstRW<[WLat5LSU, WLat5LSU, FXa4, LSU, GroupAlone2],
+def : InstRW<[WLat5LSU, WLat5LSU, FXa4, LSU, GroupAlone],
              (instregex "S(L|R)D(A|L)$")>;
 
 // Rotate
@@ -607,9 +597,9 @@ def : InstRW<[WLat3LSU, WLat3LSU, FXa, FXb, LSU, GroupAlone],
              (instregex "CS(G|Y)?$")>;
 
 // Compare double and swap
-def : InstRW<[WLat6LSU, WLat6LSU, FXa3, FXb2, LSU, GroupAlone2],
+def : InstRW<[WLat6LSU, WLat6LSU, FXa3, FXb2, LSU, GroupAlone],
              (instregex "CDS(Y)?$")>;
-def : InstRW<[WLat15, WLat15, FXa2, FXb4, LSU3, GroupAlone3],
+def : InstRW<[WLat15, WLat15, FXa2, FXb4, LSU3, GroupAlone],
              (instregex "CDSG$")>;
 
 // Compare and swap and store
@@ -630,7 +620,7 @@ def : InstRW<[WLat1LSU, WLat1LSU, LSU2, GroupAlone], (instregex "LPD(G)?$")>;
 //===----------------------------------------------------------------------===//
 
 def : InstRW<[WLat1, LSU5, GroupAlone], (instregex "TR$")>;
-def : InstRW<[WLat30, WLat30, WLat30, FXa3, LSU2, GroupAlone2],
+def : InstRW<[WLat30, WLat30, WLat30, FXa3, LSU2, GroupAlone],
              (instregex "TRT$")>;
 def : InstRW<[WLat30, WLat30, WLat30, MCD], (instregex "TRTR$")>;
 def : InstRW<[WLat30, WLat30, MCD], (instregex "TRE$")>;
@@ -653,21 +643,21 @@ def : InstRW<[WLat30, WLat30, WLat30, MCD],
 // Decimal arithmetic
 //===----------------------------------------------------------------------===//
 
-def : InstRW<[WLat30, RegReadAdv, FXb, VecDF2, LSU2, GroupAlone2],
+def : InstRW<[WLat30, RegReadAdv, FXb, VecDF2, LSU2, GroupAlone],
              (instregex "CVBG$")>;
-def : InstRW<[WLat30, RegReadAdv, FXb, VecDF, LSU, GroupAlone2],
+def : InstRW<[WLat30, RegReadAdv, FXb, VecDF, LSU, GroupAlone],
              (instregex "CVB(Y)?$")>;
-def : InstRW<[WLat1, FXb3, VecDF4, LSU, GroupAlone3], (instregex "CVDG$")>;
-def : InstRW<[WLat1, FXb2, VecDF, LSU, GroupAlone2], (instregex "CVD(Y)?$")>;
+def : InstRW<[WLat1, FXb3, VecDF4, LSU, GroupAlone], (instregex "CVDG$")>;
+def : InstRW<[WLat1, FXb2, VecDF, LSU, GroupAlone], (instregex "CVD(Y)?$")>;
 def : InstRW<[WLat1, LSU5, GroupAlone], (instregex "MV(N|O|Z)$")>;
 def : InstRW<[WLat1, LSU5, GroupAlone], (instregex "(PACK|PKA|PKU)$")>;
 def : InstRW<[WLat12, LSU5, GroupAlone], (instregex "UNPK(A|U)$")>;
 def : InstRW<[WLat1, FXb, LSU2, Cracked], (instregex "UNPK$")>;
 
-def : InstRW<[WLat5LSU, FXb, VecDFX, LSU3, GroupAlone2],
+def : InstRW<[WLat5LSU, FXb, VecDFX, LSU3, GroupAlone],
              (instregex "(A|S|ZA)P$")>;
-def : InstRW<[WLat1, FXb, VecDFX4, LSU3, GroupAlone2], (instregex "(M|D)P$")>;
-def : InstRW<[WLat15, FXb, VecDFX2, LSU2, GroupAlone3], (instregex "SRP$")>;
+def : InstRW<[WLat1, FXb, VecDFX4, LSU3, GroupAlone], (instregex "(M|D)P$")>;
+def : InstRW<[WLat15, FXb, VecDFX2, LSU2, GroupAlone], (instregex "SRP$")>;
 def : InstRW<[WLat8, VecDFX, LSU, LSU, GroupAlone], (instregex "CP$")>;
 def : InstRW<[WLat3LSU, VecDFX, LSU, Cracked], (instregex "TP$")>;
 def : InstRW<[WLat30, MCD], (instregex "ED(MK)?$")>;
@@ -684,7 +674,7 @@ def : InstRW<[WLat5, LSU, FXa, Cracked], (instregex "LAE(Y)?$")>;
 
 // Load/store access multiple (not modeled precisely)
 def : InstRW<[WLat20, WLat20, LSU5, GroupAlone], (instregex "LAM(Y)?$")>;
-def : InstRW<[WLat1, LSU5, FXb, GroupAlone2], (instregex "STAM(Y)?$")>;
+def : InstRW<[WLat1, LSU5, GroupAlone], (instregex "STAM(Y)?$")>;
 
 //===----------------------------------------------------------------------===//
 // Program mask and addressing mode
@@ -714,7 +704,7 @@ def : InstRW<[WLat1, FXa2, FXb, GroupAlone], (instregex "BASSM$")>;
 //===----------------------------------------------------------------------===//
 
 // Transaction begin
-def : InstRW<[WLat9, LSU2, FXb5, GroupAlone2], (instregex "TBEGIN(C)?$")>;
+def : InstRW<[WLat9, LSU2, FXb5, GroupAlone], (instregex "TBEGIN(C)?$")>;
 
 // Transaction end
 def : InstRW<[WLat1, FXb, GroupAlone], (instregex "TEND$")>;
@@ -823,9 +813,9 @@ def : InstRW<[WLat8, VecBF4, GroupAlone], (instregex "LX(E|D)BR$")>;
 
 // Convert from fixed / logical
 def : InstRW<[WLat8, FXb, VecBF, Cracked], (instregex "C(E|D)(F|G)BR(A)?$")>;
-def : InstRW<[WLat11, FXb, VecDF4, GroupAlone2], (instregex "CX(F|G)BR(A)?$")>;
+def : InstRW<[WLat11, FXb, VecDF4, GroupAlone], (instregex "CX(F|G)BR(A)?$")>;
 def : InstRW<[WLat8, FXb, VecBF, Cracked], (instregex "C(E|D)L(F|G)BR$")>;
-def : InstRW<[WLat11, FXb, VecDF4, GroupAlone2], (instregex "CXL(F|G)BR$")>;
+def : InstRW<[WLat11, FXb, VecDF4, GroupAlone], (instregex "CXL(F|G)BR$")>;
 
 // Convert to fixed / logical
 def : InstRW<[WLat10, WLat10, FXb, VecBF, Cracked],
@@ -909,7 +899,7 @@ def : InstRW<[WLat9, VecDF2, GroupAlone], (instregex "(K|C)XBR$")>;
 
 // Test Data Class
 def : InstRW<[WLat5, LSU, VecXsPm, NormalGr], (instregex "TC(E|D)B$")>;
-def : InstRW<[WLat10, LSU, VecDF4, GroupAlone], (instregex "TCXB$")>;
+def : InstRW<[WLat10, LSU2, VecDF4, GroupAlone], (instregex "TCXB$")>;
 
 //===----------------------------------------------------------------------===//
 // FP: Floating-point control register instructions
@@ -951,7 +941,7 @@ def : InstRW<[WLat8, VecBF4, GroupAlone], (instregex "LX(E|D)R$")>;
 
 // Convert from fixed
 def : InstRW<[WLat8, FXb, VecBF, Cracked], (instregex "C(E|D)(F|G)R$")>;
-def : InstRW<[WLat11, FXb, VecDF4, GroupAlone2], (instregex "CX(F|G)R$")>;
+def : InstRW<[WLat11, FXb, VecDF4, GroupAlone], (instregex "CX(F|G)R$")>;
 
 // Convert to fixed
 def : InstRW<[WLat10, WLat10, FXb, VecBF, Cracked], (instregex "C(F|G)(E|D)R$")>;
@@ -1064,9 +1054,9 @@ def : InstRW<[WLat10, VecDF4, GroupAlone], (instregex "LXDTR$")>;
 
 // Convert from fixed / logical
 def : InstRW<[WLat30, FXb, VecDF, Cracked], (instregex "CD(F|G)TR(A)?$")>;
-def : InstRW<[WLat30, FXb, VecDF4, GroupAlone2], (instregex "CX(F|G)TR(A)?$")>;
+def : InstRW<[WLat30, FXb, VecDF4, GroupAlone], (instregex "CX(F|G)TR(A)?$")>;
 def : InstRW<[WLat30, FXb, VecDF, Cracked], (instregex "CDL(F|G)TR$")>;
-def : InstRW<[WLat30, FXb, VecDF4, GroupAlone2], (instregex "CXL(F|G)TR$")>;
+def : InstRW<[WLat30, FXb, VecDF4, GroupAlone], (instregex "CXL(F|G)TR$")>;
 
 // Convert to fixed / logical
 def : InstRW<[WLat30, WLat30, FXb, VecDF, Cracked],
@@ -1078,19 +1068,19 @@ def : InstRW<[WLat30, WLat30, FXb, VecDF2, Cracked], (instregex "CL(F|G)XTR$")>;
 
 // Convert from / to signed / unsigned packed
 def : InstRW<[WLat9, FXb, VecDF, Cracked], (instregex "CD(S|U)TR$")>;
-def : InstRW<[WLat12, FXb2, VecDF4, GroupAlone2], (instregex "CX(S|U)TR$")>;
+def : InstRW<[WLat12, FXb2, VecDF4, GroupAlone], (instregex "CX(S|U)TR$")>;
 def : InstRW<[WLat11, FXb, VecDF, Cracked], (instregex "C(S|U)DTR$")>;
-def : InstRW<[WLat15, FXb2, VecDF4, GroupAlone2], (instregex "C(S|U)XTR$")>;
+def : InstRW<[WLat15, FXb2, VecDF4, GroupAlone], (instregex "C(S|U)XTR$")>;
 
 // Convert from / to zoned
 def : InstRW<[WLat8LSU, LSU, VecDF, Cracked], (instregex "CDZT$")>;
-def : InstRW<[WLat16LSU, LSU2, VecDF4, GroupAlone3], (instregex "CXZT$")>;
+def : InstRW<[WLat16LSU, LSU2, VecDF4, GroupAlone], (instregex "CXZT$")>;
 def : InstRW<[WLat1, FXb, LSU, VecDF, Cracked], (instregex "CZDT$")>;
 def : InstRW<[WLat1, FXb, LSU, VecDF2, GroupAlone], (instregex "CZXT$")>;
 
 // Convert from / to packed
 def : InstRW<[WLat8LSU, LSU, VecDF, Cracked], (instregex "CDPT$")>;
-def : InstRW<[WLat16LSU, LSU2, VecDF4, GroupAlone3], (instregex "CXPT$")>;
+def : InstRW<[WLat16LSU, LSU2, VecDF4, GroupAlone], (instregex "CXPT$")>;
 def : InstRW<[WLat1, FXb, LSU, VecDF, Cracked], (instregex "CPDT$")>;
 def : InstRW<[WLat1, FXb, LSU, VecDF2, GroupAlone], (instregex "CPXT$")>;
 
@@ -1139,7 +1129,7 @@ def : InstRW<[WLat10, WLat10, VecDF4, GroupAlone], (instregex "QAXTR$")>;
 
 // Reround
 def : InstRW<[WLat9, WLat9, FXb, VecDF, Cracked], (instregex "RRDTR$")>;
-def : InstRW<[WLat11, WLat11, FXb, VecDF4, GroupAlone2], (instregex "RRXTR$")>;
+def : InstRW<[WLat11, WLat11, FXb, VecDF4, GroupAlone], (instregex "RRXTR$")>;
 
 // Shift significand left/right
 def : InstRW<[WLat11LSU, LSU, VecDF, GroupAlone], (instregex "S(L|R)DT$")>;
@@ -1147,7 +1137,7 @@ def : InstRW<[WLat11LSU, LSU, VecDF4, GroupAlone], (instregex "S(L|R)XT$")>;
 
 // Insert biased exponent
 def : InstRW<[WLat9, FXb, VecDF, Cracked], (instregex "IEDTR$")>;
-def : InstRW<[WLat11, FXb, VecDF4, GroupAlone2], (instregex "IEXTR$")>;
+def : InstRW<[WLat11, FXb, VecDF4, GroupAlone], (instregex "IEXTR$")>;
 
 //===----------------------------------------------------------------------===//
 // DFP: Comparisons
@@ -1210,7 +1200,7 @@ def : InstRW<[WLat4LSU, WLat4LSU, LSU5, GroupAlone], (instregex "VLM$")>;
 def : InstRW<[WLat1, FXb, LSU, NormalGr], (instregex "VST(L|32|64)?$")>;
 def : InstRW<[WLat1, FXb, LSU, NormalGr], (instregex "VSTE(F|G)$")>;
 def : InstRW<[WLat1, FXb, LSU, VecXsPm, Cracked], (instregex "VSTE(B|H)$")>;
-def : InstRW<[WLat1, LSU2, FXb3, GroupAlone2], (instregex "VSTM$")>;
+def : InstRW<[WLat1, LSU2, FXb3, GroupAlone], (instregex "VSTM$")>;
 def : InstRW<[WLat1, FXb2, LSU, Cracked], (instregex "VSCE(F|G)$")>;
 
 //===----------------------------------------------------------------------===//
@@ -1424,7 +1414,7 @@ def : InstRW<[WLat1, LSU, EndGroup], (instregex "SAC(F)?$")>;
 //===----------------------------------------------------------------------===//
 
 def : InstRW<[WLat4LSU, WLat4LSU, LSU2, GroupAlone], (instregex "LCTL(G)?$")>;
-def : InstRW<[WLat1, LSU5, FXb, GroupAlone2], (instregex "STCT(L|G)$")>;
+def : InstRW<[WLat1, LSU5, GroupAlone], (instregex "STCT(L|G)$")>;
 def : InstRW<[LSULatency, LSU, NormalGr], (instregex "E(P|S)A(I)?R$")>;
 def : InstRW<[WLat30, MCD], (instregex "SSA(I)?R$")>;
 def : InstRW<[WLat30, MCD], (instregex "ESEA$")>;
@@ -1468,8 +1458,8 @@ def : InstRW<[WLat30, MCD], (instregex "TPROT$")>;
 // System: Memory-move Instructions
 //===----------------------------------------------------------------------===//
 
-def : InstRW<[WLat4LSU, FXa2, FXb, LSU5, GroupAlone2], (instregex "MVC(K|P|S)$")>;
-def : InstRW<[WLat1, FXa, LSU5, GroupAlone2], (instregex "MVC(S|D)K$")>;
+def : InstRW<[WLat4LSU, FXa2, FXb, LSU5, GroupAlone], (instregex "MVC(K|P|S)$")>;
+def : InstRW<[WLat1, FXa, LSU5, GroupAlone], (instregex "MVC(S|D)K$")>;
 def : InstRW<[WLat30, MCD], (instregex "MVCOS$")>;
 def : InstRW<[WLat30, MCD], (instregex "MVPG$")>;
 
@@ -1501,8 +1491,8 @@ def : InstRW<[WLat30, WLat30, MCD], (instregex "(E|M)STA$")>;
 def : InstRW<[WLat30, MCD], (instregex "PTFF$")>;
 def : InstRW<[WLat30, MCD], (instregex "SCK(PF|C)?$")>;
 def : InstRW<[WLat1, LSU2, GroupAlone], (instregex "SPT$")>;
-def : InstRW<[WLat15, LSU3, FXa2, FXb, GroupAlone2], (instregex "STCK(F)?$")>;
-def : InstRW<[WLat20, LSU4, FXa2, FXb2, GroupAlone3], (instregex "STCKE$")>;
+def : InstRW<[WLat15, LSU3, FXa2, FXb, GroupAlone], (instregex "STCK(F)?$")>;
+def : InstRW<[WLat20, LSU4, FXa2, FXb2, GroupAlone], (instregex "STCKE$")>;
 def : InstRW<[WLat30, MCD], (instregex "STCKC$")>;
 def : InstRW<[WLat1, LSU2, FXb, Cracked], (instregex "STPT$")>;
 

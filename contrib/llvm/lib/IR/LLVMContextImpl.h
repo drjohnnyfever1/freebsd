@@ -280,24 +280,21 @@ template <> struct MDNodeKeyImpl<DILocation> {
   unsigned Column;
   Metadata *Scope;
   Metadata *InlinedAt;
-  bool ImplicitCode;
 
   MDNodeKeyImpl(unsigned Line, unsigned Column, Metadata *Scope,
-                Metadata *InlinedAt, bool ImplicitCode)
-      : Line(Line), Column(Column), Scope(Scope), InlinedAt(InlinedAt),
-        ImplicitCode(ImplicitCode) {}
+                Metadata *InlinedAt)
+      : Line(Line), Column(Column), Scope(Scope), InlinedAt(InlinedAt) {}
   MDNodeKeyImpl(const DILocation *L)
       : Line(L->getLine()), Column(L->getColumn()), Scope(L->getRawScope()),
-        InlinedAt(L->getRawInlinedAt()), ImplicitCode(L->isImplicitCode()) {}
+        InlinedAt(L->getRawInlinedAt()) {}
 
   bool isKeyOf(const DILocation *RHS) const {
     return Line == RHS->getLine() && Column == RHS->getColumn() &&
-           Scope == RHS->getRawScope() && InlinedAt == RHS->getRawInlinedAt() &&
-           ImplicitCode == RHS->isImplicitCode();
+           Scope == RHS->getRawScope() && InlinedAt == RHS->getRawInlinedAt();
   }
 
   unsigned getHashValue() const {
-    return hash_combine(Line, Column, Scope, InlinedAt, ImplicitCode);
+    return hash_combine(Line, Column, Scope, InlinedAt);
   }
 };
 
@@ -379,22 +376,20 @@ template <> struct MDNodeKeyImpl<DIBasicType> {
   uint64_t SizeInBits;
   uint32_t AlignInBits;
   unsigned Encoding;
-  unsigned Flags;
 
   MDNodeKeyImpl(unsigned Tag, MDString *Name, uint64_t SizeInBits,
-                uint32_t AlignInBits, unsigned Encoding, unsigned Flags)
+                uint32_t AlignInBits, unsigned Encoding)
       : Tag(Tag), Name(Name), SizeInBits(SizeInBits), AlignInBits(AlignInBits),
-        Encoding(Encoding), Flags(Flags) {}
+        Encoding(Encoding) {}
   MDNodeKeyImpl(const DIBasicType *N)
       : Tag(N->getTag()), Name(N->getRawName()), SizeInBits(N->getSizeInBits()),
-        AlignInBits(N->getAlignInBits()), Encoding(N->getEncoding()), Flags(N->getFlags()) {}
+        AlignInBits(N->getAlignInBits()), Encoding(N->getEncoding()) {}
 
   bool isKeyOf(const DIBasicType *RHS) const {
     return Tag == RHS->getTag() && Name == RHS->getRawName() &&
            SizeInBits == RHS->getSizeInBits() &&
            AlignInBits == RHS->getAlignInBits() &&
-           Encoding == RHS->getEncoding() &&
-           Flags == RHS->getFlags();
+           Encoding == RHS->getEncoding();
   }
 
   unsigned getHashValue() const {
@@ -612,12 +607,15 @@ template <> struct MDNodeKeyImpl<DISubprogram> {
   Metadata *File;
   unsigned Line;
   Metadata *Type;
+  bool IsLocalToUnit;
+  bool IsDefinition;
   unsigned ScopeLine;
   Metadata *ContainingType;
+  unsigned Virtuality;
   unsigned VirtualIndex;
   int ThisAdjustment;
   unsigned Flags;
-  unsigned SPFlags;
+  bool IsOptimized;
   Metadata *Unit;
   Metadata *TemplateParams;
   Metadata *Declaration;
@@ -626,39 +624,45 @@ template <> struct MDNodeKeyImpl<DISubprogram> {
 
   MDNodeKeyImpl(Metadata *Scope, MDString *Name, MDString *LinkageName,
                 Metadata *File, unsigned Line, Metadata *Type,
-                unsigned ScopeLine, Metadata *ContainingType,
+                bool IsLocalToUnit, bool IsDefinition, unsigned ScopeLine,
+                Metadata *ContainingType, unsigned Virtuality,
                 unsigned VirtualIndex, int ThisAdjustment, unsigned Flags,
-                unsigned SPFlags, Metadata *Unit, Metadata *TemplateParams,
+                bool IsOptimized, Metadata *Unit, Metadata *TemplateParams,
                 Metadata *Declaration, Metadata *RetainedNodes,
                 Metadata *ThrownTypes)
       : Scope(Scope), Name(Name), LinkageName(LinkageName), File(File),
-        Line(Line), Type(Type), ScopeLine(ScopeLine),
-        ContainingType(ContainingType), VirtualIndex(VirtualIndex),
-        ThisAdjustment(ThisAdjustment), Flags(Flags), SPFlags(SPFlags),
-        Unit(Unit), TemplateParams(TemplateParams), Declaration(Declaration),
+        Line(Line), Type(Type), IsLocalToUnit(IsLocalToUnit),
+        IsDefinition(IsDefinition), ScopeLine(ScopeLine),
+        ContainingType(ContainingType), Virtuality(Virtuality),
+        VirtualIndex(VirtualIndex), ThisAdjustment(ThisAdjustment),
+        Flags(Flags), IsOptimized(IsOptimized), Unit(Unit),
+        TemplateParams(TemplateParams), Declaration(Declaration),
         RetainedNodes(RetainedNodes), ThrownTypes(ThrownTypes) {}
   MDNodeKeyImpl(const DISubprogram *N)
       : Scope(N->getRawScope()), Name(N->getRawName()),
         LinkageName(N->getRawLinkageName()), File(N->getRawFile()),
-        Line(N->getLine()), Type(N->getRawType()), ScopeLine(N->getScopeLine()),
-        ContainingType(N->getRawContainingType()),
-        VirtualIndex(N->getVirtualIndex()),
+        Line(N->getLine()), Type(N->getRawType()),
+        IsLocalToUnit(N->isLocalToUnit()), IsDefinition(N->isDefinition()),
+        ScopeLine(N->getScopeLine()), ContainingType(N->getRawContainingType()),
+        Virtuality(N->getVirtuality()), VirtualIndex(N->getVirtualIndex()),
         ThisAdjustment(N->getThisAdjustment()), Flags(N->getFlags()),
-        SPFlags(N->getSPFlags()), Unit(N->getRawUnit()),
+        IsOptimized(N->isOptimized()), Unit(N->getRawUnit()),
         TemplateParams(N->getRawTemplateParams()),
-        Declaration(N->getRawDeclaration()),
-        RetainedNodes(N->getRawRetainedNodes()),
+        Declaration(N->getRawDeclaration()), RetainedNodes(N->getRawRetainedNodes()),
         ThrownTypes(N->getRawThrownTypes()) {}
 
   bool isKeyOf(const DISubprogram *RHS) const {
     return Scope == RHS->getRawScope() && Name == RHS->getRawName() &&
            LinkageName == RHS->getRawLinkageName() &&
            File == RHS->getRawFile() && Line == RHS->getLine() &&
-           Type == RHS->getRawType() && ScopeLine == RHS->getScopeLine() &&
+           Type == RHS->getRawType() && IsLocalToUnit == RHS->isLocalToUnit() &&
+           IsDefinition == RHS->isDefinition() &&
+           ScopeLine == RHS->getScopeLine() &&
            ContainingType == RHS->getRawContainingType() &&
+           Virtuality == RHS->getVirtuality() &&
            VirtualIndex == RHS->getVirtualIndex() &&
            ThisAdjustment == RHS->getThisAdjustment() &&
-           Flags == RHS->getFlags() && SPFlags == RHS->getSPFlags() &&
+           Flags == RHS->getFlags() && IsOptimized == RHS->isOptimized() &&
            Unit == RHS->getUnit() &&
            TemplateParams == RHS->getRawTemplateParams() &&
            Declaration == RHS->getRawDeclaration() &&
@@ -666,13 +670,11 @@ template <> struct MDNodeKeyImpl<DISubprogram> {
            ThrownTypes == RHS->getRawThrownTypes();
   }
 
-  bool isDefinition() const { return SPFlags & DISubprogram::SPFlagDefinition; }
-
   unsigned getHashValue() const {
     // If this is a declaration inside an ODR type, only hash the type and the
     // name.  Otherwise the hash will be stronger than
     // MDNodeSubsetEqualImpl::isDeclarationOfODRMember().
-    if (!isDefinition() && LinkageName)
+    if (!IsDefinition && LinkageName)
       if (auto *CT = dyn_cast_or_null<DICompositeType>(Scope))
         if (CT->getRawIdentifier())
           return hash_combine(LinkageName, Scope);
@@ -689,7 +691,7 @@ template <> struct MDNodeSubsetEqualImpl<DISubprogram> {
   using KeyTy = MDNodeKeyImpl<DISubprogram>;
 
   static bool isSubsetEqual(const KeyTy &LHS, const DISubprogram *RHS) {
-    return isDeclarationOfODRMember(LHS.isDefinition(), LHS.Scope,
+    return isDeclarationOfODRMember(LHS.IsDefinition, LHS.Scope,
                                     LHS.LinkageName, LHS.TemplateParams, RHS);
   }
 
@@ -863,26 +865,23 @@ template <> struct MDNodeKeyImpl<DIGlobalVariable> {
   bool IsLocalToUnit;
   bool IsDefinition;
   Metadata *StaticDataMemberDeclaration;
-  Metadata *TemplateParams;
   uint32_t AlignInBits;
 
   MDNodeKeyImpl(Metadata *Scope, MDString *Name, MDString *LinkageName,
                 Metadata *File, unsigned Line, Metadata *Type,
                 bool IsLocalToUnit, bool IsDefinition,
-                Metadata *StaticDataMemberDeclaration, Metadata *TemplateParams,
-                uint32_t AlignInBits)
+                Metadata *StaticDataMemberDeclaration, uint32_t AlignInBits)
       : Scope(Scope), Name(Name), LinkageName(LinkageName), File(File),
         Line(Line), Type(Type), IsLocalToUnit(IsLocalToUnit),
         IsDefinition(IsDefinition),
         StaticDataMemberDeclaration(StaticDataMemberDeclaration),
-        TemplateParams(TemplateParams), AlignInBits(AlignInBits) {}
+        AlignInBits(AlignInBits) {}
   MDNodeKeyImpl(const DIGlobalVariable *N)
       : Scope(N->getRawScope()), Name(N->getRawName()),
         LinkageName(N->getRawLinkageName()), File(N->getRawFile()),
         Line(N->getLine()), Type(N->getRawType()),
         IsLocalToUnit(N->isLocalToUnit()), IsDefinition(N->isDefinition()),
         StaticDataMemberDeclaration(N->getRawStaticDataMemberDeclaration()),
-        TemplateParams(N->getRawTemplateParams()),
         AlignInBits(N->getAlignInBits()) {}
 
   bool isKeyOf(const DIGlobalVariable *RHS) const {
@@ -893,7 +892,6 @@ template <> struct MDNodeKeyImpl<DIGlobalVariable> {
            IsDefinition == RHS->isDefinition() &&
            StaticDataMemberDeclaration ==
                RHS->getRawStaticDataMemberDeclaration() &&
-           TemplateParams == RHS->getRawTemplateParams() &&
            AlignInBits == RHS->getAlignInBits();
   }
 

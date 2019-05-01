@@ -21,7 +21,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/MemoryLocation.h"
-#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include <algorithm>
@@ -84,18 +84,18 @@ public:
 
   AliasResult alias(const MemoryLocation &LocA, const MemoryLocation &LocB);
 
-  ModRefInfo getModRefInfo(const CallBase *Call, const MemoryLocation &Loc);
+  ModRefInfo getModRefInfo(ImmutableCallSite CS, const MemoryLocation &Loc);
 
-  ModRefInfo getModRefInfo(const CallBase *Call1, const CallBase *Call2);
+  ModRefInfo getModRefInfo(ImmutableCallSite CS1, ImmutableCallSite CS2);
 
   /// Chases pointers until we find a (constant global) or not.
   bool pointsToConstantMemory(const MemoryLocation &Loc, bool OrLocal);
 
   /// Get the location associated with a pointer argument of a callsite.
-  ModRefInfo getArgModRefInfo(const CallBase *Call, unsigned ArgIdx);
+  ModRefInfo getArgModRefInfo(ImmutableCallSite CS, unsigned ArgIdx);
 
   /// Returns the behavior when calling the given call site.
-  FunctionModRefBehavior getModRefBehavior(const CallBase *Call);
+  FunctionModRefBehavior getModRefBehavior(ImmutableCallSite CS);
 
   /// Returns the behavior when calling the given function. For use when the
   /// call site is not known.
@@ -115,7 +115,7 @@ private:
     unsigned ZExtBits;
     unsigned SExtBits;
 
-    APInt Scale;
+    int64_t Scale;
 
     bool operator==(const VariableGEPIndex &Other) const {
       return V == Other.V && ZExtBits == Other.ZExtBits &&
@@ -133,10 +133,10 @@ private:
     // Base pointer of the GEP
     const Value *Base;
     // Total constant offset w.r.t the base from indexing into structs
-    APInt StructOffset;
+    int64_t StructOffset;
     // Total constant offset w.r.t the base from indexing through
     // pointers/arrays/vectors
-    APInt OtherOffset;
+    int64_t OtherOffset;
     // Scaled variable (non-constant) indices.
     SmallVector<VariableGEPIndex, 4> VarIndices;
   };
@@ -189,7 +189,7 @@ private:
   bool
   constantOffsetHeuristic(const SmallVectorImpl<VariableGEPIndex> &VarIndices,
                           LocationSize V1Size, LocationSize V2Size,
-                          APInt BaseOffset, AssumptionCache *AC,
+                          int64_t BaseOffset, AssumptionCache *AC,
                           DominatorTree *DT);
 
   bool isValueEqualInPotentialCycles(const Value *V1, const Value *V2);
