@@ -26,7 +26,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -75,27 +74,27 @@ public:
 
     switch (kind) {
     case ARCRuntimeEntryPointKind::AutoreleaseRV:
-      return getIntrinsicEntryPoint(AutoreleaseRV,
-                                    Intrinsic::objc_autoreleaseReturnValue);
+      return getI8XRetI8XEntryPoint(AutoreleaseRV,
+                                    "objc_autoreleaseReturnValue", true);
     case ARCRuntimeEntryPointKind::Release:
-      return getIntrinsicEntryPoint(Release, Intrinsic::objc_release);
+      return getVoidRetI8XEntryPoint(Release, "objc_release");
     case ARCRuntimeEntryPointKind::Retain:
-      return getIntrinsicEntryPoint(Retain, Intrinsic::objc_retain);
+      return getI8XRetI8XEntryPoint(Retain, "objc_retain", true);
     case ARCRuntimeEntryPointKind::RetainBlock:
-      return getIntrinsicEntryPoint(RetainBlock, Intrinsic::objc_retainBlock);
+      return getI8XRetI8XEntryPoint(RetainBlock, "objc_retainBlock", false);
     case ARCRuntimeEntryPointKind::Autorelease:
-      return getIntrinsicEntryPoint(Autorelease, Intrinsic::objc_autorelease);
+      return getI8XRetI8XEntryPoint(Autorelease, "objc_autorelease", true);
     case ARCRuntimeEntryPointKind::StoreStrong:
-      return getIntrinsicEntryPoint(StoreStrong, Intrinsic::objc_storeStrong);
+      return getI8XRetI8XXI8XEntryPoint(StoreStrong, "objc_storeStrong");
     case ARCRuntimeEntryPointKind::RetainRV:
-      return getIntrinsicEntryPoint(RetainRV,
-                                Intrinsic::objc_retainAutoreleasedReturnValue);
+      return getI8XRetI8XEntryPoint(RetainRV,
+                                    "objc_retainAutoreleasedReturnValue", true);
     case ARCRuntimeEntryPointKind::RetainAutorelease:
-      return getIntrinsicEntryPoint(RetainAutorelease,
-                                    Intrinsic::objc_retainAutorelease);
+      return getI8XRetI8XEntryPoint(RetainAutorelease, "objc_retainAutorelease",
+                                    true);
     case ARCRuntimeEntryPointKind::RetainAutoreleaseRV:
-      return getIntrinsicEntryPoint(RetainAutoreleaseRV,
-                                Intrinsic::objc_retainAutoreleaseReturnValue);
+      return getI8XRetI8XEntryPoint(RetainAutoreleaseRV,
+                                    "objc_retainAutoreleaseReturnValue", true);
     }
 
     llvm_unreachable("Switch should be a covered switch.");
@@ -132,11 +131,54 @@ private:
   /// Declaration for objc_retainAutoreleaseReturnValue().
   Constant *RetainAutoreleaseRV = nullptr;
 
-  Constant *getIntrinsicEntryPoint(Constant *&Decl, Intrinsic::ID IntID) {
+  Constant *getVoidRetI8XEntryPoint(Constant *&Decl, StringRef Name) {
     if (Decl)
       return Decl;
 
-    return Decl = Intrinsic::getDeclaration(TheModule, IntID);
+    LLVMContext &C = TheModule->getContext();
+    Type *Params[] = { PointerType::getUnqual(Type::getInt8Ty(C)) };
+    AttributeList Attr = AttributeList().addAttribute(
+        C, AttributeList::FunctionIndex, Attribute::NoUnwind);
+    FunctionType *Fty = FunctionType::get(Type::getVoidTy(C), Params,
+                                          /*isVarArg=*/false);
+    return Decl = TheModule->getOrInsertFunction(Name, Fty, Attr);
+  }
+
+  Constant *getI8XRetI8XEntryPoint(Constant *&Decl, StringRef Name,
+                                   bool NoUnwind = false) {
+    if (Decl)
+      return Decl;
+
+    LLVMContext &C = TheModule->getContext();
+    Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
+    Type *Params[] = { I8X };
+    FunctionType *Fty = FunctionType::get(I8X, Params, /*isVarArg=*/false);
+    AttributeList Attr = AttributeList();
+
+    if (NoUnwind)
+      Attr = Attr.addAttribute(C, AttributeList::FunctionIndex,
+                               Attribute::NoUnwind);
+
+    return Decl = TheModule->getOrInsertFunction(Name, Fty, Attr);
+  }
+
+  Constant *getI8XRetI8XXI8XEntryPoint(Constant *&Decl, StringRef Name) {
+    if (Decl)
+      return Decl;
+
+    LLVMContext &C = TheModule->getContext();
+    Type *I8X = PointerType::getUnqual(Type::getInt8Ty(C));
+    Type *I8XX = PointerType::getUnqual(I8X);
+    Type *Params[] = { I8XX, I8X };
+
+    AttributeList Attr = AttributeList().addAttribute(
+        C, AttributeList::FunctionIndex, Attribute::NoUnwind);
+    Attr = Attr.addParamAttribute(C, 0, Attribute::NoCapture);
+
+    FunctionType *Fty = FunctionType::get(Type::getVoidTy(C), Params,
+                                          /*isVarArg=*/false);
+
+    return Decl = TheModule->getOrInsertFunction(Name, Fty, Attr);
   }
 };
 

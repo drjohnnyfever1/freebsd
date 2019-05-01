@@ -17,17 +17,16 @@
 
 using namespace lldb_private;
 
-llvm::VersionTuple HostInfoOpenBSD::GetOSVersion() {
+bool HostInfoOpenBSD::GetOSVersion(uint32_t &major, uint32_t &minor,
+                                   uint32_t &update) {
   struct utsname un;
 
   ::memset(&un, 0, sizeof(utsname));
   if (uname(&un) < 0)
-    return llvm::VersionTuple();
+    return false;
 
-  unsigned major, minor;
-  if (2 == sscanf(un.release, "%u.%u", &major, &minor))
-    return llvm::VersionTuple(major, minor);
-  return llvm::VersionTuple();
+  int status = sscanf(un.release, "%u.%u", &major, &minor);
+  return status == 2;
 }
 
 bool HostInfoOpenBSD::GetOSBuildString(std::string &s) {

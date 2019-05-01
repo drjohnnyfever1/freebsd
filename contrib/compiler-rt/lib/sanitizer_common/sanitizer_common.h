@@ -61,15 +61,6 @@ INLINE int Verbosity() {
   return atomic_load(&current_verbosity, memory_order_relaxed);
 }
 
-#if SANITIZER_ANDROID
-INLINE uptr GetPageSize() {
-// Android post-M sysconf(_SC_PAGESIZE) crashes if called from .preinit_array.
-  return 4096;
-}
-INLINE uptr GetPageSizeCached() {
-  return 4096;
-}
-#else
 uptr GetPageSize();
 extern uptr PageSizeCached;
 INLINE uptr GetPageSizeCached() {
@@ -77,13 +68,11 @@ INLINE uptr GetPageSizeCached() {
     PageSizeCached = GetPageSize();
   return PageSizeCached;
 }
-#endif
 uptr GetMmapGranularity();
 uptr GetMaxVirtualAddress();
 uptr GetMaxUserVirtualAddress();
 // Threads
 tid_t GetTid();
-int TgKill(pid_t pid, tid_t tid, int sig);
 uptr GetThreadSelf();
 void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
                                 uptr *stack_bottom);
@@ -233,9 +222,7 @@ bool SetEnv(const char *name, const char *value);
 u32 GetUid();
 void ReExec();
 void CheckASLR();
-void CheckMPROTECT();
 char **GetArgv();
-char **GetEnviron();
 void PrintCmdline();
 bool StackSizeIsUnlimited();
 uptr GetStackSizeLimitInBytes();
@@ -909,7 +896,6 @@ struct SignalContext {
   bool IsMemoryAccess() const;
 };
 
-void InitializePlatformEarly();
 void MaybeReexec();
 
 template <typename Fn>

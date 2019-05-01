@@ -10,14 +10,18 @@
 #ifndef liblldb_IRExecutionUnit_h_
 #define liblldb_IRExecutionUnit_h_
 
+// C Includes
+// C++ Includes
 #include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/Module.h"
 
+// Project includes
 #include "lldb/Expression/IRMemoryMap.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -108,7 +112,7 @@ public:
   void PopulateSectionList(lldb_private::ObjectFile *obj_file,
                            lldb_private::SectionList &section_list) override;
 
-  ArchSpec GetArchitecture() override;
+  bool GetArchitecture(lldb_private::ArchSpec &arch) override;
 
   lldb::ModuleSP GetJITModule();
 

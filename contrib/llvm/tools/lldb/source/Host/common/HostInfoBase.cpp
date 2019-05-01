@@ -42,7 +42,7 @@ namespace {
 
 struct HostInfoBaseFields {
   ~HostInfoBaseFields() {
-    if (FileSystem::Instance().Exists(m_lldb_process_tmp_dir)) {
+    if (m_lldb_process_tmp_dir.Exists()) {
       // Remove the LLDB temporary directory if we have one. Set "recurse" to
       // true to all files that were created for the LLDB process can be
       // cleaned up.
@@ -226,7 +226,7 @@ bool HostInfoBase::ComputeSharedLibraryDirectory(FileSpec &file_spec) {
 
   // This is necessary because when running the testsuite the shlib might be a
   // symbolic link inside the Python resource dir.
-  FileSystem::Instance().ResolveSymbolicLink(lldb_file_spec, lldb_file_spec);
+  FileSystem::ResolveSymbolicLink(lldb_file_spec, lldb_file_spec);
 
   // Remove the filename so that this FileSpec only represents the directory.
   file_spec.GetDirectory() = lldb_file_spec.GetDirectory();
@@ -256,8 +256,7 @@ bool HostInfoBase::ComputeProcessTempFileDirectory(FileSpec &file_spec) {
 bool HostInfoBase::ComputeTempFileBaseDirectory(FileSpec &file_spec) {
   llvm::SmallVector<char, 16> tmpdir;
   llvm::sys::path::system_temp_directory(/*ErasedOnReboot*/ true, tmpdir);
-  file_spec = FileSpec(std::string(tmpdir.data(), tmpdir.size()));
-  FileSystem::Instance().Resolve(file_spec);
+  file_spec = FileSpec(std::string(tmpdir.data(), tmpdir.size()), true);
   return true;
 }
 

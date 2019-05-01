@@ -16,7 +16,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "BugDriver.h"
-#include "ToolRunner.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Module.h"
@@ -167,8 +166,7 @@ bool BugDriver::runPasses(Module &Program,
 
   std::string tool = OptCmd;
   if (OptCmd.empty()) {
-    if (ErrorOr<std::string> Path =
-            FindProgramByName("opt", getToolName(), &OutputPrefix))
+    if (ErrorOr<std::string> Path = sys::findProgramByName("opt"))
       tool = *Path;
     else
       errs() << Path.getError().message() << "\n";

@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "LibCxx.h"
 
 #include "lldb/Core/ValueObject.h"
@@ -94,11 +98,12 @@ bool lldb_private::formatters::LibcxxInitializerListSyntheticFrontEnd::
   if (!m_element_type.IsValid())
     return false;
 
-  if (llvm::Optional<uint64_t> size = m_element_type.GetByteSize(nullptr)) {
-    m_element_size = *size;
-    // Store raw pointers or end up with a circular dependency.
-    m_start = m_backend.GetChildMemberWithName(g___begin_, true).get();
-  }
+  m_element_size = m_element_type.GetByteSize(nullptr);
+
+  if (m_element_size > 0)
+    m_start =
+        m_backend.GetChildMemberWithName(g___begin_, true)
+            .get(); // store raw pointers or end up with a circular dependency
 
   return false;
 }

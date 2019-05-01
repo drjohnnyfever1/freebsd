@@ -54,7 +54,7 @@ std::string escape(StringRef Str, const CoverageViewOptions &Opts) {
 std::string tag(const std::string &Name, const std::string &Str,
                 const std::string &ClassName = "") {
   std::string Tag = "<" + Name;
-  if (!ClassName.empty())
+  if (ClassName != "")
     Tag += " class='" + ClassName + "'";
   return Tag + ">" + Str + "</" + Name + ">";
 }

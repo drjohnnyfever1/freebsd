@@ -78,8 +78,7 @@ namespace llvm {
     ///
     /// FIXME: Remove this.  Users should use DILocation::get().
     static DebugLoc get(unsigned Line, unsigned Col, const MDNode *Scope,
-                        const MDNode *InlinedAt = nullptr,
-                        bool ImplicitCode = false);
+                        const MDNode *InlinedAt = nullptr);
 
     enum { ReplaceLastInlinedAt = true };
     /// Rebuild the entire inlined-at chain for this instruction so that the top of
@@ -112,10 +111,6 @@ namespace llvm {
 
     /// Return \c this as a bar \a MDNode.
     MDNode *getAsMDNode() const { return Loc; }
-
-    /// Check if the DebugLoc corresponds to an implicit code.
-    bool isImplicitCode() const;
-    void setImplicitCode(bool ImplicitCode);
 
     bool operator==(const DebugLoc &DL) const { return Loc == DL.Loc; }
     bool operator!=(const DebugLoc &DL) const { return Loc != DL.Loc; }

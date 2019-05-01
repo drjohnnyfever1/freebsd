@@ -26,20 +26,19 @@ class raw_ostream;
 class DWARFTypeUnit : public DWARFUnit {
 public:
   DWARFTypeUnit(DWARFContext &Context, const DWARFSection &Section,
-                const DWARFUnitHeader &Header, const DWARFDebugAbbrev *DA,
-                const DWARFSection *RS, const DWARFSection *LocSection,
+                const DWARFUnitHeader &Header,
+                const DWARFDebugAbbrev *DA, const DWARFSection *RS,
                 StringRef SS, const DWARFSection &SOS, const DWARFSection *AOS,
                 const DWARFSection &LS, bool LE, bool IsDWO,
-                const DWARFUnitVector &UnitVector)
-      : DWARFUnit(Context, Section, Header, DA, RS, LocSection, SS, SOS, AOS,
-                  LS, LE, IsDWO, UnitVector) {}
+                const DWARFUnitSectionBase &UnitSection)
+      : DWARFUnit(Context, Section, Header, DA, RS, SS, SOS, AOS, LS, LE, IsDWO,
+                  UnitSection) {}
 
   uint64_t getTypeHash() const { return getHeader().getTypeHash(); }
   uint32_t getTypeOffset() const { return getHeader().getTypeOffset(); }
 
-  void dump(raw_ostream &OS, DIDumpOptions DumpOpts = {}) override;
-  // Enable LLVM-style RTTI.
-  static bool classof(const DWARFUnit *U) { return U->isTypeUnit(); }
+  void dump(raw_ostream &OS, DIDumpOptions DumpOpts = {});
+  static const DWARFSectionKind Section = DW_SECT_TYPES;
 };
 
 } // end namespace llvm

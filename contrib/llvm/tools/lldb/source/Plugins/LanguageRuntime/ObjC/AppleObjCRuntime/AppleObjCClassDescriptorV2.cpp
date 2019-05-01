@@ -264,7 +264,11 @@ bool ClassDescriptorV2::method_t::Read(Process *process, lldb::addr_t addr) {
   }
 
   process->ReadCStringFromMemory(m_types_ptr, m_types, error);
-  return !error.Fail();
+  if (error.Fail()) {
+    return false;
+  }
+
+  return true;
 }
 
 bool ClassDescriptorV2::ivar_list_t::Read(Process *process, lldb::addr_t addr) {
@@ -319,7 +323,11 @@ bool ClassDescriptorV2::ivar_t::Read(Process *process, lldb::addr_t addr) {
   }
 
   process->ReadCStringFromMemory(m_type_ptr, m_type, error);
-  return !error.Fail();
+  if (error.Fail()) {
+    return false;
+  }
+
+  return true;
 }
 
 bool ClassDescriptorV2::Describe(
@@ -516,8 +524,7 @@ void ClassDescriptorV2::iVarsStorage::fill(AppleObjCRuntimeV2 &runtime,
       LLDB_LOGV(log,
                 "name = {0}, encoding = {1}, offset_ptr = {2:x}, size = "
                 "{3}, type_size = {4}",
-                name, type, offset_ptr, size,
-                ivar_type.GetByteSize(nullptr).getValueOr(0));
+                name, type, offset_ptr, size, ivar_type.GetByteSize(nullptr));
       Scalar offset_scalar;
       Status error;
       const int offset_ptr_size = 4;

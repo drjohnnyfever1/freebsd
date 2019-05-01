@@ -19,9 +19,9 @@
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
 # include <sys/param.h>
-# if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
+# if defined(BSD)
 #   include <sys/sysctl.h>
-# endif
+# endif // defined(BSD)
 #endif // defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__)) || defined(__CloudABI__) || defined(__Fuchsia__)

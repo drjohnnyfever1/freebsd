@@ -11,14 +11,16 @@
 #include "RegisterContextDarwin_arm64.h"
 #include "RegisterContextDarwinConstants.h"
 
+// C++ Includes
+// Other libraries and framework includes
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Compiler.h"
 
@@ -30,6 +32,7 @@
 #define LLVM_EXTENSION
 #endif
 
+// Project includes
 #include "Utility/ARM64_DWARF_Registers.h"
 
 using namespace lldb;
@@ -338,22 +341,12 @@ bool RegisterContextDarwin_arm64::ReadRegister(const RegisterInfo *reg_info,
   case gpr_x26:
   case gpr_x27:
   case gpr_x28:
-    value.SetUInt64(gpr.x[reg - gpr_x0]);
-    break;
   case gpr_fp:
-    value.SetUInt64(gpr.fp);
-    break;
   case gpr_sp:
-    value.SetUInt64(gpr.sp);
-    break;
   case gpr_lr:
-    value.SetUInt64(gpr.lr);
-    break;
   case gpr_pc:
-    value.SetUInt64(gpr.pc);
-    break;
   case gpr_cpsr:
-    value.SetUInt64(gpr.cpsr);
+    value.SetUInt64(gpr.x[reg - gpr_x0]);
     break;
 
   case gpr_w0:
@@ -956,7 +949,7 @@ uint32_t RegisterContextDarwin_arm64::SetHardwareWatchpoint(lldb::addr_t addr,
     return LLDB_INVALID_INDEX32;
 
   // We must watch for either read or write
-  if (!read && !write)
+  if (read == false && write == false)
     return LLDB_INVALID_INDEX32;
 
   // Can't watch more than 4 bytes per WVR/WCR pair

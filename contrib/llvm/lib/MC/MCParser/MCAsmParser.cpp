@@ -21,7 +21,7 @@
 
 using namespace llvm;
 
-MCAsmParser::MCAsmParser() {}
+MCAsmParser::MCAsmParser() : ShowParsedOperands(0) {}
 
 MCAsmParser::~MCAsmParser() = default;
 

@@ -19,11 +19,13 @@ class MCSymbolWasm : public MCSymbol {
   bool IsWeak = false;
   bool IsHidden = false;
   bool IsComdat = false;
-  Optional<std::string> ImportModule;
-  Optional<std::string> ImportName;
-  wasm::WasmSignature *Signature = nullptr;
-  Optional<wasm::WasmGlobalType> GlobalType;
-  Optional<wasm::WasmEventType> EventType;
+  std::string ModuleName;
+  SmallVector<wasm::ValType, 1> Returns;
+  SmallVector<wasm::ValType, 4> Params;
+  wasm::WasmGlobalType GlobalType;
+  bool ParamsSet = false;
+  bool ReturnsSet = false;
+  bool GlobalTypeSet = false;
 
   /// An expression describing how to calculate the size of a symbol. If a
   /// symbol has no size this field will be NULL.
@@ -33,7 +35,8 @@ public:
   // Use a module name of "env" for now, for compatibility with existing tools.
   // This is temporary, and may change, as the ABI is not yet stable.
   MCSymbolWasm(const StringMapEntry<bool> *Name, bool isTemporary)
-      : MCSymbol(SymbolKindWasm, Name, isTemporary) {}
+      : MCSymbol(SymbolKindWasm, Name, isTemporary),
+        ModuleName("env") {}
   static bool classof(const MCSymbol *S) { return S->isWasm(); }
 
   const MCExpr *getSize() const { return SymbolSize; }
@@ -43,7 +46,6 @@ public:
   bool isData() const { return Type == wasm::WASM_SYMBOL_TYPE_DATA; }
   bool isGlobal() const { return Type == wasm::WASM_SYMBOL_TYPE_GLOBAL; }
   bool isSection() const { return Type == wasm::WASM_SYMBOL_TYPE_SECTION; }
-  bool isEvent() const { return Type == wasm::WASM_SYMBOL_TYPE_EVENT; }
   wasm::WasmSymbolType getType() const { return Type; }
   void setType(wasm::WasmSymbolType type) { Type = type; }
 
@@ -56,38 +58,40 @@ public:
   bool isComdat() const { return IsComdat; }
   void setComdat(bool isComdat) { IsComdat = isComdat; }
 
-  const StringRef getImportModule() const {
-      if (ImportModule.hasValue()) {
-          return ImportModule.getValue();
-      }
-      return "env";
-  }
-  void setImportModule(StringRef Name) { ImportModule = Name; }
+  const StringRef getModuleName() const { return ModuleName; }
+  void setModuleName(StringRef Name) { ModuleName = Name; }
 
-  const StringRef getImportName() const {
-      if (ImportName.hasValue()) {
-          return ImportName.getValue();
-      }
-      return getName();
+  const SmallVector<wasm::ValType, 1> &getReturns() const {
+    assert(ReturnsSet);
+    return Returns;
   }
-  void setImportName(StringRef Name) { ImportName = Name; }
 
-  const wasm::WasmSignature *getSignature() const { return Signature; }
-  void setSignature(wasm::WasmSignature *Sig) { Signature = Sig; }
+  void setReturns(SmallVectorImpl<wasm::ValType> &&Rets) {
+    ReturnsSet = true;
+    Returns = std::move(Rets);
+  }
+
+  const SmallVector<wasm::ValType, 4> &getParams() const {
+    assert(ParamsSet);
+    return Params;
+  }
+
+  void setParams(SmallVectorImpl<wasm::ValType> &&Pars) {
+    ParamsSet = true;
+    Params = std::move(Pars);
+  }
 
   const wasm::WasmGlobalType &getGlobalType() const {
-    assert(GlobalType.hasValue());
-    return GlobalType.getValue();
+    assert(GlobalTypeSet);
+    return GlobalType;
   }
-  void setGlobalType(wasm::WasmGlobalType GT) { GlobalType = GT; }
 
-  const wasm::WasmEventType &getEventType() const {
-    assert(EventType.hasValue());
-    return EventType.getValue();
+  void setGlobalType(wasm::WasmGlobalType GT) {
+    GlobalTypeSet = true;
+    GlobalType = GT;
   }
-  void setEventType(wasm::WasmEventType ET) { EventType = ET; }
 };
 
-} // end namespace llvm
+}  // end namespace llvm
 
 #endif // LLVM_MC_MCSYMBOLWASM_H

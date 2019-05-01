@@ -28,20 +28,21 @@ class Module;
 
 namespace orc {
 
-class IRCompileLayer : public IRLayer {
+class IRCompileLayer2 : public IRLayer {
 public:
   using CompileFunction =
       std::function<Expected<std::unique_ptr<MemoryBuffer>>(Module &)>;
 
   using NotifyCompiledFunction =
-      std::function<void(VModuleKey K, ThreadSafeModule TSM)>;
+      std::function<void(VModuleKey K, std::unique_ptr<Module>)>;
 
-  IRCompileLayer(ExecutionSession &ES, ObjectLayer &BaseLayer,
-                 CompileFunction Compile);
+  IRCompileLayer2(ExecutionSession &ES, ObjectLayer &BaseLayer,
+                  CompileFunction Compile);
 
   void setNotifyCompiled(NotifyCompiledFunction NotifyCompiled);
 
-  void emit(MaterializationResponsibility R, ThreadSafeModule TSM) override;
+  void emit(MaterializationResponsibility R, VModuleKey K,
+            std::unique_ptr<Module> M) override;
 
 private:
   mutable std::mutex IRLayerMutex;
@@ -56,15 +57,15 @@ private:
 /// object file and adds this module file to the layer below, which must
 /// implement the object layer concept.
 template <typename BaseLayerT, typename CompileFtor>
-class LegacyIRCompileLayer {
+class IRCompileLayer {
 public:
   /// Callback type for notifications when modules are compiled.
   using NotifyCompiledCallback =
       std::function<void(VModuleKey K, std::unique_ptr<Module>)>;
 
-  /// Construct an LegacyIRCompileLayer with the given BaseLayer, which must
+  /// Construct an IRCompileLayer with the given BaseLayer, which must
   ///        implement the ObjectLayer concept.
-  LegacyIRCompileLayer(
+  IRCompileLayer(
       BaseLayerT &BaseLayer, CompileFtor Compile,
       NotifyCompiledCallback NotifyCompiled = NotifyCompiledCallback())
       : BaseLayer(BaseLayer), Compile(std::move(Compile)),

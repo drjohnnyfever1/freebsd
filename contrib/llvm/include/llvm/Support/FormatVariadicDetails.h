@@ -21,8 +21,6 @@ class Error;
 
 namespace detail {
 class format_adapter {
-  virtual void anchor();
-
 protected:
   virtual ~format_adapter() {}
 

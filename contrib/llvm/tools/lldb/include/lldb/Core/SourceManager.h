@@ -11,16 +11,16 @@
 #define liblldb_SourceManager_h_
 
 #include "lldb/Utility/FileSpec.h"
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-forward.h"
+#include "lldb/lldb-defines.h" // for DISALLOW_COPY_AND_ASSIGN
+#include "lldb/lldb-forward.h" // for DebuggerSP, DebuggerWP, DataBufferSP
 
 #include "llvm/Support/Chrono.h"
 
-#include <cstdint>
+#include <cstdint> // for uint32_t, UINT32_MAX
 #include <map>
 #include <memory>
-#include <stddef.h>
-#include <string>
+#include <stddef.h> // for size_t
+#include <string>   // for string
 #include <vector>
 
 namespace lldb_private {
@@ -52,7 +52,7 @@ public:
 
     void UpdateIfNeeded();
 
-    size_t DisplaySourceLines(uint32_t line, llvm::Optional<size_t> column,
+    size_t DisplaySourceLines(uint32_t line, uint32_t column,
                               uint32_t context_before, uint32_t context_after,
                               Stream *s);
     void FindLinesMatchingRegex(RegularExpression &regex, uint32_t start_line,

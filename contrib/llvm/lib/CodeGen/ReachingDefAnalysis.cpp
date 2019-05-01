@@ -157,7 +157,7 @@ bool ReachingDefAnalysis::runOnMachineFunction(MachineFunction &mf) {
   // Sorting all reaching defs found for a ceartin reg unit in a given BB.
   for (MBBDefsInfo &MBBDefs : MBBReachingDefs) {
     for (MBBRegUnitDefs &RegUnitDefs : MBBDefs)
-      llvm::sort(RegUnitDefs);
+      llvm::sort(RegUnitDefs.begin(), RegUnitDefs.end());
   }
 
   return false;

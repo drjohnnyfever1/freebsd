@@ -13,8 +13,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/Analysis/LegacyDivergenceAnalysis.h"
+#include "llvm/Analysis/DivergenceAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/RegionInfo.h"
 #include "llvm/Analysis/RegionIterator.h"
@@ -184,7 +183,7 @@ class StructurizeCFG : public RegionPass {
   Function *Func;
   Region *ParentRegion;
 
-  LegacyDivergenceAnalysis *DA;
+  DivergenceAnalysis *DA;
   DominatorTree *DT;
   LoopInfo *LI;
 
@@ -270,7 +269,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     if (SkipUniformRegions)
-      AU.addRequired<LegacyDivergenceAnalysis>();
+      AU.addRequired<DivergenceAnalysis>();
     AU.addRequiredID(LowerSwitchID);
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<LoopInfoWrapperPass>();
@@ -286,7 +285,7 @@ char StructurizeCFG::ID = 0;
 
 INITIALIZE_PASS_BEGIN(StructurizeCFG, "structurizecfg", "Structurize the CFG",
                       false, false)
-INITIALIZE_PASS_DEPENDENCY(LegacyDivergenceAnalysis)
+INITIALIZE_PASS_DEPENDENCY(DivergenceAnalysis)
 INITIALIZE_PASS_DEPENDENCY(LowerSwitch)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(RegionInfoPass)
@@ -597,8 +596,7 @@ void StructurizeCFG::addPhiValues(BasicBlock *From, BasicBlock *To) {
 
 /// Add the real PHI value as soon as everything is set up
 void StructurizeCFG::setPhiValues() {
-  SmallVector<PHINode *, 8> InsertedPhis;
-  SSAUpdater Updater(&InsertedPhis);
+  SSAUpdater Updater;
   for (const auto &AddedPhi : AddedPhis) {
     BasicBlock *To = AddedPhi.first;
     const BBVector &From = AddedPhi.second;
@@ -634,31 +632,11 @@ void StructurizeCFG::setPhiValues() {
     DeletedPhis.erase(To);
   }
   assert(DeletedPhis.empty());
-
-  // Simplify any phis inserted by the SSAUpdater if possible
-  bool Changed;
-  do {
-    Changed = false;
-
-    SimplifyQuery Q(Func->getParent()->getDataLayout());
-    Q.DT = DT;
-    for (size_t i = 0; i < InsertedPhis.size(); ++i) {
-      PHINode *Phi = InsertedPhis[i];
-      if (Value *V = SimplifyInstruction(Phi, Q)) {
-        Phi->replaceAllUsesWith(V);
-        Phi->eraseFromParent();
-        InsertedPhis[i] = InsertedPhis.back();
-        InsertedPhis.pop_back();
-        i--;
-        Changed = true;
-      }
-    }
-  } while (Changed);
 }
 
 /// Remove phi values from all successors and then remove the terminator.
 void StructurizeCFG::killTerminator(BasicBlock *BB) {
-  Instruction *Term = BB->getTerminator();
+  TerminatorInst *Term = BB->getTerminator();
   if (!Term)
     return;
 
@@ -936,7 +914,7 @@ void StructurizeCFG::rebuildSSA() {
 }
 
 static bool hasOnlyUniformBranches(Region *R, unsigned UniformMDKindID,
-                                   const LegacyDivergenceAnalysis &DA) {
+                                   const DivergenceAnalysis &DA) {
   for (auto E : R->elements()) {
     if (!E->isSubRegion()) {
       auto Br = dyn_cast<BranchInst>(E->getEntry()->getTerminator());
@@ -984,7 +962,7 @@ bool StructurizeCFG::runOnRegion(Region *R, RGPassManager &RGM) {
     // but we shouldn't rely on metadata for correctness!
     unsigned UniformMDKindID =
         R->getEntry()->getContext().getMDKindID("structurizecfg.uniform");
-    DA = &getAnalysis<LegacyDivergenceAnalysis>();
+    DA = &getAnalysis<DivergenceAnalysis>();
 
     if (hasOnlyUniformBranches(R, UniformMDKindID, *DA)) {
       LLVM_DEBUG(dbgs() << "Skipping region with uniform control flow: " << *R

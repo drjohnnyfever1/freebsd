@@ -93,10 +93,10 @@ static void createCoroData(CodeGenFunction &CGF,
                            CallExpr const *CoroIdExpr = nullptr) {
   if (CurCoro.Data) {
     if (CurCoro.Data->CoroIdExpr)
-      CGF.CGM.Error(CoroIdExpr->getBeginLoc(),
+      CGF.CGM.Error(CoroIdExpr->getLocStart(),
                     "only one __builtin_coro_id can be used in a function");
     else if (CoroIdExpr)
-      CGF.CGM.Error(CoroIdExpr->getBeginLoc(),
+      CGF.CGM.Error(CoroIdExpr->getLocStart(),
                     "__builtin_coro_id shall not be used in a C++ coroutine");
     else
       llvm_unreachable("EmitCoroutineBodyStatement called twice?");
@@ -444,7 +444,7 @@ struct CallCoroDelete final : public EHScopeStack::Cleanup {
     // We should have captured coro.free from the emission of deallocate.
     auto *CoroFree = CGF.CurCoro.Data->LastCoroFree;
     if (!CoroFree) {
-      CGF.CGM.Error(Deallocate->getBeginLoc(),
+      CGF.CGM.Error(Deallocate->getLocStart(),
                     "Deallocation expressoin does not refer to coro.free");
       return;
     }
@@ -654,7 +654,7 @@ void CodeGenFunction::EmitCoroutineBody(const CoroutineBodyStmt &S) {
         EmitBlock(BodyBB);
       }
 
-      auto Loc = S.getBeginLoc();
+      auto Loc = S.getLocStart();
       CXXCatchStmt Catch(Loc, /*exDecl=*/nullptr,
                          CurCoro.Data->ExceptionHandler);
       auto *TryStmt =
@@ -707,8 +707,8 @@ RValue CodeGenFunction::EmitCoroutineIntrinsic(const CallExpr *E,
     if (CurCoro.Data && CurCoro.Data->CoroBegin) {
       return RValue::get(CurCoro.Data->CoroBegin);
     }
-    CGM.Error(E->getBeginLoc(), "this builtin expect that __builtin_coro_begin "
-                                "has been used earlier in this function");
+    CGM.Error(E->getLocStart(), "this builtin expect that __builtin_coro_begin "
+      "has been used earlier in this function");
     auto NullPtr = llvm::ConstantPointerNull::get(Builder.getInt8PtrTy());
     return RValue::get(NullPtr);
   }
@@ -722,7 +722,7 @@ RValue CodeGenFunction::EmitCoroutineIntrinsic(const CallExpr *E,
       Args.push_back(CurCoro.Data->CoroId);
       break;
     }
-    CGM.Error(E->getBeginLoc(), "this builtin expect that __builtin_coro_id has"
+    CGM.Error(E->getLocStart(), "this builtin expect that __builtin_coro_id has"
                                 " been used earlier in this function");
     // Fallthrough to the next case to add TokenNone as the first argument.
     LLVM_FALLTHROUGH;

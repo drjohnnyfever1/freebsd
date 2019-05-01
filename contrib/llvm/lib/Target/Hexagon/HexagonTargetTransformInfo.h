@@ -98,9 +98,6 @@ public:
   bool prefersVectorizedAddressing() {
     return false;
   }
-  bool enableInterleavedAccessVectorization() {
-    return true;
-  }
 
   unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract);
   unsigned getOperandsScalarizationOverhead(ArrayRef<const Value*> Args,
@@ -123,8 +120,7 @@ public:
             bool VariableMask, unsigned Alignment);
   unsigned getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
             unsigned Factor, ArrayRef<unsigned> Indices, unsigned Alignment,
-            unsigned AddressSpace, bool UseMaskForCond = false,
-            bool UseMaskForGaps = false);
+            unsigned AddressSpace);
   unsigned getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
             const Instruction *I);
   unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,

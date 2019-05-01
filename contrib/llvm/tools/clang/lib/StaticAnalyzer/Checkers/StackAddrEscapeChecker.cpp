@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
@@ -79,17 +79,17 @@ SourceRange StackAddrEscapeChecker::genName(raw_ostream &os, const MemRegion *R,
     const CompoundLiteralExpr *CL = CR->getLiteralExpr();
     os << "stack memory associated with a compound literal "
           "declared on line "
-       << SM.getExpansionLineNumber(CL->getBeginLoc()) << " returned to caller";
+       << SM.getExpansionLineNumber(CL->getLocStart()) << " returned to caller";
     range = CL->getSourceRange();
   } else if (const auto *AR = dyn_cast<AllocaRegion>(R)) {
     const Expr *ARE = AR->getExpr();
-    SourceLocation L = ARE->getBeginLoc();
+    SourceLocation L = ARE->getLocStart();
     range = ARE->getSourceRange();
     os << "stack memory allocated by call to alloca() on line "
        << SM.getExpansionLineNumber(L);
   } else if (const auto *BR = dyn_cast<BlockDataRegion>(R)) {
     const BlockDecl *BD = BR->getCodeRegion()->getDecl();
-    SourceLocation L = BD->getBeginLoc();
+    SourceLocation L = BD->getLocStart();
     range = BD->getSourceRange();
     os << "stack-allocated block declared on line "
        << SM.getExpansionLineNumber(L);

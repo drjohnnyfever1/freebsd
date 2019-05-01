@@ -14,6 +14,7 @@
 #include "lldb/API/SBSymbolContext.h"
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Debugger.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Symbol/CompileUnit.h"
@@ -30,7 +31,6 @@
 #include "lldb/Target/ThreadPlanStepInstruction.h"
 #include "lldb/Target/ThreadPlanStepOut.h"
 #include "lldb/Target/ThreadPlanStepRange.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StructuredData.h"
 
@@ -143,12 +143,6 @@ bool SBThreadPlan::IsValid() {
 SBThreadPlan
 SBThreadPlan::QueueThreadPlanForStepOverRange(SBAddress &sb_start_address,
                                               lldb::addr_t size) {
-  SBError error;
-  return QueueThreadPlanForStepOverRange(sb_start_address, size, error);
-}
-
-SBThreadPlan SBThreadPlan::QueueThreadPlanForStepOverRange(
-    SBAddress &sb_start_address, lldb::addr_t size, SBError &error) {
   if (m_opaque_sp) {
     Address *start_address = sb_start_address.get();
     if (!start_address) {
@@ -158,16 +152,9 @@ SBThreadPlan SBThreadPlan::QueueThreadPlanForStepOverRange(
     AddressRange range(*start_address, size);
     SymbolContext sc;
     start_address->CalculateSymbolContext(&sc);
-    Status plan_status;
-
-    SBThreadPlan plan =
-        SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForStepOverRange(
-            false, range, sc, eAllThreads, plan_status));
-
-    if (plan_status.Fail())
-      error.SetErrorString(plan_status.AsCString());
-
-    return plan;
+    return SBThreadPlan(
+        m_opaque_sp->GetThread().QueueThreadPlanForStepOverRange(
+            false, range, sc, eAllThreads));
   } else {
     return SBThreadPlan();
   }
@@ -176,13 +163,6 @@ SBThreadPlan SBThreadPlan::QueueThreadPlanForStepOverRange(
 SBThreadPlan
 SBThreadPlan::QueueThreadPlanForStepInRange(SBAddress &sb_start_address,
                                             lldb::addr_t size) {
-  SBError error;
-  return QueueThreadPlanForStepInRange(sb_start_address, size, error);
-}
-
-SBThreadPlan
-SBThreadPlan::QueueThreadPlanForStepInRange(SBAddress &sb_start_address,
-                                            lldb::addr_t size, SBError &error) {
   if (m_opaque_sp) {
     Address *start_address = sb_start_address.get();
     if (!start_address) {
@@ -192,16 +172,8 @@ SBThreadPlan::QueueThreadPlanForStepInRange(SBAddress &sb_start_address,
     AddressRange range(*start_address, size);
     SymbolContext sc;
     start_address->CalculateSymbolContext(&sc);
-
-    Status plan_status;
-    SBThreadPlan plan =
-        SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForStepInRange(
-            false, range, sc, NULL, eAllThreads, plan_status));
-
-    if (plan_status.Fail())
-      error.SetErrorString(plan_status.AsCString());
-
-    return plan;
+    return SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForStepInRange(
+        false, range, sc, NULL, eAllThreads));
   } else {
     return SBThreadPlan();
   }
@@ -210,28 +182,13 @@ SBThreadPlan::QueueThreadPlanForStepInRange(SBAddress &sb_start_address,
 SBThreadPlan
 SBThreadPlan::QueueThreadPlanForStepOut(uint32_t frame_idx_to_step_to,
                                         bool first_insn) {
-  SBError error;
-  return QueueThreadPlanForStepOut(frame_idx_to_step_to, first_insn, error);
-}
-
-SBThreadPlan
-SBThreadPlan::QueueThreadPlanForStepOut(uint32_t frame_idx_to_step_to,
-                                        bool first_insn, SBError &error) {
   if (m_opaque_sp) {
     SymbolContext sc;
     sc = m_opaque_sp->GetThread().GetStackFrameAtIndex(0)->GetSymbolContext(
         lldb::eSymbolContextEverything);
-
-    Status plan_status;
-    SBThreadPlan plan =
-        SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForStepOut(
-            false, &sc, first_insn, false, eVoteYes, eVoteNoOpinion,
-            frame_idx_to_step_to, plan_status));
-
-    if (plan_status.Fail())
-      error.SetErrorString(plan_status.AsCString());
-
-    return plan;
+    return SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForStepOut(
+        false, &sc, first_insn, false, eVoteYes, eVoteNoOpinion,
+        frame_idx_to_step_to));
   } else {
     return SBThreadPlan();
   }
@@ -239,50 +196,13 @@ SBThreadPlan::QueueThreadPlanForStepOut(uint32_t frame_idx_to_step_to,
 
 SBThreadPlan
 SBThreadPlan::QueueThreadPlanForRunToAddress(SBAddress sb_address) {
-  SBError error;
-  return QueueThreadPlanForRunToAddress(sb_address, error);
-}
-
-SBThreadPlan SBThreadPlan::QueueThreadPlanForRunToAddress(SBAddress sb_address,
-                                                          SBError &error) {
   if (m_opaque_sp) {
     Address *address = sb_address.get();
     if (!address)
       return SBThreadPlan();
 
-    Status plan_status;
-    SBThreadPlan plan =
-        SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForRunToAddress(
-            false, *address, false, plan_status));
-
-    if (plan_status.Fail())
-      error.SetErrorString(plan_status.AsCString());
-
-    return plan;
-  } else {
-    return SBThreadPlan();
-  }
-}
-
-SBThreadPlan
-SBThreadPlan::QueueThreadPlanForStepScripted(const char *script_class_name) {
-  SBError error;
-  return QueueThreadPlanForStepScripted(script_class_name, error);
-}
-
-SBThreadPlan
-SBThreadPlan::QueueThreadPlanForStepScripted(const char *script_class_name,
-                                             SBError &error) {
-  if (m_opaque_sp) {
-    Status plan_status;
-    SBThreadPlan plan =
-        SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForStepScripted(
-            false, script_class_name, false, plan_status));
-
-    if (plan_status.Fail())
-      error.SetErrorString(plan_status.AsCString());
-
-    return plan;
+    return SBThreadPlan(m_opaque_sp->GetThread().QueueThreadPlanForRunToAddress(
+        false, *address, false));
   } else {
     return SBThreadPlan();
   }

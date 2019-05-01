@@ -913,7 +913,8 @@ private:
     if (!IsOffsetKnown)
       return PI.setAborted(&II);
 
-    if (II.isLifetimeStartOrEnd()) {
+    if (II.getIntrinsicID() == Intrinsic::lifetime_start ||
+        II.getIntrinsicID() == Intrinsic::lifetime_end) {
       ConstantInt *Length = cast<ConstantInt>(II.getArgOperand(0));
       uint64_t Size = std::min(AllocSize - Offset.getLimitedValue(),
                                Length->getLimitedValue());
@@ -1059,7 +1060,7 @@ AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
 
   // Sort the uses. This arranges for the offsets to be in ascending order,
   // and the sizes to be in descending order.
-  llvm::sort(Slices);
+  llvm::sort(Slices.begin(), Slices.end());
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -1210,7 +1211,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
   // predecessor blocks. The only thing to watch out for is that we can't put
   // a possibly trapping load in the predecessor if it is a critical edge.
   for (unsigned Idx = 0, Num = PN.getNumIncomingValues(); Idx != Num; ++Idx) {
-    Instruction *TI = PN.getIncomingBlock(Idx)->getTerminator();
+    TerminatorInst *TI = PN.getIncomingBlock(Idx)->getTerminator();
     Value *InVal = PN.getIncomingValue(Idx);
 
     // If the value is produced by the terminator of the predecessor (an
@@ -1274,7 +1275,7 @@ static void speculatePHINodeLoads(PHINode &PN) {
       continue;
     }
 
-    Instruction *TI = Pred->getTerminator();
+    TerminatorInst *TI = Pred->getTerminator();
     IRBuilderTy PredBuilder(TI);
 
     LoadInst *Load = PredBuilder.CreateLoad(
@@ -1399,8 +1400,8 @@ static Value *getNaturalGEPWithType(IRBuilderTy &IRB, const DataLayout &DL,
   if (Ty == TargetTy)
     return buildGEP(IRB, BasePtr, Indices, NamePrefix);
 
-  // Offset size to use for the indices.
-  unsigned OffsetSize = DL.getIndexTypeSizeInBits(BasePtr->getType());
+  // Pointer size to use for the indices.
+  unsigned PtrSize = DL.getPointerTypeSizeInBits(BasePtr->getType());
 
   // See if we can descend into a struct and locate a field with the correct
   // type.
@@ -1412,7 +1413,7 @@ static Value *getNaturalGEPWithType(IRBuilderTy &IRB, const DataLayout &DL,
 
     if (ArrayType *ArrayTy = dyn_cast<ArrayType>(ElementTy)) {
       ElementTy = ArrayTy->getElementType();
-      Indices.push_back(IRB.getIntN(OffsetSize, 0));
+      Indices.push_back(IRB.getIntN(PtrSize, 0));
     } else if (VectorType *VectorTy = dyn_cast<VectorType>(ElementTy)) {
       ElementTy = VectorTy->getElementType();
       Indices.push_back(IRB.getInt32(0));
@@ -1806,7 +1807,8 @@ static bool isVectorPromotionViableForSlice(Partition &P, const Slice &S,
     if (!S.isSplittable())
       return false; // Skip any unsplittable intrinsics.
   } else if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(U->getUser())) {
-    if (!II->isLifetimeStartOrEnd())
+    if (II->getIntrinsicID() != Intrinsic::lifetime_start &&
+        II->getIntrinsicID() != Intrinsic::lifetime_end)
       return false;
   } else if (U->get()->getType()->getPointerElementType()->isStructTy()) {
     // Disable vector promotion when there are loads or stores of an FCA.
@@ -1904,7 +1906,7 @@ static VectorType *isVectorPromotionViable(Partition &P, const DataLayout &DL) {
              "All non-integer types eliminated!");
       return RHSTy->getNumElements() < LHSTy->getNumElements();
     };
-    llvm::sort(CandidateTys, RankVectorTypes);
+    llvm::sort(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes);
     CandidateTys.erase(
         std::unique(CandidateTys.begin(), CandidateTys.end(), RankVectorTypes),
         CandidateTys.end());
@@ -2027,7 +2029,8 @@ static bool isIntegerWideningViableForSlice(const Slice &S,
     if (!S.isSplittable())
       return false; // Skip any unsplittable intrinsics.
   } else if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(U->getUser())) {
-    if (!II->isLifetimeStartOrEnd())
+    if (II->getIntrinsicID() != Intrinsic::lifetime_start &&
+        II->getIntrinsicID() != Intrinsic::lifetime_end)
       return false;
   } else {
     return false;
@@ -2374,7 +2377,7 @@ private:
 #endif
 
     return getAdjustedPtr(IRB, DL, &NewAI,
-                          APInt(DL.getIndexTypeSizeInBits(PointerTy), Offset),
+                          APInt(DL.getPointerTypeSizeInBits(PointerTy), Offset),
                           PointerTy,
 #ifndef NDEBUG
                           Twine(OldName) + "."
@@ -2590,8 +2593,7 @@ private:
     }
     V = convertValue(DL, IRB, V, NewAllocaTy);
     StoreInst *Store = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment());
-    Store->copyMetadata(SI, {LLVMContext::MD_mem_parallel_loop_access,
-                             LLVMContext::MD_access_group});
+    Store->copyMetadata(SI, LLVMContext::MD_mem_parallel_loop_access);
     if (AATags)
       Store->setAAMetadata(AATags);
     Pass.DeadInsts.insert(&SI);
@@ -2660,8 +2662,7 @@ private:
       NewSI = IRB.CreateAlignedStore(V, NewPtr, getSliceAlign(V->getType()),
                                      SI.isVolatile());
     }
-    NewSI->copyMetadata(SI, {LLVMContext::MD_mem_parallel_loop_access,
-                             LLVMContext::MD_access_group});
+    NewSI->copyMetadata(SI, LLVMContext::MD_mem_parallel_loop_access);
     if (AATags)
       NewSI->setAAMetadata(AATags);
     if (SI.isVolatile())
@@ -2898,8 +2899,8 @@ private:
     unsigned OtherAS = OtherPtrTy->getPointerAddressSpace();
 
     // Compute the relative offset for the other pointer within the transfer.
-    unsigned OffsetWidth = DL.getIndexSizeInBits(OtherAS);
-    APInt OtherOffset(OffsetWidth, NewBeginOffset - BeginOffset);
+    unsigned IntPtrWidth = DL.getPointerSizeInBits(OtherAS);
+    APInt OtherOffset(IntPtrWidth, NewBeginOffset - BeginOffset);
     unsigned OtherAlign =
       IsDest ? II.getSourceAlignment() : II.getDestAlignment();
     OtherAlign =  MinAlign(OtherAlign ? OtherAlign : 1,
@@ -3010,7 +3011,8 @@ private:
   }
 
   bool visitIntrinsicInst(IntrinsicInst &II) {
-    assert(II.isLifetimeStartOrEnd());
+    assert(II.getIntrinsicID() == Intrinsic::lifetime_start ||
+           II.getIntrinsicID() == Intrinsic::lifetime_end);
     LLVM_DEBUG(dbgs() << "    original: " << II << "\n");
     assert(II.getArgOperand(1) == OldPtr);
 
@@ -3031,10 +3033,7 @@ private:
     ConstantInt *Size =
         ConstantInt::get(cast<IntegerType>(II.getArgOperand(0)->getType()),
                          NewEndOffset - NewBeginOffset);
-    // Lifetime intrinsics always expect an i8* so directly get such a pointer
-    // for the new alloca slice.
-    Type *PointerTy = IRB.getInt8PtrTy(OldPtr->getType()->getPointerAddressSpace());
-    Value *Ptr = getNewAllocaSlicePtr(IRB, PointerTy);
+    Value *Ptr = getNewAllocaSlicePtr(IRB, OldPtr->getType());
     Value *New;
     if (II.getIntrinsicID() == Intrinsic::lifetime_start)
       New = IRB.CreateLifetimeStart(Ptr, Size);
@@ -3165,12 +3164,7 @@ class AggLoadStoreRewriter : public InstVisitor<AggLoadStoreRewriter, bool> {
   /// value (as opposed to the user).
   Use *U;
 
-  /// Used to calculate offsets, and hence alignment, of subobjects.
-  const DataLayout &DL;
-
 public:
-  AggLoadStoreRewriter(const DataLayout &DL) : DL(DL) {}
-
   /// Rewrite loads and stores through a pointer and all pointers derived from
   /// it.
   bool rewrite(Instruction &I) {
@@ -3214,22 +3208,10 @@ private:
     /// split operations.
     Value *Ptr;
 
-    /// The base pointee type being GEPed into.
-    Type *BaseTy;
-
-    /// Known alignment of the base pointer.
-    unsigned BaseAlign;
-
-    /// To calculate offset of each component so we can correctly deduce
-    /// alignments.
-    const DataLayout &DL;
-
     /// Initialize the splitter with an insertion point, Ptr and start with a
     /// single zero GEP index.
-    OpSplitter(Instruction *InsertionPoint, Value *Ptr, Type *BaseTy,
-               unsigned BaseAlign, const DataLayout &DL)
-        : IRB(InsertionPoint), GEPIndices(1, IRB.getInt32(0)), Ptr(Ptr),
-          BaseTy(BaseTy), BaseAlign(BaseAlign), DL(DL) {}
+    OpSplitter(Instruction *InsertionPoint, Value *Ptr)
+        : IRB(InsertionPoint), GEPIndices(1, IRB.getInt32(0)), Ptr(Ptr) {}
 
   public:
     /// Generic recursive split emission routine.
@@ -3246,11 +3228,8 @@ private:
     /// \param Agg The aggregate value being built up or stored, depending on
     /// whether this is splitting a load or a store respectively.
     void emitSplitOps(Type *Ty, Value *&Agg, const Twine &Name) {
-      if (Ty->isSingleValueType()) {
-        unsigned Offset = DL.getIndexedOffsetInType(BaseTy, GEPIndices);
-        return static_cast<Derived *>(this)->emitFunc(
-            Ty, Agg, MinAlign(BaseAlign, Offset), Name);
-      }
+      if (Ty->isSingleValueType())
+        return static_cast<Derived *>(this)->emitFunc(Ty, Agg, Name);
 
       if (ArrayType *ATy = dyn_cast<ArrayType>(Ty)) {
         unsigned OldSize = Indices.size();
@@ -3289,19 +3268,17 @@ private:
   struct LoadOpSplitter : public OpSplitter<LoadOpSplitter> {
     AAMDNodes AATags;
 
-    LoadOpSplitter(Instruction *InsertionPoint, Value *Ptr, Type *BaseTy,
-                   AAMDNodes AATags, unsigned BaseAlign, const DataLayout &DL)
-        : OpSplitter<LoadOpSplitter>(InsertionPoint, Ptr, BaseTy, BaseAlign,
-                                     DL), AATags(AATags) {}
+    LoadOpSplitter(Instruction *InsertionPoint, Value *Ptr, AAMDNodes AATags)
+        : OpSplitter<LoadOpSplitter>(InsertionPoint, Ptr), AATags(AATags) {}
 
     /// Emit a leaf load of a single value. This is called at the leaves of the
     /// recursive emission to actually load values.
-    void emitFunc(Type *Ty, Value *&Agg, unsigned Align, const Twine &Name) {
+    void emitFunc(Type *Ty, Value *&Agg, const Twine &Name) {
       assert(Ty->isSingleValueType());
       // Load the single value and insert it using the indices.
       Value *GEP =
           IRB.CreateInBoundsGEP(nullptr, Ptr, GEPIndices, Name + ".gep");
-      LoadInst *Load = IRB.CreateAlignedLoad(GEP, Align, Name + ".load");
+      LoadInst *Load = IRB.CreateLoad(GEP, Name + ".load");
       if (AATags)
         Load->setAAMetadata(AATags);
       Agg = IRB.CreateInsertValue(Agg, Load, Indices, Name + ".insert");
@@ -3318,8 +3295,7 @@ private:
     LLVM_DEBUG(dbgs() << "    original: " << LI << "\n");
     AAMDNodes AATags;
     LI.getAAMetadata(AATags);
-    LoadOpSplitter Splitter(&LI, *U, LI.getType(), AATags,
-                            getAdjustedAlignment(&LI, 0, DL), DL);
+    LoadOpSplitter Splitter(&LI, *U, AATags);
     Value *V = UndefValue::get(LI.getType());
     Splitter.emitSplitOps(LI.getType(), V, LI.getName() + ".fca");
     LI.replaceAllUsesWith(V);
@@ -3328,15 +3304,13 @@ private:
   }
 
   struct StoreOpSplitter : public OpSplitter<StoreOpSplitter> {
-    StoreOpSplitter(Instruction *InsertionPoint, Value *Ptr, Type *BaseTy,
-                    AAMDNodes AATags, unsigned BaseAlign, const DataLayout &DL)
-        : OpSplitter<StoreOpSplitter>(InsertionPoint, Ptr, BaseTy, BaseAlign,
-                                      DL),
-          AATags(AATags) {}
+    StoreOpSplitter(Instruction *InsertionPoint, Value *Ptr, AAMDNodes AATags)
+        : OpSplitter<StoreOpSplitter>(InsertionPoint, Ptr), AATags(AATags) {}
     AAMDNodes AATags;
+
     /// Emit a leaf store of a single value. This is called at the leaves of the
     /// recursive emission to actually produce stores.
-    void emitFunc(Type *Ty, Value *&Agg, unsigned Align, const Twine &Name) {
+    void emitFunc(Type *Ty, Value *&Agg, const Twine &Name) {
       assert(Ty->isSingleValueType());
       // Extract the single value and store it using the indices.
       //
@@ -3346,8 +3320,7 @@ private:
           IRB.CreateExtractValue(Agg, Indices, Name + ".extract");
       Value *InBoundsGEP =
           IRB.CreateInBoundsGEP(nullptr, Ptr, GEPIndices, Name + ".gep");
-      StoreInst *Store =
-          IRB.CreateAlignedStore(ExtractValue, InBoundsGEP, Align);
+      StoreInst *Store = IRB.CreateStore(ExtractValue, InBoundsGEP);
       if (AATags)
         Store->setAAMetadata(AATags);
       LLVM_DEBUG(dbgs() << "          to: " << *Store << "\n");
@@ -3365,8 +3338,7 @@ private:
     LLVM_DEBUG(dbgs() << "    original: " << SI << "\n");
     AAMDNodes AATags;
     SI.getAAMetadata(AATags);
-    StoreOpSplitter Splitter(&SI, *U, V->getType(), AATags,
-                             getAdjustedAlignment(&SI, 0, DL), DL);
+    StoreOpSplitter Splitter(&SI, *U, AATags);
     Splitter.emitSplitOps(V->getType(), V, V->getName() + ".fca");
     SI.eraseFromParent();
     return true;
@@ -3800,8 +3772,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
                          PartPtrTy, BasePtr->getName() + "."),
           getAdjustedAlignment(LI, PartOffset, DL), /*IsVolatile*/ false,
           LI->getName());
-      PLoad->copyMetadata(*LI, {LLVMContext::MD_mem_parallel_loop_access,
-                                LLVMContext::MD_access_group});
+      PLoad->copyMetadata(*LI, LLVMContext::MD_mem_parallel_loop_access);
 
       // Append this load onto the list of split loads so we can find it later
       // to rewrite the stores.
@@ -3857,8 +3828,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
                            APInt(DL.getIndexSizeInBits(AS), PartOffset),
                            PartPtrTy, StoreBasePtr->getName() + "."),
             getAdjustedAlignment(SI, PartOffset, DL), /*IsVolatile*/ false);
-        PStore->copyMetadata(*LI, {LLVMContext::MD_mem_parallel_loop_access,
-                                   LLVMContext::MD_access_group});
+        PStore->copyMetadata(*LI, LLVMContext::MD_mem_parallel_loop_access);
         LLVM_DEBUG(dbgs() << "      +" << PartOffset << ":" << *PStore << "\n");
       }
 
@@ -4251,7 +4221,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   }
 
   if (!IsSorted)
-    llvm::sort(AS);
+    llvm::sort(AS.begin(), AS.end());
 
   /// Describes the allocas introduced by rewritePartition in order to migrate
   /// the debug info.
@@ -4284,7 +4254,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
 
   // Migrate debug information from the old alloca to the new alloca(s)
   // and the individual partitions.
-  TinyPtrVector<DbgVariableIntrinsic *> DbgDeclares = FindDbgAddrUses(&AI);
+  TinyPtrVector<DbgInfoIntrinsic *> DbgDeclares = FindDbgAddrUses(&AI);
   if (!DbgDeclares.empty()) {
     auto *Var = DbgDeclares.front()->getVariable();
     auto *Expr = DbgDeclares.front()->getExpression();
@@ -4336,7 +4306,7 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
       }
 
       // Remove any existing intrinsics describing the same alloca.
-      for (DbgVariableIntrinsic *OldDII : FindDbgAddrUses(Fragment.Alloca))
+      for (DbgInfoIntrinsic *OldDII : FindDbgAddrUses(Fragment.Alloca))
         OldDII->eraseFromParent();
 
       DIB.insertDeclare(Fragment.Alloca, Var, FragmentExpr,
@@ -4386,7 +4356,7 @@ bool SROA::runOnAlloca(AllocaInst &AI) {
 
   // First, split any FCA loads and stores touching this alloca to promote
   // better splitting and promotion opportunities.
-  AggLoadStoreRewriter AggRewriter(DL);
+  AggLoadStoreRewriter AggRewriter;
   Changed |= AggRewriter.rewrite(AI);
 
   // Build the slices using a recursive instruction-visiting builder.
@@ -4451,7 +4421,7 @@ bool SROA::deleteDeadInstructions(
     // not be able to find it.
     if (AllocaInst *AI = dyn_cast<AllocaInst>(I)) {
       DeletedAllocas.insert(AI);
-      for (DbgVariableIntrinsic *OldDII : FindDbgAddrUses(AI))
+      for (DbgInfoIntrinsic *OldDII : FindDbgAddrUses(AI))
         OldDII->eraseFromParent();
     }
 

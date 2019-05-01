@@ -121,8 +121,7 @@ static void ConstructPS4LinkJob(const Tool &T, Compilation &C,
     assert(Output.isNothing() && "Invalid output.");
   }
 
-  if(!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs))
-    AddPS4SanitizerArgs(ToolChain, CmdArgs);
+  AddPS4SanitizerArgs(ToolChain, CmdArgs);
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   Args.AddAllArgs(CmdArgs, options::OPT_T_Group);
@@ -191,8 +190,7 @@ static void ConstructGoldLinkJob(const Tool &T, Compilation &C,
     assert(Output.isNothing() && "Invalid output.");
   }
 
-  if(!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs))
-    AddPS4SanitizerArgs(ToolChain, CmdArgs);
+  AddPS4SanitizerArgs(ToolChain, CmdArgs);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
     const char *crt1 = nullptr;

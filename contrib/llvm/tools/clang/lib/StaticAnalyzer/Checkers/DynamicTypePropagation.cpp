@@ -21,7 +21,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Basic/Builtins.h"
@@ -85,6 +85,7 @@ class DynamicTypePropagation:
     }
 
     std::shared_ptr<PathDiagnosticPiece> VisitNode(const ExplodedNode *N,
+                                                   const ExplodedNode *PrevN,
                                                    BugReporterContext &BRC,
                                                    BugReport &BR) override;
 
@@ -121,6 +122,11 @@ void DynamicTypePropagation::checkDeadSymbols(SymbolReaper &SR,
     if (!SR.isLiveRegion(I->first)) {
       State = State->remove<DynamicTypeMap>(I->first);
     }
+  }
+
+  if (!SR.hasDeadSymbols()) {
+    C.addTransition(State);
+    return;
   }
 
   MostSpecializedTypeArgsMapTy TyArgMap =
@@ -931,10 +937,11 @@ void DynamicTypePropagation::reportGenericsBug(
 
 std::shared_ptr<PathDiagnosticPiece>
 DynamicTypePropagation::GenericsBugVisitor::VisitNode(const ExplodedNode *N,
+                                                      const ExplodedNode *PrevN,
                                                       BugReporterContext &BRC,
                                                       BugReport &BR) {
   ProgramStateRef state = N->getState();
-  ProgramStateRef statePrev = N->getFirstPred()->getState();
+  ProgramStateRef statePrev = PrevN->getState();
 
   const ObjCObjectPointerType *const *TrackedType =
       state->get<MostSpecializedTypeArgsMap>(Sym);

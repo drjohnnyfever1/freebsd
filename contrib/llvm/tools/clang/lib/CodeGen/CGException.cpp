@@ -66,7 +66,7 @@ llvm::Constant *CodeGenModule::getTerminateFn() {
       name = "__std_terminate";
     else
       name = "?terminate@@YAXXZ";
-  } else if (getLangOpts().ObjC &&
+  } else if (getLangOpts().ObjC1 &&
              getLangOpts().ObjCRuntime.hasTerminate())
     name = "objc_terminate";
   else
@@ -224,7 +224,7 @@ const EHPersonality &EHPersonality::get(CodeGenModule &CGM,
   if (FD && FD->usesSEHTry())
     return getSEHPersonalityMSVC(T);
 
-  if (L.ObjC)
+  if (L.ObjC1)
     return L.CPlusPlus ? getObjCXXPersonality(Target, L)
                        : getObjCPersonality(Target, L);
   return L.CPlusPlus ? getCXXPersonality(Target, L)
@@ -250,11 +250,7 @@ static llvm::Constant *getPersonalityFn(CodeGenModule &CGM,
 static llvm::Constant *getOpaquePersonalityFn(CodeGenModule &CGM,
                                         const EHPersonality &Personality) {
   llvm::Constant *Fn = getPersonalityFn(CGM, Personality);
-  llvm::PointerType* Int8PtrTy = llvm::PointerType::get(
-      llvm::Type::getInt8Ty(CGM.getLLVMContext()),
-      CGM.getDataLayout().getProgramAddressSpace());
-
-  return llvm::ConstantExpr::getBitCast(Fn, Int8PtrTy);
+  return llvm::ConstantExpr::getBitCast(Fn, CGM.Int8PtrTy);
 }
 
 /// Check whether a landingpad instruction only uses C++ features.
@@ -319,7 +315,7 @@ static bool PersonalityHasOnlyCXXUses(llvm::Constant *Fn) {
 /// when it really needs it.
 void CodeGenModule::SimplifyPersonality() {
   // If we're not in ObjC++ -fexceptions, there's nothing to do.
-  if (!LangOpts.CPlusPlus || !LangOpts.ObjC || !LangOpts.Exceptions)
+  if (!LangOpts.CPlusPlus || !LangOpts.ObjC1 || !LangOpts.Exceptions)
     return;
 
   // Both the problem this endeavors to fix and the way the logic
@@ -1252,7 +1248,7 @@ void CodeGenFunction::ExitCXXTryStmt(const CXXTryStmt &S, bool IsFnTryBlock) {
     // we follow the false destination for each of the cond branches to reach
     // the rethrow block.
     llvm::BasicBlock *RethrowBlock = WasmCatchStartBlock;
-    while (llvm::Instruction *TI = RethrowBlock->getTerminator()) {
+    while (llvm::TerminatorInst *TI = RethrowBlock->getTerminator()) {
       auto *BI = cast<llvm::BranchInst>(TI);
       assert(BI->isConditional());
       RethrowBlock = BI->getSuccessor(1);
@@ -1627,16 +1623,8 @@ struct PerformSEHFinally final : EHScopeStack::Cleanup {
 
     // Compute the two argument values.
     QualType ArgTys[2] = {Context.UnsignedCharTy, Context.VoidPtrTy};
-    llvm::Value *FP = nullptr;
-    // If CFG.IsOutlinedSEHHelper is true, then we are within a finally block.
-    if (CGF.IsOutlinedSEHHelper) {
-      FP = &CGF.CurFn->arg_begin()[1];
-    } else {
-      llvm::Value *LocalAddrFn =
-          CGM.getIntrinsic(llvm::Intrinsic::localaddress);
-      FP = CGF.Builder.CreateCall(LocalAddrFn);
-    }
-
+    llvm::Value *LocalAddrFn = CGM.getIntrinsic(llvm::Intrinsic::localaddress);
+    llvm::Value *FP = CGF.Builder.CreateCall(LocalAddrFn);
     llvm::Value *IsForEH =
         llvm::ConstantInt::get(CGF.ConvertType(ArgTys[0]), F.isForEHCleanup());
     Args.add(RValue::get(IsForEH), ArgTys[0]);
@@ -1789,7 +1777,7 @@ void CodeGenFunction::EmitCapturedLocals(CodeGenFunction &ParentCGF,
     // frame pointer of the parent function. We only need to do this in filters,
     // since finally funclets recover the parent FP for us.
     llvm::Function *RecoverFPIntrin =
-        CGM.getIntrinsic(llvm::Intrinsic::eh_recoverfp);
+        CGM.getIntrinsic(llvm::Intrinsic::x86_seh_recoverfp);
     llvm::Constant *ParentI8Fn =
         llvm::ConstantExpr::getBitCast(ParentCGF.CurFn, Int8PtrTy);
     ParentFP = Builder.CreateCall(RecoverFPIntrin, {ParentI8Fn, EntryFP});
@@ -1835,7 +1823,7 @@ void CodeGenFunction::EmitCapturedLocals(CodeGenFunction &ParentCGF,
 void CodeGenFunction::startOutlinedSEHHelper(CodeGenFunction &ParentCGF,
                                              bool IsFilter,
                                              const Stmt *OutlinedStmt) {
-  SourceLocation StartLoc = OutlinedStmt->getBeginLoc();
+  SourceLocation StartLoc = OutlinedStmt->getLocStart();
 
   // Get the mangled function name.
   SmallString<128> Name;
@@ -1883,10 +1871,10 @@ void CodeGenFunction::startOutlinedSEHHelper(CodeGenFunction &ParentCGF,
   IsOutlinedSEHHelper = true;
 
   StartFunction(GlobalDecl(), RetTy, Fn, FnInfo, Args,
-                OutlinedStmt->getBeginLoc(), OutlinedStmt->getBeginLoc());
+                OutlinedStmt->getLocStart(), OutlinedStmt->getLocStart());
   CurSEHParent = ParentCGF.CurSEHParent;
 
-  CGM.SetLLVMFunctionAttributes(GlobalDecl(), FnInfo, CurFn);
+  CGM.SetLLVMFunctionAttributes(nullptr, FnInfo, CurFn);
   EmitCapturedLocals(ParentCGF, OutlinedStmt, IsFilter);
 }
 
@@ -1905,7 +1893,7 @@ CodeGenFunction::GenerateSEHFilterFunction(CodeGenFunction &ParentCGF,
                             FilterExpr->getType()->isSignedIntegerType());
   Builder.CreateStore(R, ReturnValue);
 
-  FinishFunction(FilterExpr->getEndLoc());
+  FinishFunction(FilterExpr->getLocEnd());
 
   return CurFn;
 }
@@ -1919,7 +1907,7 @@ CodeGenFunction::GenerateSEHFinallyFunction(CodeGenFunction &ParentCGF,
   // Emit the original filter expression, convert to i32, and return.
   EmitStmt(FinallyBlock);
 
-  FinishFunction(FinallyBlock->getEndLoc());
+  FinishFunction(FinallyBlock->getLocEnd());
 
   return CurFn;
 }

@@ -439,7 +439,6 @@ class Instruction {
   // instruction.
   bit isReturn     = 0;     // Is this instruction a return instruction?
   bit isBranch     = 0;     // Is this instruction a branch instruction?
-  bit isEHScopeReturn = 0;  // Does this instruction end an EH scope?
   bit isIndirectBranch = 0; // Is this instruction an indirect branch?
   bit isCompare    = 0;     // Is this instruction a comparison instruction?
   bit isMoveImm    = 0;     // Is this instruction a move immediate instruction?
@@ -479,7 +478,6 @@ class Instruction {
   bit isInsertSubreg = 0;   // Is this instruction a kind of insert subreg?
                             // If so, make sure to override
                             // TargetInstrInfo::getInsertSubregLikeInputs.
-  bit variadicOpsAreDefs = 0; // Are variadic operands definitions?
 
   // Does the instruction have side effects that are not captured by any
   // operands of the instruction or other flags?
@@ -1105,7 +1103,7 @@ def FAULTING_OP : StandardPseudoInstruction {
   let isBranch = 1;
 }
 def PATCHABLE_OP : StandardPseudoInstruction {
-  let OutOperandList = (outs);
+  let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let usesCustomInserter = 1;
   let mayLoad = 1;
@@ -1165,8 +1163,8 @@ def PATCHABLE_TYPED_EVENT_CALL : StandardPseudoInstruction {
   let hasSideEffects = 1;
 }
 def FENTRY_CALL : StandardPseudoInstruction {
-  let OutOperandList = (outs);
-  let InOperandList = (ins);
+  let OutOperandList = (outs unknown:$dst);
+  let InOperandList = (ins variable_ops);
   let AsmString = "# FEntry call";
   let usesCustomInserter = 1;
   let mayLoad = 1;
@@ -1556,8 +1554,3 @@ include "llvm/Target/GlobalISel/Target.td"
 // Pull in the common support for the Global ISel DAG-based selector generation.
 //
 include "llvm/Target/GlobalISel/SelectionDAGCompat.td"
-
-//===----------------------------------------------------------------------===//
-// Pull in the common support for Pfm Counters generation.
-//
-include "llvm/Target/TargetPfmCounters.td"

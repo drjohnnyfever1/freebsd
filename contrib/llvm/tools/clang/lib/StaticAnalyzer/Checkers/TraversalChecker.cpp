@@ -11,7 +11,7 @@
 // as it builds the ExplodedGraph.
 //
 //===----------------------------------------------------------------------===//
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/AST/ParentMap.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
@@ -47,7 +47,7 @@ void TraversalDumper::checkBranchCondition(const Stmt *Condition,
   // It is mildly evil to print directly to llvm::outs() rather than emitting
   // warnings, but this ensures things do not get filtered out by the rest of
   // the static analyzer machinery.
-  SourceLocation Loc = Parent->getBeginLoc();
+  SourceLocation Loc = Parent->getLocStart();
   llvm::outs() << C.getSourceManager().getSpellingLineNumber(Loc) << " "
                << Parent->getStmtClassName() << "\n";
 }

@@ -16,6 +16,7 @@
 
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/SourceLocation.h"
+#include "clang/Frontend/CodeGenOptions.h"
 #include "clang/Lex/PPCallbacks.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/GlobalValue.h"

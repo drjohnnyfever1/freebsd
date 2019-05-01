@@ -13,7 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/AST/Expr.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"

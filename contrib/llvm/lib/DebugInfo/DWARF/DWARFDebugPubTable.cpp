@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/DWARF/DWARFDebugPubTable.h"
-#include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/DataExtractor.h"
@@ -19,11 +18,10 @@
 using namespace llvm;
 using namespace dwarf;
 
-DWARFDebugPubTable::DWARFDebugPubTable(const DWARFObject &Obj,
-                                       const DWARFSection &Sec,
-                                       bool LittleEndian, bool GnuStyle)
+DWARFDebugPubTable::DWARFDebugPubTable(StringRef Data, bool LittleEndian,
+                                       bool GnuStyle)
     : GnuStyle(GnuStyle) {
-  DWARFDataExtractor PubNames(Obj, Sec, LittleEndian, 0);
+  DataExtractor PubNames(Data, LittleEndian, 0);
   uint32_t Offset = 0;
   while (PubNames.isValidOffset(Offset)) {
     Sets.push_back({});
@@ -31,10 +29,10 @@ DWARFDebugPubTable::DWARFDebugPubTable(const DWARFObject &Obj,
 
     SetData.Length = PubNames.getU32(&Offset);
     SetData.Version = PubNames.getU16(&Offset);
-    SetData.Offset = PubNames.getRelocatedValue(4, &Offset);
+    SetData.Offset = PubNames.getU32(&Offset);
     SetData.Size = PubNames.getU32(&Offset);
 
-    while (Offset < Sec.Data.size()) {
+    while (Offset < Data.size()) {
       uint32_t DieRef = PubNames.getU32(&Offset);
       if (DieRef == 0)
         break;

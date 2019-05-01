@@ -7,8 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Expression/Materializer.h"
 #include "lldb/Core/DumpDataExtractor.h"
+#include "lldb/Core/RegisterValue.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/Expression/ExpressionVariable.h"
@@ -22,7 +27,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegisterValue.h"
 
 using namespace lldb_private;
 
@@ -46,8 +50,7 @@ uint32_t Materializer::AddStructMember(Entity &entity) {
 }
 
 void Materializer::Entity::SetSizeAndAlignmentFromType(CompilerType &type) {
-  if (llvm::Optional<uint64_t> size = type.GetByteSize(nullptr))
-    m_size = *size;
+  m_size = type.GetByteSize(nullptr);
 
   uint32_t bit_alignment = type.GetTypeBitAlign();
 
@@ -529,7 +532,7 @@ public:
 
         if (data.GetByteSize() < m_variable_sp->GetType()->GetByteSize()) {
           if (data.GetByteSize() == 0 &&
-              !m_variable_sp->LocationExpression().IsValid()) {
+              m_variable_sp->LocationExpression().IsValid() == false) {
             err.SetErrorStringWithFormat("the variable '%s' has no location, "
                                          "it may have been optimized out",
                                          m_variable_sp->GetName().AsCString());
@@ -795,11 +798,7 @@ public:
 
       ExecutionContextScope *exe_scope = map.GetBestExecutionContextScope();
 
-      llvm::Optional<uint64_t> byte_size = m_type.GetByteSize(exe_scope);
-      if (!byte_size) {
-        err.SetErrorString("can't get size of type");
-        return;
-      }
+      size_t byte_size = m_type.GetByteSize(exe_scope);
       size_t bit_align = m_type.GetTypeBitAlign();
       size_t byte_align = (bit_align + 7) / 8;
 
@@ -810,10 +809,10 @@ public:
       const bool zero_memory = true;
 
       m_temporary_allocation = map.Malloc(
-          *byte_size, byte_align,
+          byte_size, byte_align,
           lldb::ePermissionsReadable | lldb::ePermissionsWritable,
           IRMemoryMap::eAllocationPolicyMirror, zero_memory, alloc_error);
-      m_temporary_allocation_size = *byte_size;
+      m_temporary_allocation_size = byte_size;
 
       if (!alloc_error.Success()) {
         err.SetErrorStringWithFormat(

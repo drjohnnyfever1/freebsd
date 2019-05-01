@@ -58,7 +58,7 @@ static inline void EraseInstruction(Instruction *CI) {
     // Replace the return value with the argument.
     assert((IsForwarding(GetBasicARCInstKind(CI)) ||
             (IsNoopOnNull(GetBasicARCInstKind(CI)) &&
-             IsNullOrUndef(OldArg->stripPointerCasts()))) &&
+             isa<ConstantPointerNull>(OldArg))) &&
            "Can't delete non-forwarding instruction with users!");
     CI->replaceAllUsesWith(OldArg);
   }

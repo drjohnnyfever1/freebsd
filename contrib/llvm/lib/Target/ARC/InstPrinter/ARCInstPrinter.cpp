@@ -20,6 +20,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -27,12 +28,6 @@ using namespace llvm;
 #define DEBUG_TYPE "asm-printer"
 
 #include "ARCGenAsmWriter.inc"
-
-template <class T>
-static const char *BadConditionCode(T cc) {
-  LLVM_DEBUG(dbgs() << "Unknown condition code passed: " << cc << "\n");
-  return "{unknown-cc}";
-}
 
 static const char *ARCBRCondCodeToString(ARCCC::BRCondCode BRCC) {
   switch (BRCC) {
@@ -49,7 +44,7 @@ static const char *ARCBRCondCodeToString(ARCCC::BRCondCode BRCC) {
   case ARCCC::BRHS:
     return "hs";
   }
-  return BadConditionCode(BRCC);
+  llvm_unreachable("Unhandled ARCCC::BRCondCode");
 }
 
 static const char *ARCCondCodeToString(ARCCC::CondCode CC) {
@@ -91,7 +86,7 @@ static const char *ARCCondCodeToString(ARCCC::CondCode CC) {
   case ARCCC::Z:
     return "z";
   }
-  return BadConditionCode(CC);
+  llvm_unreachable("Unhandled ARCCC::CondCode");
 }
 
 void ARCInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {

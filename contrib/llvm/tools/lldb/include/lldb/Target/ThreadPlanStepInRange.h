@@ -10,6 +10,10 @@
 #ifndef liblldb_ThreadPlanStepInRange_h_
 #define liblldb_ThreadPlanStepInRange_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/AddressRange.h"
 #include "lldb/Target/StackID.h"
 #include "lldb/Target/Thread.h"
@@ -54,7 +58,7 @@ protected:
   static bool DefaultShouldStopHereCallback(ThreadPlan *current_plan,
                                             Flags &flags,
                                             lldb::FrameComparison operation,
-                                            Status &status, void *baton);
+                                            void *baton);
 
   bool DoWillResume(lldb::StateType resume_state, bool current_plan) override;
 
@@ -76,11 +80,11 @@ private:
   friend lldb::ThreadPlanSP Thread::QueueThreadPlanForStepOverRange(
       bool abort_other_plans, const AddressRange &range,
       const SymbolContext &addr_context, lldb::RunMode stop_others,
-      Status &status, LazyBool avoid_code_without_debug_info);
+      LazyBool avoid_code_without_debug_info);
   friend lldb::ThreadPlanSP Thread::QueueThreadPlanForStepInRange(
       bool abort_other_plans, const AddressRange &range,
       const SymbolContext &addr_context, const char *step_in_target,
-      lldb::RunMode stop_others, Status &status,
+      lldb::RunMode stop_others,
       LazyBool step_in_avoids_code_without_debug_info,
       LazyBool step_out_avoids_code_without_debug_info);
 

@@ -671,11 +671,10 @@ public:
   static InitializationKind CreateForInit(SourceLocation Loc, bool DirectInit,
                                           Expr *Init) {
     if (!Init) return CreateDefault(Loc);
-    if (!DirectInit)
-      return CreateCopy(Loc, Init->getBeginLoc());
+    if (!DirectInit) return CreateCopy(Loc, Init->getLocStart());
     if (isa<InitListExpr>(Init))
-      return CreateDirectList(Loc, Init->getBeginLoc(), Init->getEndLoc());
-    return CreateDirect(Loc, Init->getBeginLoc(), Init->getEndLoc());
+      return CreateDirectList(Loc, Init->getLocStart(), Init->getLocEnd());
+    return CreateDirect(Loc, Init->getLocStart(), Init->getLocEnd());
   }
 
   /// Determine the initialization kind.
@@ -893,8 +892,11 @@ public:
     /// Initialize an OpenCL sampler from an integer.
     SK_OCLSamplerInit,
 
-    /// Initialize an opaque OpenCL type (event_t, queue_t, etc.) with zero
-    SK_OCLZeroOpaqueType
+    /// Initialize queue_t from 0.
+    SK_OCLZeroQueue,
+
+    /// Passing zero to a function where OpenCL event_t is expected.
+    SK_OCLZeroEvent
   };
 
   /// A single step in the initialization sequence.
@@ -1331,13 +1333,12 @@ public:
   /// constant.
   void AddOCLSamplerInitStep(QualType T);
 
-  /// Add a step to initialzie an OpenCL opaque type (event_t, queue_t, etc.)
-  /// from a zero constant.
-  void AddOCLZeroOpaqueTypeStep(QualType T);
+  /// Add a step to initialize an OpenCL event_t from a NULL
+  /// constant.
+  void AddOCLZeroEventStep(QualType T);
 
-  /// Add a step to initialize by zero types defined in the
-  /// cl_intel_device_side_avc_motion_estimation OpenCL extension
-  void AddOCLIntelSubgroupAVCZeroInitStep(QualType T);
+  /// Add a step to initialize an OpenCL queue_t from 0.
+  void AddOCLZeroQueueStep(QualType T);
 
   /// Add steps to unwrap a initializer list for a reference around a
   /// single element and rewrap it at the end.

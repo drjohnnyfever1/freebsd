@@ -118,7 +118,7 @@ public:
     /// Only runs visitors, no output generated.
     None,
 
-    /// Used for HTML, SARIF, and text output.
+    /// Used for HTML and text output.
     Minimal,
 
     /// Used for plist output, used for "arrows" generation.
@@ -178,9 +178,10 @@ public:
   PathDiagnosticLocation() = default;
 
   /// Create a location corresponding to the given statement.
-  PathDiagnosticLocation(const Stmt *s, const SourceManager &sm,
+  PathDiagnosticLocation(const Stmt *s,
+                         const SourceManager &sm,
                          LocationOrAnalysisDeclContext lac)
-      : K(s->getBeginLoc().isValid() ? StmtK : SingleLocK),
+      : K(s->getLocStart().isValid() ? StmtK : SingleLocK),
         S(K == StmtK ? s : nullptr), SM(&sm),
         Loc(genLocation(SourceLocation(), lac)), Range(genRange(lac)) {
     assert(K == SingleLocK || S);
@@ -632,7 +633,7 @@ public:
   }
 
   static std::shared_ptr<PathDiagnosticCallPiece>
-  construct(const CallExitEnd &CE,
+  construct(const ExplodedNode *N, const CallExitEnd &CE,
             const SourceManager &SM);
 
   static PathDiagnosticCallPiece *construct(PathPieces &pieces,
@@ -759,7 +760,7 @@ public:
 };
 
 /// File IDs mapped to sets of line numbers.
-using FilesToLineNumsMap = std::map<FileID, std::set<unsigned>>;
+using FilesToLineNumsMap = std::map<unsigned, std::set<unsigned>>;
 
 /// PathDiagnostic - PathDiagnostic objects represent a single path-sensitive
 ///  diagnostic.  It represents an ordered-collection of PathDiagnosticPieces,
@@ -858,13 +859,13 @@ public:
   meta_iterator meta_end() const { return OtherDesc.end(); }
   void addMeta(StringRef s) { OtherDesc.push_back(s); }
 
-  const FilesToLineNumsMap &getExecutedLines() const {
-    return *ExecutedLines;
+  using filesmap_iterator = FilesToLineNumsMap::const_iterator;
+
+  filesmap_iterator executedLines_begin() const {
+    return ExecutedLines->begin();
   }
 
-  FilesToLineNumsMap &getExecutedLines() {
-    return *ExecutedLines;
-  }
+  filesmap_iterator executedLines_end() const { return ExecutedLines->end(); }
 
   PathDiagnosticLocation getLocation() const {
     return Loc;

@@ -94,12 +94,10 @@ static rlim_t getlim(int res) {
 }
 
 static void setlim(int res, rlim_t lim) {
-  struct rlimit rlim;
-  if (getrlimit(res, const_cast<struct rlimit *>(&rlim))) {
-    Report("ERROR: %s getrlimit() failed %d\n", SanitizerToolName, errno);
-    Die();
-  }
+  // The following magic is to prevent clang from replacing it with memset.
+  volatile struct rlimit rlim;
   rlim.rlim_cur = lim;
+  rlim.rlim_max = lim;
   if (setrlimit(res, const_cast<struct rlimit *>(&rlim))) {
     Report("ERROR: %s setrlimit() failed %d\n", SanitizerToolName, errno);
     Die();

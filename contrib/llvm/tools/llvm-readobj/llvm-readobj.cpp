@@ -48,72 +48,58 @@ namespace opts {
     cl::desc("<input object files>"),
     cl::ZeroOrMore);
 
-  // -all, -a
-  cl::opt<bool>
-      All("all",
-          cl::desc("Equivalent to setting: --file-headers, --program-headers, "
-                   "--section-headers, --symbols, --relocations, "
-                   "--dynamic-table, --notes, --version-info, --unwind, "
-                   "--section-groups and --elf-hash-histogram."));
-  cl::alias AllShort("a", cl::desc("Alias for --all"), cl::aliasopt(All));
-
-  // --headers -e
-  cl::opt<bool>
-      Headers("headers",
-          cl::desc("Equivalent to setting: --file-headers, --program-headers, "
-                   "--section-headers"));
-  cl::alias HeadersShort("e", cl::desc("Alias for --headers"),
-     cl::aliasopt(Headers));
-
   // -wide, -W
-  cl::opt<bool>
-      WideOutput("wide", cl::desc("Ignored for compatibility with GNU readelf"),
-                 cl::Hidden);
+  cl::opt<bool> WideOutput("wide",
+    cl::desc("Ignored for compatibility with GNU readelf"));
   cl::alias WideOutputShort("W",
     cl::desc("Alias for --wide"),
     cl::aliasopt(WideOutput));
 
-  // -file-headers, -file-header, -h
+  // -file-headers, -h
   cl::opt<bool> FileHeaders("file-headers",
     cl::desc("Display file headers "));
-  cl::alias FileHeadersShort("h", cl::desc("Alias for --file-headers"),
-                             cl::aliasopt(FileHeaders), cl::NotHidden);
-  cl::alias FileHeadersSingular("file-header",
-                                cl::desc("Alias for --file-headers"),
-                                cl::aliasopt(FileHeaders));
+  cl::alias FileHeadersShort("h",
+    cl::desc("Alias for --file-headers"),
+    cl::aliasopt(FileHeaders));
 
-  // -section-headers, -sections, -S
-  // Also -s in llvm-readobj mode.
-  cl::opt<bool> SectionHeaders("section-headers",
-                               cl::desc("Display all section headers."));
-  cl::alias SectionsShortUpper("S", cl::desc("Alias for --section-headers"),
-                               cl::aliasopt(SectionHeaders), cl::NotHidden);
-  cl::alias SectionHeadersAlias("sections",
-                                cl::desc("Alias for --section-headers"),
-                                cl::aliasopt(SectionHeaders), cl::NotHidden);
+  // -sections, -s, -S
+  // Note: In GNU readelf, -s means --symbols!
+  cl::opt<bool> Sections("sections",
+    cl::desc("Display all sections."));
+  cl::alias SectionsShort("s",
+    cl::desc("Alias for --sections"),
+    cl::aliasopt(Sections));
+  cl::alias SectionsShortUpper("S",
+    cl::desc("Alias for --sections"),
+    cl::aliasopt(Sections));
 
-  // -section-relocations
-  // Also -sr in llvm-readobj mode.
+  // -section-relocations, -sr
   cl::opt<bool> SectionRelocations("section-relocations",
     cl::desc("Display relocations for each section shown."));
+  cl::alias SectionRelocationsShort("sr",
+    cl::desc("Alias for --section-relocations"),
+    cl::aliasopt(SectionRelocations));
 
-  // -section-symbols
-  // Also -st in llvm-readobj mode.
+  // -section-symbols, -st
   cl::opt<bool> SectionSymbols("section-symbols",
     cl::desc("Display symbols for each section shown."));
+  cl::alias SectionSymbolsShort("st",
+    cl::desc("Alias for --section-symbols"),
+    cl::aliasopt(SectionSymbols));
 
-  // -section-data
-  // Also -sd in llvm-readobj mode.
+  // -section-data, -sd
   cl::opt<bool> SectionData("section-data",
     cl::desc("Display section data for each section shown."));
+  cl::alias SectionDataShort("sd",
+    cl::desc("Alias for --section-data"),
+    cl::aliasopt(SectionData));
 
-  // -relocations, -relocs, -r
+  // -relocations, -r
   cl::opt<bool> Relocations("relocations",
     cl::desc("Display the relocation entries in the file"));
-  cl::alias RelocationsShort("r", cl::desc("Alias for --relocations"),
-                             cl::aliasopt(Relocations), cl::NotHidden);
-  cl::alias RelocationsGNU("relocs", cl::desc("Alias for --relocations"),
-                           cl::aliasopt(Relocations));
+  cl::alias RelocationsShort("r",
+    cl::desc("Alias for --relocations"),
+    cl::aliasopt(Relocations));
 
   // -notes, -n
   cl::opt<bool> Notes("notes", cl::desc("Display the ELF notes in the file"));
@@ -123,19 +109,19 @@ namespace opts {
   cl::opt<bool> DynRelocs("dyn-relocations",
     cl::desc("Display the dynamic relocation entries in the file"));
 
-  // -symbols
-  // Also -s in llvm-readelf mode, or -t in llvm-readobj mode.
+  // -symbols, -t
   cl::opt<bool> Symbols("symbols",
     cl::desc("Display the symbol table"));
-  cl::alias SymbolsGNU("syms", cl::desc("Alias for --symbols"),
-                       cl::aliasopt(Symbols));
+  cl::alias SymbolsShort("t",
+    cl::desc("Alias for --symbols"),
+    cl::aliasopt(Symbols));
 
-  // -dyn-symbols, -dyn-syms
-  // Also -dt in llvm-readobj mode.
+  // -dyn-symbols, -dt
   cl::opt<bool> DynamicSymbols("dyn-symbols",
     cl::desc("Display the dynamic symbol table"));
-  cl::alias DynSymsGNU("dyn-syms", cl::desc("Alias for --dyn-symbols"),
-                       cl::aliasopt(DynamicSymbols));
+  cl::alias DynamicSymbolsShort("dt",
+    cl::desc("Alias for --dyn-symbols"),
+    cl::aliasopt(DynamicSymbols));
 
   // -unwind, -u
   cl::opt<bool> UnwindInfo("unwind",
@@ -144,33 +130,29 @@ namespace opts {
     cl::desc("Alias for --unwind"),
     cl::aliasopt(UnwindInfo));
 
-  // -dynamic-table, -dynamic, -d
+  // -dynamic-table
   cl::opt<bool> DynamicTable("dynamic-table",
     cl::desc("Display the ELF .dynamic section table"));
   cl::alias DynamicTableShort("d", cl::desc("Alias for --dynamic-table"),
-                              cl::aliasopt(DynamicTable), cl::NotHidden);
-  cl::alias DynamicTableAlias("dynamic", cl::desc("Alias for --dynamic-table"),
                               cl::aliasopt(DynamicTable));
 
   // -needed-libs
   cl::opt<bool> NeededLibraries("needed-libs",
     cl::desc("Display the needed libraries"));
 
-  // -program-headers, -segments, -l
+  // -program-headers
   cl::opt<bool> ProgramHeaders("program-headers",
     cl::desc("Display ELF program headers"));
   cl::alias ProgramHeadersShort("l", cl::desc("Alias for --program-headers"),
-                                cl::aliasopt(ProgramHeaders), cl::NotHidden);
-  cl::alias SegmentsAlias("segments", cl::desc("Alias for --program-headers"),
-                          cl::aliasopt(ProgramHeaders));
+                                cl::aliasopt(ProgramHeaders));
 
-  // -string-dump, -p
+  // -string-dump
   cl::list<std::string> StringDump("string-dump", cl::desc("<number|name>"),
                                    cl::ZeroOrMore);
   cl::alias StringDumpShort("p", cl::desc("Alias for --string-dump"),
                             cl::aliasopt(StringDump));
 
-  // -hex-dump, -x
+  // -hex-dump
   cl::list<std::string> HexDump("hex-dump", cl::desc("<number|name>"),
                                 cl::ZeroOrMore);
   cl::alias HexDumpShort("x", cl::desc("Alias for --hex-dump"),
@@ -206,9 +188,11 @@ namespace opts {
       "codeview-subsection-bytes",
       cl::desc("Dump raw contents of codeview debug sections and records"));
 
-  // -arm-attributes
+  // -arm-attributes, -a
   cl::opt<bool> ARMAttributes("arm-attributes",
                               cl::desc("Display the ARM attributes section"));
+  cl::alias ARMAttributesShort("a", cl::desc("Alias for --arm-attributes"),
+                               cl::aliasopt(ARMAttributes));
 
   // -mips-plt-got
   cl::opt<bool>
@@ -299,40 +283,28 @@ namespace opts {
   PrintStackMap("stackmap",
                 cl::desc("Display contents of stackmap section"));
 
-  // -version-info, -V
+  // -version-info
   cl::opt<bool>
       VersionInfo("version-info",
                   cl::desc("Display ELF version sections (if present)"));
   cl::alias VersionInfoShort("V", cl::desc("Alias for -version-info"),
                              cl::aliasopt(VersionInfo));
 
-  // -elf-section-groups, -section-groups, -g
   cl::opt<bool> SectionGroups("elf-section-groups",
                               cl::desc("Display ELF section group contents"));
-  cl::alias SectionGroupsAlias("section-groups",
-                               cl::desc("Alias for -elf-sections-groups"),
-                               cl::aliasopt(SectionGroups));
   cl::alias SectionGroupsShort("g", cl::desc("Alias for -elf-sections-groups"),
                                cl::aliasopt(SectionGroups));
-
-  // -elf-hash-histogram, -histogram, -I
   cl::opt<bool> HashHistogram(
       "elf-hash-histogram",
       cl::desc("Display bucket list histogram for hash sections"));
   cl::alias HashHistogramShort("I", cl::desc("Alias for -elf-hash-histogram"),
                                cl::aliasopt(HashHistogram));
-  cl::alias HistogramAlias("histogram",
-                           cl::desc("Alias for --elf-hash-histogram"),
-                           cl::aliasopt(HashHistogram));
 
-  // -elf-cg-profile
   cl::opt<bool> CGProfile("elf-cg-profile", cl::desc("Display callgraph profile section"));
 
-  // -addrsig
-  cl::opt<bool> Addrsig("addrsig",
+  cl::opt<bool> Addrsig("elf-addrsig",
                         cl::desc("Display address-significance table"));
 
-  // -elf-output-style
   cl::opt<OutputStyleTy>
       Output("elf-output-style", cl::desc("Specify ELF dump style"),
              cl::values(clEnumVal(LLVM, "LLVM default style"),
@@ -446,8 +418,8 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
 
   if (opts::FileHeaders)
     Dumper->printFileHeaders();
-  if (opts::SectionHeaders)
-    Dumper->printSectionHeaders();
+  if (opts::Sections)
+    Dumper->printSections();
   if (opts::Relocations)
     Dumper->printRelocations();
   if (opts::DynRelocs)
@@ -520,8 +492,6 @@ static void dumpObject(const ObjectFile *Obj, ScopedPrinter &Writer) {
       Dumper->printCOFFResources();
     if (opts::COFFLoadConfig)
       Dumper->printCOFFLoadConfig();
-    if (opts::Addrsig)
-      Dumper->printAddrsig();
     if (opts::CodeView)
       Dumper->printCodeViewDebugInfo();
     if (opts::CodeViewMergedTypes)
@@ -616,87 +586,21 @@ static void dumpInput(StringRef File) {
     reportError(File, readobj_error::unrecognized_file_format);
 }
 
-/// Registers aliases that should only be allowed by readobj.
-static void registerReadobjAliases() {
-  // -s has meant --sections for a very long time in llvm-readobj despite
-  // meaning --symbols in readelf.
-  static cl::alias SectionsShort("s", cl::desc("Alias for --section-headers"),
-                                 cl::aliasopt(opts::SectionHeaders),
-                                 cl::NotHidden);
-
-  // Only register -t in llvm-readobj, as readelf reserves it for
-  // --section-details (not implemented yet).
-  static cl::alias SymbolsShort("t", cl::desc("Alias for --symbols"),
-                                cl::aliasopt(opts::Symbols), cl::NotHidden);
-
-  // The following two-letter aliases are only provided for readobj, as readelf
-  // allows single-letter args to be grouped together.
-  static cl::alias SectionRelocationsShort(
-      "sr", cl::desc("Alias for --section-relocations"),
-      cl::aliasopt(opts::SectionRelocations));
-  static cl::alias SectionDataShort("sd", cl::desc("Alias for --section-data"),
-                                    cl::aliasopt(opts::SectionData));
-  static cl::alias SectionSymbolsShort("st",
-                                       cl::desc("Alias for --section-symbols"),
-                                       cl::aliasopt(opts::SectionSymbols));
-  static cl::alias DynamicSymbolsShort("dt",
-                                       cl::desc("Alias for --dyn-symbols"),
-                                       cl::aliasopt(opts::DynamicSymbols));
-}
-
-/// Registers aliases that should only be allowed by readelf.
-static void registerReadelfAliases() {
-  // -s is here because for readobj it means --sections.
-  static cl::alias SymbolsShort("s", cl::desc("Alias for --symbols"),
-                                cl::aliasopt(opts::Symbols), cl::NotHidden,
-                                cl::Grouping);
-
-  // Allow all single letter flags to be grouped together.
-  for (auto &OptEntry : cl::getRegisteredOptions()) {
-    StringRef ArgName = OptEntry.getKey();
-    cl::Option *Option = OptEntry.getValue();
-    if (ArgName.size() == 1)
-      Option->setFormattingFlag(cl::Grouping);
-  }
-}
-
 int main(int argc, const char *argv[]) {
   InitLLVM X(argc, argv);
 
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 
-  if (sys::path::stem(argv[0]).contains("readelf")) {
+  opts::WideOutput.setHiddenFlag(cl::Hidden);
+
+  if (sys::path::stem(argv[0]).find("readelf") != StringRef::npos)
     opts::Output = opts::GNU;
-    registerReadelfAliases();
-  } else {
-    registerReadobjAliases();
-  }
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM Object Reader\n");
 
-  if (opts::All) {
-    opts::FileHeaders = true;
-    opts::ProgramHeaders = true;
-    opts::SectionHeaders = true;
-    opts::Symbols = true;
-    opts::Relocations = true;
-    opts::DynamicTable = true;
-    opts::Notes = true;
-    opts::VersionInfo = true;
-    opts::UnwindInfo = true;
-    opts::SectionGroups = true;
-    opts::HashHistogram = true;
-  }
-
-  if (opts::Headers) {
-    opts::FileHeaders = true;
-    opts::ProgramHeaders = true;
-    opts::SectionHeaders = true;
-  }
-
   // Default to stdin if no filename is specified.
-  if (opts::InputFilenames.empty())
+  if (opts::InputFilenames.size() == 0)
     opts::InputFilenames.push_back("-");
 
   llvm::for_each(opts::InputFilenames, dumpInput);

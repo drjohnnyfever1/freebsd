@@ -40,7 +40,7 @@ INITIALIZE_PASS(PhysicalRegisterUsageInfo, "reg-usage-info",
 
 char PhysicalRegisterUsageInfo::ID = 0;
 
-void PhysicalRegisterUsageInfo::setTargetMachine(const LLVMTargetMachine &TM) {
+void PhysicalRegisterUsageInfo::setTargetMachine(const TargetMachine &TM) {
   this->TM = &TM;
 }
 
@@ -81,7 +81,7 @@ void PhysicalRegisterUsageInfo::print(raw_ostream &OS, const Module *M) const {
 
   // sort the vector to print analysis in alphabatic order of function name.
   llvm::sort(
-      FPRMPairVector,
+      FPRMPairVector.begin(), FPRMPairVector.end(),
       [](const FuncPtrRegMaskPair *A, const FuncPtrRegMaskPair *B) -> bool {
         return A->first->getName() < B->first->getName();
       });

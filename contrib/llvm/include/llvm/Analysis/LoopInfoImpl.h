@@ -392,10 +392,7 @@ void LoopBase<BlockT, LoopT>::verifyLoopNest(
 template <class BlockT, class LoopT>
 void LoopBase<BlockT, LoopT>::print(raw_ostream &OS, unsigned Depth,
                                     bool Verbose) const {
-  OS.indent(Depth * 2);
-  if (static_cast<const LoopT *>(this)->isAnnotatedParallel())
-    OS << "Parallel ";
-  OS << "Loop at depth " << getLoopDepth() << " containing: ";
+  OS.indent(Depth * 2) << "Loop at depth " << getLoopDepth() << " containing: ";
 
   BlockT *H = getHeader();
   for (unsigned i = 0; i < getBlocks().size(); ++i) {
@@ -643,8 +640,8 @@ void LoopInfoBase<BlockT, LoopT>::print(raw_ostream &OS) const {
 
 template <typename T>
 bool compareVectors(std::vector<T> &BB1, std::vector<T> &BB2) {
-  llvm::sort(BB1);
-  llvm::sort(BB2);
+  llvm::sort(BB1.begin(), BB1.end());
+  llvm::sort(BB2.begin(), BB2.end());
   return BB1 == BB2;
 }
 

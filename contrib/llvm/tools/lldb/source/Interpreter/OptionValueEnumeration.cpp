@@ -9,13 +9,17 @@
 
 #include "lldb/Interpreter/OptionValueEnumeration.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Utility/StringList.h"
 
 using namespace lldb;
 using namespace lldb_private;
 
 OptionValueEnumeration::OptionValueEnumeration(
-    const OptionEnumValues &enumerators, enum_type value)
+    const OptionEnumValueElement *enumerators, enum_type value)
     : OptionValue(), m_current_value(value), m_default_value(value),
       m_enumerations() {
   SetEnumerations(enumerators);
@@ -87,16 +91,18 @@ Status OptionValueEnumeration::SetValueFromString(llvm::StringRef value,
 }
 
 void OptionValueEnumeration::SetEnumerations(
-    const OptionEnumValues &enumerators) {
+    const OptionEnumValueElement *enumerators) {
   m_enumerations.Clear();
-
-  for (const auto &enumerator : enumerators) {
-    ConstString const_enumerator_name(enumerator.string_value);
-    EnumeratorInfo enumerator_info = {enumerator.value, enumerator.usage};
-    m_enumerations.Append(const_enumerator_name, enumerator_info);
+  if (enumerators) {
+    for (size_t i = 0; enumerators[i].string_value != nullptr; ++i) {
+      ConstString const_enumerator_name(enumerators[i].string_value);
+      EnumeratorInfo enumerator_info = {enumerators[i].value,
+                                        enumerators[i].usage};
+      m_enumerations.Append(const_enumerator_name,
+                            enumerator_info);
+    }
+    m_enumerations.Sort();
   }
-
-  m_enumerations.Sort();
 }
 
 lldb::OptionValueSP OptionValueEnumeration::DeepCopy() const {

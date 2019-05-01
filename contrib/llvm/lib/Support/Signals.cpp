@@ -20,8 +20,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/FormatAdapters.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Mutex.h"
@@ -157,7 +155,7 @@ static bool printSymbolizedStackTrace(StringRef Argv0, void **StackTrace,
   }
 
   Optional<StringRef> Redirects[] = {StringRef(InputFile),
-                                     StringRef(OutputFile), StringRef("")};
+                                     StringRef(OutputFile), llvm::None};
   StringRef Args[] = {"llvm-symbolizer", "--functions=linkage", "--inlining",
 #ifdef _WIN32
                       // Pass --relative-address on Windows so that we don't
@@ -182,14 +180,8 @@ static bool printSymbolizedStackTrace(StringRef Argv0, void **StackTrace,
   auto CurLine = Lines.begin();
   int frame_no = 0;
   for (int i = 0; i < Depth; i++) {
-    auto PrintLineHeader = [&]() {
-      OS << right_justify(formatv("#{0}", frame_no++).str(),
-                          std::log10(Depth) + 2)
-         << ' ' << format_ptr(StackTrace[i]) << ' ';
-    };
     if (!Modules[i]) {
-      PrintLineHeader();
-      OS << '\n';
+      OS << '#' << frame_no++ << ' ' << format_ptr(StackTrace[i]) << '\n';
       continue;
     }
     // Read pairs of lines (function name and file/line info) until we
@@ -200,7 +192,7 @@ static bool printSymbolizedStackTrace(StringRef Argv0, void **StackTrace,
       StringRef FunctionName = *CurLine++;
       if (FunctionName.empty())
         break;
-      PrintLineHeader();
+      OS << '#' << frame_no++ << ' ' << format_ptr(StackTrace[i]) << ' ';
       if (!FunctionName.startswith("??"))
         OS << FunctionName << ' ';
       if (CurLine == Lines.end())

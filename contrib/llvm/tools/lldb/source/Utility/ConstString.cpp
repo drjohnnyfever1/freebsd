@@ -12,20 +12,20 @@
 #include "lldb/Utility/Stream.h"
 
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/iterator.h"
-#include "llvm/Support/Allocator.h"
-#include "llvm/Support/DJB.h"
-#include "llvm/Support/FormatProviders.h"
+#include "llvm/ADT/iterator.h"            // for iterator_facade_base
+#include "llvm/Support/Allocator.h"       // for BumpPtrAllocator
+#include "llvm/Support/DJB.h"             // for djbHash
+#include "llvm/Support/FormatProviders.h" // for format_provider
 #include "llvm/Support/RWMutex.h"
 #include "llvm/Support/Threading.h"
 
-#include <algorithm>
+#include <algorithm> // for min
 #include <array>
-#include <utility>
+#include <utility> // for make_pair, pair
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <string.h>
+#include <inttypes.h> // for PRIu64
+#include <stdint.h>   // for uint8_t, uint32_t, uint64_t
+#include <string.h>   // for size_t, strlen
 
 using namespace lldb_private;
 
@@ -111,34 +111,38 @@ public:
   }
 
   const char *
-  GetConstCStringAndSetMangledCounterPart(llvm::StringRef demangled,
+  GetConstCStringAndSetMangledCounterPart(const char *demangled_cstr,
                                           const char *mangled_ccstr) {
-    const char *demangled_ccstr = nullptr;
+    if (demangled_cstr != nullptr) {
+      const char *demangled_ccstr = nullptr;
 
-    {
-      const uint8_t h = hash(demangled);
-      llvm::sys::SmartScopedWriter<false> wlock(m_string_pools[h].m_mutex);
+      {
+        llvm::StringRef string_ref(demangled_cstr);
+        const uint8_t h = hash(string_ref);
+        llvm::sys::SmartScopedWriter<false> wlock(m_string_pools[h].m_mutex);
 
-      // Make or update string pool entry with the mangled counterpart
-      StringPool &map = m_string_pools[h].m_string_map;
-      StringPoolEntryType &entry = *map.try_emplace(demangled).first;
+        // Make string pool entry with the mangled counterpart already set
+        StringPoolEntryType &entry =
+            *m_string_pools[h]
+                 .m_string_map.insert(std::make_pair(string_ref, mangled_ccstr))
+                 .first;
 
-      entry.second = mangled_ccstr;
+        // Extract the const version of the demangled_cstr
+        demangled_ccstr = entry.getKeyData();
+      }
 
-      // Extract the const version of the demangled_cstr
-      demangled_ccstr = entry.getKeyData();
+      {
+        // Now assign the demangled const string as the counterpart of the
+        // mangled const string...
+        const uint8_t h = hash(llvm::StringRef(mangled_ccstr));
+        llvm::sys::SmartScopedWriter<false> wlock(m_string_pools[h].m_mutex);
+        GetStringMapEntryFromKeyData(mangled_ccstr).setValue(demangled_ccstr);
+      }
+
+      // Return the constant demangled C string
+      return demangled_ccstr;
     }
-
-    {
-      // Now assign the demangled const string as the counterpart of the
-      // mangled const string...
-      const uint8_t h = hash(llvm::StringRef(mangled_ccstr));
-      llvm::sys::SmartScopedWriter<false> wlock(m_string_pools[h].m_mutex);
-      GetStringMapEntryFromKeyData(mangled_ccstr).setValue(demangled_ccstr);
-    }
-
-    // Return the constant demangled C string
-    return demangled_ccstr;
+    return nullptr;
   }
 
   const char *GetConstTrimmedCStringWithLength(const char *cstr,
@@ -302,7 +306,7 @@ void ConstString::SetString(const llvm::StringRef &s) {
   m_string = StringPool().GetConstCStringWithLength(s.data(), s.size());
 }
 
-void ConstString::SetStringWithMangledCounterpart(llvm::StringRef demangled,
+void ConstString::SetCStringWithMangledCounterpart(const char *demangled,
                                                    const ConstString &mangled) {
   m_string = StringPool().GetConstCStringAndSetMangledCounterPart(
       demangled, mangled.m_string);

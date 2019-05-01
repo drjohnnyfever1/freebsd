@@ -19,6 +19,7 @@
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/FileSystemOptions.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/VirtualFileSystem.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/Job.h"
@@ -50,7 +51,6 @@
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <cstring>
@@ -74,9 +74,9 @@ FrontendActionFactory::~FrontendActionFactory() = default;
 // it to be based on the same framework.
 
 /// Builds a clang driver initialized for running clang tools.
-static driver::Driver *
-newDriver(DiagnosticsEngine *Diagnostics, const char *BinaryName,
-          IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS) {
+static driver::Driver *newDriver(
+    DiagnosticsEngine *Diagnostics, const char *BinaryName,
+    IntrusiveRefCntPtr<vfs::FileSystem> VFS) {
   driver::Driver *CompilerDriver =
       new driver::Driver(BinaryName, llvm::sys::getDefaultTargetTriple(),
                          *Diagnostics, std::move(VFS));
@@ -155,7 +155,7 @@ namespace tooling {
 
 bool runToolOnCodeWithArgs(
     FrontendAction *ToolAction, const Twine &Code,
-    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS,
+    llvm::IntrusiveRefCntPtr<vfs::FileSystem> VFS,
     const std::vector<std::string> &Args, const Twine &FileName,
     const Twine &ToolName,
     std::shared_ptr<PCHContainerOperations> PCHContainerOps) {
@@ -178,10 +178,10 @@ bool runToolOnCodeWithArgs(
     const Twine &ToolName,
     std::shared_ptr<PCHContainerOperations> PCHContainerOps,
     const FileContentMappings &VirtualMappedFiles) {
-  llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> OverlayFileSystem(
-      new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem()));
-  llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> InMemoryFileSystem(
-      new llvm::vfs::InMemoryFileSystem);
+  llvm::IntrusiveRefCntPtr<vfs::OverlayFileSystem> OverlayFileSystem(
+      new vfs::OverlayFileSystem(vfs::getRealFileSystem()));
+  llvm::IntrusiveRefCntPtr<vfs::InMemoryFileSystem> InMemoryFileSystem(
+      new vfs::InMemoryFileSystem);
   OverlayFileSystem->pushOverlay(InMemoryFileSystem);
 
   SmallString<1024> CodeStorage;
@@ -199,8 +199,7 @@ bool runToolOnCodeWithArgs(
                                FileName, ToolName);
 }
 
-llvm::Expected<std::string> getAbsolutePath(llvm::vfs::FileSystem &FS,
-                                            StringRef File) {
+std::string getAbsolutePath(StringRef File) {
   StringRef RelativePath(File);
   // FIXME: Should '.\\' be accepted on Win32?
   if (RelativePath.startswith("./")) {
@@ -208,14 +207,11 @@ llvm::Expected<std::string> getAbsolutePath(llvm::vfs::FileSystem &FS,
   }
 
   SmallString<1024> AbsolutePath = RelativePath;
-  if (auto EC = FS.makeAbsolute(AbsolutePath))
-    return llvm::errorCodeToError(EC);
+  std::error_code EC = llvm::sys::fs::make_absolute(AbsolutePath);
+  assert(!EC);
+  (void)EC;
   llvm::sys::path::native(AbsolutePath);
   return AbsolutePath.str();
-}
-
-std::string getAbsolutePath(StringRef File) {
-  return llvm::cantFail(getAbsolutePath(*llvm::vfs::getRealFileSystem(), File));
 }
 
 void addTargetAndModeForProgramName(std::vector<std::string> &CommandLine,
@@ -303,12 +299,8 @@ bool ToolInvocation::run() {
 
   const std::unique_ptr<driver::Driver> Driver(
       newDriver(&Diagnostics, BinaryName, Files->getVirtualFileSystem()));
-  // The "input file not found" diagnostics from the driver are useful.
-  // The driver is only aware of the VFS working directory, but some clients
-  // change this at the FileManager level instead.
-  // In this case the checks have false positives, so skip them.
-  if (!Files->getFileSystemOpts().WorkingDir.empty())
-    Driver->setCheckInputsExist(false);
+  // Since the input might only be virtual, don't check whether it exists.
+  Driver->setCheckInputsExist(false);
   const std::unique_ptr<driver::Compilation> Compilation(
       Driver->BuildCompilation(llvm::makeArrayRef(Argv)));
   if (!Compilation)
@@ -369,18 +361,18 @@ bool FrontendActionFactory::runInvocation(
 
   const bool Success = Compiler.ExecuteAction(*ScopedToolAction);
 
-  Files->clearStatCache();
+  Files->clearStatCaches();
   return Success;
 }
 
 ClangTool::ClangTool(const CompilationDatabase &Compilations,
                      ArrayRef<std::string> SourcePaths,
                      std::shared_ptr<PCHContainerOperations> PCHContainerOps,
-                     IntrusiveRefCntPtr<llvm::vfs::FileSystem> BaseFS)
+                     IntrusiveRefCntPtr<vfs::FileSystem> BaseFS)
     : Compilations(Compilations), SourcePaths(SourcePaths),
       PCHContainerOps(std::move(PCHContainerOps)),
-      OverlayFileSystem(new llvm::vfs::OverlayFileSystem(std::move(BaseFS))),
-      InMemoryFileSystem(new llvm::vfs::InMemoryFileSystem),
+      OverlayFileSystem(new vfs::OverlayFileSystem(std::move(BaseFS))),
+      InMemoryFileSystem(new vfs::InMemoryFileSystem),
       Files(new FileManager(FileSystemOptions(), OverlayFileSystem)) {
   OverlayFileSystem->pushOverlay(InMemoryFileSystem);
   appendArgumentsAdjuster(getClangStripOutputAdjuster());
@@ -419,6 +411,15 @@ int ClangTool::run(ToolAction *Action) {
   // This just needs to be some symbol in the binary.
   static int StaticSymbol;
 
+  std::string InitialDirectory;
+  if (llvm::ErrorOr<std::string> CWD =
+          OverlayFileSystem->getCurrentWorkingDirectory()) {
+    InitialDirectory = std::move(*CWD);
+  } else {
+    llvm::report_fatal_error("Cannot detect current path: " +
+                             Twine(CWD.getError().message()));
+  }
+
   // First insert all absolute paths into the in-memory VFS. These are global
   // for all compile commands.
   if (SeenWorkingDirectories.insert("/").second)
@@ -430,33 +431,9 @@ int ClangTool::run(ToolAction *Action) {
 
   bool ProcessingFailed = false;
   bool FileSkipped = false;
-  // Compute all absolute paths before we run any actions, as those will change
-  // the working directory.
-  std::vector<std::string> AbsolutePaths;
-  AbsolutePaths.reserve(SourcePaths.size());
   for (const auto &SourcePath : SourcePaths) {
-    auto AbsPath = getAbsolutePath(*OverlayFileSystem, SourcePath);
-    if (!AbsPath) {
-      llvm::errs() << "Skipping " << SourcePath
-                   << ". Error while getting an absolute path: "
-                   << llvm::toString(AbsPath.takeError()) << "\n";
-      continue;
-    }
-    AbsolutePaths.push_back(std::move(*AbsPath));
-  }
+    std::string File(getAbsolutePath(SourcePath));
 
-  // Remember the working directory in case we need to restore it.
-  std::string InitialWorkingDir;
-  if (RestoreCWD) {
-    if (auto CWD = OverlayFileSystem->getCurrentWorkingDirectory()) {
-      InitialWorkingDir = std::move(*CWD);
-    } else {
-      llvm::errs() << "Could not get working directory: "
-                   << CWD.getError().message() << "\n";
-    }
-  }
-
-  for (llvm::StringRef File : AbsolutePaths) {
     // Currently implementations of CompilationDatabase::getCompileCommands can
     // change the state of the file system (e.g.  prepare generated headers), so
     // this method needs to run right before we invoke the tool, as the next
@@ -521,14 +498,12 @@ int ClangTool::run(ToolAction *Action) {
         llvm::errs() << "Error while processing " << File << ".\n";
         ProcessingFailed = true;
       }
+      // Return to the initial directory to correctly resolve next file by
+      // relative path.
+      if (OverlayFileSystem->setCurrentWorkingDirectory(InitialDirectory.c_str()))
+        llvm::report_fatal_error("Cannot chdir into \"" +
+                                 Twine(InitialDirectory) + "\n!");
     }
-  }
-
-  if (!InitialWorkingDir.empty()) {
-    if (auto EC =
-            OverlayFileSystem->setCurrentWorkingDirectory(InitialWorkingDir))
-      llvm::errs() << "Error when trying to restore working dir: "
-                   << EC.message() << "\n";
   }
   return ProcessingFailed ? 1 : (FileSkipped ? 2 : 0);
 }
@@ -566,40 +541,42 @@ int ClangTool::buildASTs(std::vector<std::unique_ptr<ASTUnit>> &ASTs) {
   return run(&Action);
 }
 
-void ClangTool::setRestoreWorkingDir(bool RestoreCWD) {
-  this->RestoreCWD = RestoreCWD;
-}
-
 namespace clang {
 namespace tooling {
 
 std::unique_ptr<ASTUnit>
-buildASTFromCode(StringRef Code, StringRef FileName,
+buildASTFromCode(const Twine &Code, const Twine &FileName,
                  std::shared_ptr<PCHContainerOperations> PCHContainerOps) {
   return buildASTFromCodeWithArgs(Code, std::vector<std::string>(), FileName,
                                   "clang-tool", std::move(PCHContainerOps));
 }
 
 std::unique_ptr<ASTUnit> buildASTFromCodeWithArgs(
-    StringRef Code, const std::vector<std::string> &Args, StringRef FileName,
-    StringRef ToolName, std::shared_ptr<PCHContainerOperations> PCHContainerOps,
+    const Twine &Code, const std::vector<std::string> &Args,
+    const Twine &FileName, const Twine &ToolName,
+    std::shared_ptr<PCHContainerOperations> PCHContainerOps,
     ArgumentsAdjuster Adjuster) {
+  SmallString<16> FileNameStorage;
+  StringRef FileNameRef = FileName.toNullTerminatedStringRef(FileNameStorage);
+
   std::vector<std::unique_ptr<ASTUnit>> ASTs;
   ASTBuilderAction Action(ASTs);
-  llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> OverlayFileSystem(
-      new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem()));
-  llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> InMemoryFileSystem(
-      new llvm::vfs::InMemoryFileSystem);
+  llvm::IntrusiveRefCntPtr<vfs::OverlayFileSystem> OverlayFileSystem(
+      new vfs::OverlayFileSystem(vfs::getRealFileSystem()));
+  llvm::IntrusiveRefCntPtr<vfs::InMemoryFileSystem> InMemoryFileSystem(
+      new vfs::InMemoryFileSystem);
   OverlayFileSystem->pushOverlay(InMemoryFileSystem);
   llvm::IntrusiveRefCntPtr<FileManager> Files(
       new FileManager(FileSystemOptions(), OverlayFileSystem));
 
   ToolInvocation Invocation(
-      getSyntaxOnlyToolArgs(ToolName, Adjuster(Args, FileName), FileName),
+      getSyntaxOnlyToolArgs(ToolName, Adjuster(Args, FileNameRef), FileNameRef),
       &Action, Files.get(), std::move(PCHContainerOps));
 
-  InMemoryFileSystem->addFile(FileName, 0,
-                              llvm::MemoryBuffer::getMemBufferCopy(Code));
+  SmallString<1024> CodeStorage;
+  InMemoryFileSystem->addFile(FileNameRef, 0,
+                              llvm::MemoryBuffer::getMemBuffer(
+                                  Code.toNullTerminatedStringRef(CodeStorage)));
   if (!Invocation.run())
     return nullptr;
 

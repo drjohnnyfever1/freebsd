@@ -12,11 +12,11 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
-#include <utility>
+#include <utility> // for pair
 #include <vector>
 
-#include <assert.h>
-#include <stdarg.h>
+#include <assert.h> // for assert
+#include <stdarg.h> // for va_end, va_list, va_start
 #include <stdio.h>
 
 using namespace lldb_private;
@@ -125,7 +125,7 @@ void Timer::DumpCategoryTimes(Stream *s) {
     return; // Later code will break without any elements.
 
   // Sort by time
-  llvm::sort(sorted.begin(), sorted.end(), CategoryMapIteratorSortCriterion);
+  std::sort(sorted.begin(), sorted.end(), CategoryMapIteratorSortCriterion);
 
   for (const auto &timer : sorted)
     s->Printf("%.9f sec for %s\n", timer.second / 1000000000., timer.first);

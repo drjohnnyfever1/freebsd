@@ -9,6 +9,10 @@
 
 #include "lldb/Interpreter/OptionGroupWatchpoint.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/lldb-enumerations.h"
@@ -16,31 +20,33 @@
 using namespace lldb;
 using namespace lldb_private;
 
-static constexpr OptionEnumValueElement g_watch_type[] = {
+static OptionEnumValueElement g_watch_type[] = {
     {OptionGroupWatchpoint::eWatchRead, "read", "Watch for read"},
     {OptionGroupWatchpoint::eWatchWrite, "write", "Watch for write"},
     {OptionGroupWatchpoint::eWatchReadWrite, "read_write",
-     "Watch for read/write"} };
+     "Watch for read/write"},
+    {0, nullptr, nullptr}};
 
-static constexpr OptionEnumValueElement g_watch_size[] = {
+static OptionEnumValueElement g_watch_size[] = {
     {1, "1", "Watch for byte size of 1"},
     {2, "2", "Watch for byte size of 2"},
     {4, "4", "Watch for byte size of 4"},
-    {8, "8", "Watch for byte size of 8"} };
+    {8, "8", "Watch for byte size of 8"},
+    {0, nullptr, nullptr}};
 
-static constexpr OptionDefinition g_option_table[] = {
+static OptionDefinition g_option_table[] = {
     {LLDB_OPT_SET_1, false, "watch", 'w', OptionParser::eRequiredArgument,
-     nullptr, OptionEnumValues(g_watch_type), 0, eArgTypeWatchType,
+     nullptr, g_watch_type, 0, eArgTypeWatchType,
      "Specify the type of watching to perform."},
     {LLDB_OPT_SET_1, false, "size", 's', OptionParser::eRequiredArgument,
-     nullptr, OptionEnumValues(g_watch_size), 0, eArgTypeByteSize,
+     nullptr, g_watch_size, 0, eArgTypeByteSize,
      "Number of bytes to use to watch a region."}};
 
 bool OptionGroupWatchpoint::IsWatchSizeSupported(uint32_t watch_size) {
-  for (const auto& size : g_watch_size) {
-    if (0  == size.value)
+  for (uint32_t i = 0; i < llvm::array_lengthof(g_watch_size); ++i) {
+    if (g_watch_size[i].value == 0)
       break;
-    if (watch_size == size.value)
+    if (watch_size == g_watch_size[i].value)
       return true;
   }
   return false;

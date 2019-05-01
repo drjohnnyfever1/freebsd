@@ -158,7 +158,7 @@ public:
         if (DD->getOuterLocStart() != DD->getInnerLocStart())
           return DD->getSourceRange();
       }
-      return SourceRange(getFriendLoc(), ND->getEndLoc());
+      return SourceRange(getFriendLoc(), ND->getLocEnd());
     }
     else if (TypeSourceInfo *TInfo = getFriendType()) {
       SourceLocation StartL =

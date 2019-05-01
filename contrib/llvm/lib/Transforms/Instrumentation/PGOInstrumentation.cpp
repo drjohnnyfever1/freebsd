@@ -63,7 +63,7 @@
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFG.h"
-#include "llvm/Analysis/IndirectCallVisitor.h"
+#include "llvm/Analysis/IndirectCallSiteVisitor.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/IR/Attributes.h"
@@ -141,11 +141,6 @@ static cl::opt<std::string>
                        cl::value_desc("filename"),
                        cl::desc("Specify the path of profile data file. This is"
                                 "mainly for test purpose."));
-static cl::opt<std::string> PGOTestProfileRemappingFile(
-    "pgo-test-profile-remapping-file", cl::init(""), cl::Hidden,
-    cl::value_desc("filename"),
-    cl::desc("Specify the path of profile remapping file. This is mainly for "
-             "test purpose."));
 
 // Command line option to disable value profiling. The default is false:
 // i.e. value profiling is enabled by default. This is for debug purpose.
@@ -544,7 +539,7 @@ public:
     MIVisitor.countMemIntrinsics(Func);
     NumOfPGOSelectInsts += SIVisitor.getNumOfSelectInsts();
     NumOfPGOMemIntrinsics += MIVisitor.getNumOfMemIntrinsics();
-    ValueSites[IPVK_IndirectCallTarget] = findIndirectCalls(Func);
+    ValueSites[IPVK_IndirectCallTarget] = findIndirectCallSites(Func);
     ValueSites[IPVK_MemOPSize] = MIVisitor.findMemIntrinsics(Func);
 
     FuncName = getPGOFuncName(F);
@@ -586,7 +581,7 @@ void FuncPGOInstrumentation<Edge, BBInfo>::computeCFGHash() {
   std::vector<char> Indexes;
   JamCRC JC;
   for (auto &BB : F) {
-    const Instruction *TI = BB.getTerminator();
+    const TerminatorInst *TI = BB.getTerminator();
     for (unsigned I = 0, E = TI->getNumSuccessors(); I != E; ++I) {
       BasicBlock *Succ = TI->getSuccessor(I);
       auto BI = findBBInfo(Succ);
@@ -698,7 +693,7 @@ BasicBlock *FuncPGOInstrumentation<Edge, BBInfo>::getInstrBB(Edge *E) {
 
   // Instrument the SrcBB if it has a single successor,
   // otherwise, the DestBB if this is not a critical edge.
-  Instruction *TI = SrcBB->getTerminator();
+  TerminatorInst *TI = SrcBB->getTerminator();
   if (TI->getNumSuccessors() <= 1)
     return SrcBB;
   if (!E->IsCritical)
@@ -754,12 +749,12 @@ static void instrumentOneFunc(
   if (DisableValueProfiling)
     return;
 
-  unsigned NumIndirectCalls = 0;
+  unsigned NumIndirectCallSites = 0;
   for (auto &I : FuncInfo.ValueSites[IPVK_IndirectCallTarget]) {
     CallSite CS(I);
     Value *Callee = CS.getCalledValue();
     LLVM_DEBUG(dbgs() << "Instrument one indirect call: CallSite Index = "
-                      << NumIndirectCalls << "\n");
+                      << NumIndirectCallSites << "\n");
     IRBuilder<> Builder(I);
     assert(Builder.GetInsertPoint() != I->getParent()->end() &&
            "Cannot get the Instrumentation point");
@@ -769,9 +764,9 @@ static void instrumentOneFunc(
          Builder.getInt64(FuncInfo.FunctionHash),
          Builder.CreatePtrToInt(Callee, Builder.getInt64Ty()),
          Builder.getInt32(IPVK_IndirectCallTarget),
-         Builder.getInt32(NumIndirectCalls++)});
+         Builder.getInt32(NumIndirectCallSites++)});
   }
-  NumOfPGOICall += NumIndirectCalls;
+  NumOfPGOICall += NumIndirectCallSites;
 
   // Now instrument memop intrinsic calls.
   FuncInfo.MIVisitor.instrumentMemIntrinsics(
@@ -859,7 +854,7 @@ public:
         FreqAttr(FFA_Normal) {}
 
   // Read counts for the instrumented BB from profile.
-  bool readCounters(IndexedInstrProfReader *PGOReader, bool &AllZeros);
+  bool readCounters(IndexedInstrProfReader *PGOReader);
 
   // Populate the counts for all BBs.
   void populateCounters();
@@ -904,7 +899,6 @@ public:
     FuncInfo.dumpInfo(Str);
   }
 
-  uint64_t getProgramMaxCount() const { return ProgramMaxCount; }
 private:
   Function &F;
   Module *M;
@@ -1014,7 +1008,7 @@ void PGOUseFunc::setEdgeCount(DirectEdges &Edges, uint64_t Value) {
 // Read the profile from ProfileFileName and assign the value to the
 // instrumented BB and the edges. This function also updates ProgramMaxCount.
 // Return true if the profile are successfully read, and false on errors.
-bool PGOUseFunc::readCounters(IndexedInstrProfReader *PGOReader, bool &AllZeros) {
+bool PGOUseFunc::readCounters(IndexedInstrProfReader *PGOReader) {
   auto &Ctx = M->getContext();
   Expected<InstrProfRecord> Result =
       PGOReader->getInstrProfRecord(FuncInfo.FuncName, FuncInfo.FunctionHash);
@@ -1054,7 +1048,6 @@ bool PGOUseFunc::readCounters(IndexedInstrProfReader *PGOReader, bool &AllZeros)
     LLVM_DEBUG(dbgs() << "  " << I << ": " << CountFromProfile[I] << "\n");
     ValueSum += CountFromProfile[I];
   }
-  AllZeros = (ValueSum == 0);
 
   LLVM_DEBUG(dbgs() << "SUM =  " << ValueSum << "\n");
 
@@ -1169,7 +1162,7 @@ void PGOUseFunc::setBranchWeights() {
   // Generate MD_prof metadata for every branch instruction.
   LLVM_DEBUG(dbgs() << "\nSetting branch weights.\n");
   for (auto &BB : F) {
-    Instruction *TI = BB.getTerminator();
+    TerminatorInst *TI = BB.getTerminator();
     if (TI->getNumSuccessors() < 2)
       continue;
     if (!(isa<BranchInst>(TI) || isa<SwitchInst>(TI) ||
@@ -1215,7 +1208,7 @@ void PGOUseFunc::annotateIrrLoopHeaderWeights() {
     // to become an irreducible loop header after the indirectbr tail
     // duplication.
     if (BFI->isIrrLoopHeader(&BB) || isIndirectBrTarget(&BB)) {
-      Instruction *TI = BB.getTerminator();
+      TerminatorInst *TI = BB.getTerminator();
       const UseBBInfo &BBCountInfo = getBBInfo(&BB);
       setIrrLoopHeaderMetadata(M, TI, BBCountInfo.CountValue);
     }
@@ -1436,14 +1429,13 @@ PreservedAnalyses PGOInstrumentationGen::run(Module &M,
 }
 
 static bool annotateAllFunctions(
-    Module &M, StringRef ProfileFileName, StringRef ProfileRemappingFileName,
+    Module &M, StringRef ProfileFileName,
     function_ref<BranchProbabilityInfo *(Function &)> LookupBPI,
     function_ref<BlockFrequencyInfo *(Function &)> LookupBFI) {
   LLVM_DEBUG(dbgs() << "Read in profile counters: ");
   auto &Ctx = M.getContext();
   // Read the counter array from file.
-  auto ReaderOrErr =
-      IndexedInstrProfReader::create(ProfileFileName, ProfileRemappingFileName);
+  auto ReaderOrErr = IndexedInstrProfReader::create(ProfileFileName);
   if (Error E = ReaderOrErr.takeError()) {
     handleAllErrors(std::move(E), [&](const ErrorInfoBase &EI) {
       Ctx.diagnose(
@@ -1479,15 +1471,8 @@ static bool annotateAllFunctions(
     // later in getInstrBB() to avoid invalidating it.
     SplitIndirectBrCriticalEdges(F, BPI, BFI);
     PGOUseFunc Func(F, &M, ComdatMembers, BPI, BFI);
-    bool AllZeros = false;
-    if (!Func.readCounters(PGOReader.get(), AllZeros))
+    if (!Func.readCounters(PGOReader.get()))
       continue;
-    if (AllZeros) {
-      F.setEntryCount(ProfileCount(0, Function::PCT_Real));
-      if (Func.getProgramMaxCount() != 0)
-        ColdFunctions.push_back(&F);
-      continue;
-    }
     Func.populateCounters();
     Func.setBranchWeights();
     Func.annotateValueSites();
@@ -1544,14 +1529,10 @@ static bool annotateAllFunctions(
   return true;
 }
 
-PGOInstrumentationUse::PGOInstrumentationUse(std::string Filename,
-                                             std::string RemappingFilename)
-    : ProfileFileName(std::move(Filename)),
-      ProfileRemappingFileName(std::move(RemappingFilename)) {
+PGOInstrumentationUse::PGOInstrumentationUse(std::string Filename)
+    : ProfileFileName(std::move(Filename)) {
   if (!PGOTestProfileFile.empty())
     ProfileFileName = PGOTestProfileFile;
-  if (!PGOTestProfileRemappingFile.empty())
-    ProfileRemappingFileName = PGOTestProfileRemappingFile;
 }
 
 PreservedAnalyses PGOInstrumentationUse::run(Module &M,
@@ -1566,8 +1547,7 @@ PreservedAnalyses PGOInstrumentationUse::run(Module &M,
     return &FAM.getResult<BlockFrequencyAnalysis>(F);
   };
 
-  if (!annotateAllFunctions(M, ProfileFileName, ProfileRemappingFileName,
-                            LookupBPI, LookupBFI))
+  if (!annotateAllFunctions(M, ProfileFileName, LookupBPI, LookupBFI))
     return PreservedAnalyses::all();
 
   return PreservedAnalyses::none();
@@ -1584,7 +1564,7 @@ bool PGOInstrumentationUseLegacyPass::runOnModule(Module &M) {
     return &this->getAnalysis<BlockFrequencyInfoWrapperPass>(F).getBFI();
   };
 
-  return annotateAllFunctions(M, ProfileFileName, "", LookupBPI, LookupBFI);
+  return annotateAllFunctions(M, ProfileFileName, LookupBPI, LookupBFI);
 }
 
 static std::string getSimpleNodeName(const BasicBlock *Node) {

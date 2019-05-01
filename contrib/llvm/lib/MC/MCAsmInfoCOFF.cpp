@@ -25,7 +25,7 @@ MCAsmInfoCOFF::MCAsmInfoCOFF() {
   COMMDirectiveAlignmentIsInBytes = false;
   LCOMMDirectiveAlignmentType = LCOMM::ByteAlignment;
   HasDotTypeDotSizeDirective = false;
-  HasSingleParameterDotFile = true;
+  HasSingleParameterDotFile = false;
   WeakRefDirective = "\t.weak\t";
   HasLinkOnceDirective = true;
 

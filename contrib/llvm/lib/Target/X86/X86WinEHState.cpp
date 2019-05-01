@@ -34,6 +34,10 @@ using namespace llvm;
 
 #define DEBUG_TYPE "winehstate"
 
+namespace llvm {
+void initializeWinEHStatePassPass(PassRegistry &);
+}
+
 namespace {
 const int OverdefinedState = INT_MIN;
 
@@ -365,7 +369,7 @@ void WinEHStatePass::emitExceptionRegistrationRecord(Function *F) {
 
   // Insert an unlink before all returns.
   for (BasicBlock &BB : *F) {
-    Instruction *T = BB.getTerminator();
+    TerminatorInst *T = BB.getTerminator();
     if (!isa<ReturnInst>(T))
       continue;
     Builder.SetInsertPoint(T);

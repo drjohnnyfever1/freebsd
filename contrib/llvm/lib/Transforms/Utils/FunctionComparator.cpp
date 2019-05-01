@@ -410,6 +410,8 @@ int FunctionComparator::cmpTypes(Type *TyL, Type *TyR) const {
   switch (TyL->getTypeID()) {
   default:
     llvm_unreachable("Unknown type!");
+    // Fall through in Release mode.
+    LLVM_FALLTHROUGH;
   case Type::IntegerTyID:
     return cmpNumbers(cast<IntegerType>(TyL)->getBitWidth(),
                       cast<IntegerType>(TyR)->getBitWidth());
@@ -865,8 +867,8 @@ int FunctionComparator::compare() {
     if (int Res = cmpBasicBlocks(BBL, BBR))
       return Res;
 
-    const Instruction *TermL = BBL->getTerminator();
-    const Instruction *TermR = BBR->getTerminator();
+    const TerminatorInst *TermL = BBL->getTerminator();
+    const TerminatorInst *TermR = BBR->getTerminator();
 
     assert(TermL->getNumSuccessors() == TermR->getNumSuccessors());
     for (unsigned i = 0, e = TermL->getNumSuccessors(); i != e; ++i) {
@@ -936,7 +938,7 @@ FunctionComparator::FunctionHash FunctionComparator::functionHash(Function &F) {
     for (auto &Inst : *BB) {
       H.add(Inst.getOpcode());
     }
-    const Instruction *Term = BB->getTerminator();
+    const TerminatorInst *Term = BB->getTerminator();
     for (unsigned i = 0, e = Term->getNumSuccessors(); i != e; ++i) {
       if (!VisitedBBs.insert(Term->getSuccessor(i)).second)
         continue;

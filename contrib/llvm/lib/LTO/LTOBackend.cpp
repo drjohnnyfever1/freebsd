@@ -138,15 +138,9 @@ createTargetMachine(Config &Conf, const Target *TheTarget, Module &M) {
     RelocModel =
         M.getPICLevel() == PICLevel::NotPIC ? Reloc::Static : Reloc::PIC_;
 
-  Optional<CodeModel::Model> CodeModel;
-  if (Conf.CodeModel)
-    CodeModel = *Conf.CodeModel;
-  else
-    CodeModel = M.getCodeModel();
-
   return std::unique_ptr<TargetMachine>(TheTarget->createTargetMachine(
       TheTriple, Conf.CPU, Features.getString(), Conf.Options, RelocModel,
-      CodeModel, Conf.CGOptLevel));
+      Conf.CodeModel, Conf.CGOptLevel));
 }
 
 static void runNewPMPasses(Config &Conf, Module &Mod, TargetMachine *TM,
@@ -155,14 +149,13 @@ static void runNewPMPasses(Config &Conf, Module &Mod, TargetMachine *TM,
                            const ModuleSummaryIndex *ImportSummary) {
   Optional<PGOOptions> PGOOpt;
   if (!Conf.SampleProfile.empty())
-    PGOOpt = PGOOptions("", "", Conf.SampleProfile, Conf.ProfileRemapping,
-                        false, true);
+    PGOOpt = PGOOptions("", "", Conf.SampleProfile, false, true);
 
   PassBuilder PB(TM, PGOOpt);
   AAManager AA;
 
   // Parse a custom AA pipeline if asked to.
-  if (auto Err = PB.parseAAPipeline(AA, "default"))
+  if (!PB.parseAAPipeline(AA, "default"))
     report_fatal_error("Error parsing default AA pipeline");
 
   LoopAnalysisManager LAM(Conf.DebugPassManager);
@@ -221,9 +214,9 @@ static void runNewPMCustomPasses(Module &Mod, TargetMachine *TM,
 
   // Parse a custom AA pipeline if asked to.
   if (!AAPipelineDesc.empty())
-    if (auto Err = PB.parseAAPipeline(AA, AAPipelineDesc))
-      report_fatal_error("unable to parse AA pipeline description '" +
-                         AAPipelineDesc + "': " + toString(std::move(Err)));
+    if (!PB.parseAAPipeline(AA, AAPipelineDesc))
+      report_fatal_error("unable to parse AA pipeline description: " +
+                         AAPipelineDesc);
 
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
@@ -246,9 +239,9 @@ static void runNewPMCustomPasses(Module &Mod, TargetMachine *TM,
   MPM.addPass(VerifierPass());
 
   // Now, add all the passes we've been requested to.
-  if (auto Err = PB.parsePassPipeline(MPM, PipelineDesc))
-    report_fatal_error("unable to parse pass pipeline description '" +
-                       PipelineDesc + "': " + toString(std::move(Err)));
+  if (!PB.parsePassPipeline(MPM, PipelineDesc))
+    report_fatal_error("unable to parse pass pipeline description: " +
+                       PipelineDesc);
 
   if (!DisableVerify)
     MPM.addPass(VerifierPass());
@@ -490,7 +483,7 @@ Error lto::thinBackend(Config &Conf, unsigned Task, AddStreamFn AddStream,
 
   dropDeadSymbols(Mod, DefinedGlobals, CombinedIndex);
 
-  thinLTOResolvePrevailingInModule(Mod, DefinedGlobals);
+  thinLTOResolveWeakForLinkerModule(Mod, DefinedGlobals);
 
   if (Conf.PostPromoteModuleHook && !Conf.PostPromoteModuleHook(Task, Mod))
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));

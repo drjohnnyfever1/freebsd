@@ -24,6 +24,11 @@
 #include "lldb/Initialization/SystemInitializerCommon.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Symbol/ClangASTContext.h"
+#include "lldb/Symbol/GoASTContext.h"
+#ifdef LLDB_ENABLE_ALL
+#include "lldb/Symbol/JavaASTContext.h"
+#endif // LLDB_ENABLE_ALL
+#include "lldb/Symbol/OCamlASTContext.h"
 #include "lldb/Utility/Timer.h"
 
 #ifdef LLDB_ENABLE_ALL
@@ -46,7 +51,6 @@
 #endif // LLDB_ENABLE_ALL
 #include "Plugins/ABI/SysV-x86_64/ABISysV_x86_64.h"
 #include "Plugins/Architecture/Arm/ArchitectureArm.h"
-#include "Plugins/Architecture/Mips/ArchitectureMips.h"
 #include "Plugins/Architecture/PPC64/ArchitecturePPC64.h"
 #include "Plugins/Disassembler/llvm/DisassemblerLLVMC.h"
 #ifdef LLDB_ENABLE_ALL
@@ -69,21 +73,26 @@
 #include "Plugins/JITLoader/GDB/JITLoaderGDB.h"
 #include "Plugins/Language/CPlusPlus/CPlusPlusLanguage.h"
 #ifdef LLDB_ENABLE_ALL
+#include "Plugins/Language/Go/GoLanguage.h"
+#include "Plugins/Language/Java/JavaLanguage.h"
+#include "Plugins/Language/OCaml/OCamlLanguage.h"
 #include "Plugins/Language/ObjC/ObjCLanguage.h"
 #include "Plugins/Language/ObjCPlusPlus/ObjCPlusPlusLanguage.h"
 #endif // LLDB_ENABLE_ALL
 #include "Plugins/LanguageRuntime/CPlusPlus/ItaniumABI/ItaniumABILanguageRuntime.h"
 #ifdef LLDB_ENABLE_ALL
+#include "Plugins/LanguageRuntime/Go/GoLanguageRuntime.h"
+#include "Plugins/LanguageRuntime/Java/JavaLanguageRuntime.h"
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV1.h"
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV2.h"
 #include "Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptRuntime.h"
 #endif // LLDB_ENABLE_ALL
 #include "Plugins/MemoryHistory/asan/MemoryHistoryASan.h"
-#include "Plugins/ObjectFile/Breakpad/ObjectFileBreakpad.h"
 #include "Plugins/ObjectFile/ELF/ObjectFileELF.h"
 #ifdef LLDB_ENABLE_ALL
 #include "Plugins/ObjectFile/Mach-O/ObjectFileMachO.h"
 #include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
+#include "Plugins/OperatingSystem/Go/OperatingSystemGo.h"
 #include "Plugins/OperatingSystem/Python/OperatingSystemPython.h"
 #include "Plugins/Platform/Android/PlatformAndroid.h"
 #endif // LLDB_ENABLE_ALL
@@ -105,7 +114,6 @@
 #include "Plugins/Process/minidump/ProcessMinidump.h"
 #endif // LLDB_ENABLE_ALL
 #include "Plugins/ScriptInterpreter/None/ScriptInterpreterNone.h"
-#include "Plugins/SymbolFile/Breakpad/SymbolFileBreakpad.h"
 #include "Plugins/SymbolFile/DWARF/SymbolFileDWARF.h"
 #include "Plugins/SymbolFile/DWARF/SymbolFileDWARFDebugMap.h"
 #ifdef LLDB_ENABLE_ALL
@@ -126,7 +134,6 @@
 #include "Plugins/Platform/MacOSX/PlatformDarwinKernel.h"
 #include "Plugins/Platform/MacOSX/PlatformRemoteAppleTV.h"
 #include "Plugins/Platform/MacOSX/PlatformRemoteAppleWatch.h"
-#include "Plugins/Platform/MacOSX/PlatformRemoteAppleBridge.h"
 #include "Plugins/Platform/MacOSX/PlatformiOSSimulator.h"
 #include "Plugins/Process/MacOSX-Kernel/ProcessKDP.h"
 #include "Plugins/SymbolVendor/MacOSX/SymbolVendorMacOSX.h"
@@ -200,18 +207,6 @@ extern "C" bool LLDBSWIGPythonCallThreadPlan(void *implementor,
                                              const char *method_name,
                                              Event *event_sp, bool &got_error);
 
-extern "C" void *LLDBSwigPythonCreateScriptedBreakpointResolver(
-    const char *python_class_name,
-    const char *session_dictionary_name,
-    lldb_private::StructuredDataImpl *args,
-    lldb::BreakpointSP &bkpt_sp);
-
-extern "C" unsigned int LLDBSwigPythonCallBreakpointResolver(
-    void *implementor,
-    const char *method_name,
-    lldb_private::SymbolContext *sym_ctx
-);
-
 extern "C" size_t LLDBSwigPython_CalculateNumChildren(void *implementor,
                                                       uint32_t max);
 
@@ -257,13 +252,6 @@ LLDBSWIGPythonCreateOSPlugin(const char *python_class_name,
                              const char *session_dictionary_name,
                              const lldb::ProcessSP &process_sp);
 
-extern "C" void *LLDBSWIGPython_CreateFrameRecognizer(
-    const char *python_class_name,
-    const char *session_dictionary_name);
-
-extern "C" void *LLDBSwigPython_GetRecognizedArguments(void *implementor,
-    const lldb::StackFrameSP& frame_sp);
-
 extern "C" bool LLDBSWIGPythonRunScriptKeywordProcess(
     const char *python_function_name, const char *session_dictionary_name,
     lldb::ProcessSP &process, std::string &output);
@@ -294,12 +282,9 @@ SystemInitializerFull::SystemInitializerFull() {}
 
 SystemInitializerFull::~SystemInitializerFull() {}
 
-llvm::Error
-SystemInitializerFull::Initialize(const InitializerOptions &options) {
-  if (auto e = SystemInitializerCommon::Initialize(options))
-    return e;
+void SystemInitializerFull::Initialize() {
+  SystemInitializerCommon::Initialize();
 
-  breakpad::ObjectFileBreakpad::Initialize();
   ObjectFileELF::Initialize();
 #ifdef LLDB_ENABLE_ALL
   ObjectFileMachO::Initialize();
@@ -311,6 +296,9 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
 #ifndef LLDB_DISABLE_PYTHON
   OperatingSystemPython::Initialize();
 #endif
+#ifdef LLDB_ENABLE_ALL
+  OperatingSystemGo::Initialize();
+#endif // LLDB_ENABLE_ALL
 
 #if !defined(LLDB_DISABLE_PYTHON)
   InitializeSWIG();
@@ -344,8 +332,11 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   llvm::InitializeAllDisassemblers();
 
   ClangASTContext::Initialize();
-
 #ifdef LLDB_ENABLE_ALL
+  GoASTContext::Initialize();
+  JavaASTContext::Initialize();
+  OCamlASTContext::Initialize();
+
   ABIMacOSX_i386::Initialize();
   ABIMacOSX_arm::Initialize();
   ABIMacOSX_arm64::Initialize();
@@ -366,7 +357,6 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
 #endif // LLDB_ENABLE_ALL
 
   ArchitectureArm::Initialize();
-  ArchitectureMips::Initialize();
   ArchitecturePPC64::Initialize();
 
   DisassemblerLLVMC::Initialize();
@@ -386,7 +376,6 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   MainThreadCheckerRuntime::Initialize();
 
   SymbolVendorELF::Initialize();
-  breakpad::SymbolFileBreakpad::Initialize();
   SymbolFileDWARF::Initialize();
 #ifdef LLDB_ENABLE_ALL
   SymbolFilePDB::Initialize();
@@ -403,12 +392,17 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   AppleObjCRuntimeV1::Initialize();
   SystemRuntimeMacOSX::Initialize();
   RenderScriptRuntime::Initialize();
+  GoLanguageRuntime::Initialize();
+  JavaLanguageRuntime::Initialize();
 #endif // LLDB_ENABLE_ALL
 
   CPlusPlusLanguage::Initialize();
 #ifdef LLDB_ENABLE_ALL
+  GoLanguage::Initialize();
+  JavaLanguage::Initialize();
   ObjCLanguage::Initialize();
   ObjCPlusPlusLanguage::Initialize();
+  OCamlLanguage::Initialize();
 #endif // LLDB_ENABLE_ALL
 
 #if defined(_WIN32)
@@ -424,7 +418,6 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   PlatformAppleWatchSimulator::Initialize();
   PlatformRemoteAppleTV::Initialize();
   PlatformRemoteAppleWatch::Initialize();
-  PlatformRemoteAppleBridge::Initialize();
   DynamicLoaderDarwinKernel::Initialize();
 #endif
 
@@ -458,8 +451,6 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   // AFTER PluginManager::Initialize is called.
 
   Debugger::SettingsInitialize();
-
-  return llvm::Error::success();
 }
 
 void SystemInitializerFull::InitializeSWIG() {
@@ -476,14 +467,11 @@ void SystemInitializerFull::InitializeSWIG() {
       LLDBSwigPython_MightHaveChildrenSynthProviderInstance,
       LLDBSwigPython_GetValueSynthProviderInstance, LLDBSwigPythonCallCommand,
       LLDBSwigPythonCallCommandObject, LLDBSwigPythonCallModuleInit,
-      LLDBSWIGPythonCreateOSPlugin, LLDBSWIGPython_CreateFrameRecognizer,
-      LLDBSwigPython_GetRecognizedArguments,
-      LLDBSWIGPythonRunScriptKeywordProcess,
+      LLDBSWIGPythonCreateOSPlugin, LLDBSWIGPythonRunScriptKeywordProcess,
       LLDBSWIGPythonRunScriptKeywordThread,
       LLDBSWIGPythonRunScriptKeywordTarget, LLDBSWIGPythonRunScriptKeywordFrame,
       LLDBSWIGPythonRunScriptKeywordValue, LLDBSWIGPython_GetDynamicSetting,
-      LLDBSwigPythonCreateScriptedThreadPlan, LLDBSWIGPythonCallThreadPlan,
-      LLDBSwigPythonCreateScriptedBreakpointResolver, LLDBSwigPythonCallBreakpointResolver);
+      LLDBSwigPythonCreateScriptedThreadPlan, LLDBSWIGPythonCallThreadPlan);
 #endif
 }
 
@@ -497,11 +485,10 @@ void SystemInitializerFull::Terminate() {
   PluginManager::Terminate();
 
   ClangASTContext::Terminate();
-
+  GoASTContext::Terminate();
 #ifdef LLDB_ENABLE_ALL
-  ArchitectureArm::Terminate();
-  ArchitectureMips::Terminate();
-  ArchitecturePPC64::Terminate();
+  JavaASTContext::Terminate();
+  OCamlASTContext::Terminate();
 
   ABIMacOSX_i386::Terminate();
   ABIMacOSX_arm::Terminate();
@@ -537,7 +524,6 @@ void SystemInitializerFull::Terminate() {
   UndefinedBehaviorSanitizerRuntime::Terminate();
   MainThreadCheckerRuntime::Terminate();
   SymbolVendorELF::Terminate();
-  breakpad::SymbolFileBreakpad::Terminate();
   SymbolFileDWARF::Terminate();
 #ifdef LLDB_ENABLE_ALL
   SymbolFilePDB::Terminate();
@@ -554,12 +540,16 @@ void SystemInitializerFull::Terminate() {
   AppleObjCRuntimeV1::Terminate();
   SystemRuntimeMacOSX::Terminate();
   RenderScriptRuntime::Terminate();
+  JavaLanguageRuntime::Terminate();
 #endif // LLDB_ENABLE_ALL
 
   CPlusPlusLanguage::Terminate();
 #ifdef LLDB_ENABLE_ALL
+  GoLanguage::Terminate();
+  JavaLanguage::Terminate();
   ObjCLanguage::Terminate();
   ObjCPlusPlusLanguage::Terminate();
+  OCamlLanguage::Terminate();
 #endif // LLDB_ENABLE_ALL
 
 #if defined(__APPLE__)
@@ -570,7 +560,6 @@ void SystemInitializerFull::Terminate() {
   PlatformAppleWatchSimulator::Terminate();
   PlatformRemoteAppleTV::Terminate();
   PlatformRemoteAppleWatch::Terminate();
-  PlatformRemoteAppleBridge::Terminate();
 #endif
 
 #if defined(__FreeBSD__)
@@ -595,6 +584,9 @@ void SystemInitializerFull::Terminate() {
 #ifndef LLDB_DISABLE_PYTHON
   OperatingSystemPython::Terminate();
 #endif
+#ifdef LLDB_ENABLE_ALL
+  OperatingSystemGo::Terminate();
+#endif // LLDB_ENABLE_ALL
 
   platform_freebsd::PlatformFreeBSD::Terminate();
 #ifdef LLDB_ENABLE_ALL
@@ -612,7 +604,6 @@ void SystemInitializerFull::Terminate() {
   PlatformDarwinKernel::Terminate();
 #endif
 
-  breakpad::ObjectFileBreakpad::Terminate();
   ObjectFileELF::Terminate();
 #ifdef LLDB_ENABLE_ALL
   ObjectFileMachO::Terminate();

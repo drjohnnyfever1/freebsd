@@ -1022,7 +1022,9 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
       }
 
       // We adjust AliasAnalysis information for merged stack slots.
-      SmallVector<MachineMemOperand *, 2> NewMMOs;
+      MachineSDNode::mmo_iterator NewMemOps =
+          MF->allocateMemRefsArray(I.getNumMemOperands());
+      unsigned MemOpIdx = 0;
       bool ReplaceMemOps = false;
       for (MachineMemOperand *MMO : I.memoperands()) {
         // If this memory location can be a slot remapped here,
@@ -1049,17 +1051,17 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
           }
         }
         if (MayHaveConflictingAAMD) {
-          NewMMOs.push_back(MF->getMachineMemOperand(MMO, AAMDNodes()));
+          NewMemOps[MemOpIdx++] = MF->getMachineMemOperand(MMO, AAMDNodes());
           ReplaceMemOps = true;
-        } else {
-          NewMMOs.push_back(MMO);
         }
+        else
+          NewMemOps[MemOpIdx++] = MMO;
       }
 
       // If any memory operand is updated, set memory references of
       // this instruction.
       if (ReplaceMemOps)
-        I.setMemRefs(*MF, NewMMOs);
+        I.setMemRefs(std::make_pair(NewMemOps, I.getNumMemOperands()));
     }
 
   // Update the location of C++ catch objects for the MSVC personality routine.
@@ -1231,7 +1233,7 @@ bool StackColoring::runOnMachineFunction(MachineFunction &Func) {
   });
 
   for (auto &s : LiveStarts)
-    llvm::sort(s);
+    llvm::sort(s.begin(), s.end());
 
   bool Changed = true;
   while (Changed) {

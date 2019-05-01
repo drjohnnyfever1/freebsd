@@ -59,16 +59,15 @@ struct MapUnmapCallback;
 static const uptr kAllocatorRegionSizeLog = 20;
 static const uptr kAllocatorNumRegions =
     SANITIZER_MMAP_RANGE_SIZE >> kAllocatorRegionSizeLog;
-using ByteMap = TwoLevelByteMap<(kAllocatorNumRegions >> 12), 1 << 12,
-                                LocalAddressSpaceView, MapUnmapCallback>;
+typedef TwoLevelByteMap<(kAllocatorNumRegions >> 12), 1 << 12,
+    MapUnmapCallback> ByteMap;
 struct AP32 {
   static const uptr kSpaceBeg = 0;
   static const u64 kSpaceSize = SANITIZER_MMAP_RANGE_SIZE;
   static const uptr kMetadataSize = 0;
   typedef __sanitizer::CompactSizeClassMap SizeClassMap;
   static const uptr kRegionSizeLog = kAllocatorRegionSizeLog;
-  using AddressSpaceView = LocalAddressSpaceView;
-  using ByteMap = __tsan::ByteMap;
+  typedef __tsan::ByteMap ByteMap;
   typedef __tsan::MapUnmapCallback MapUnmapCallback;
   static const uptr kFlags = 0;
 };
@@ -81,7 +80,6 @@ struct AP64 {  // Allocator64 parameters. Deliberately using a short name.
   typedef DefaultSizeClassMap SizeClassMap;
   typedef __tsan::MapUnmapCallback MapUnmapCallback;
   static const uptr kFlags = 0;
-  using AddressSpaceView = LocalAddressSpaceView;
 };
 typedef SizeClassAllocator64<AP64> PrimaryAllocator;
 #endif
@@ -774,7 +772,6 @@ void ThreadFinalize(ThreadState *thr);
 void ThreadSetName(ThreadState *thr, const char *name);
 int ThreadCount(ThreadState *thr);
 void ProcessPendingSignals(ThreadState *thr);
-void ThreadNotJoined(ThreadState *thr, uptr pc, int tid, uptr uid);
 
 Processor *ProcCreate();
 void ProcDestroy(Processor *proc);

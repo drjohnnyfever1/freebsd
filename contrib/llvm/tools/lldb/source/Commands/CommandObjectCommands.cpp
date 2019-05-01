@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "llvm/ADT/StringRef.h"
 
+// Project includes
 #include "CommandObjectCommands.h"
 #include "CommandObjectHelp.h"
 #include "lldb/Core/Debugger.h"
@@ -34,12 +38,12 @@ using namespace lldb_private;
 // CommandObjectCommandsSource
 //-------------------------------------------------------------------------
 
-static constexpr OptionDefinition g_history_options[] = {
+static OptionDefinition g_history_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_1, false, "count",       'c', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeUnsignedInteger, "How many history commands to print." },
-  { LLDB_OPT_SET_1, false, "start-index", 's', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeUnsignedInteger, "Index at which to start printing history commands (or end to mean tail mode)." },
-  { LLDB_OPT_SET_1, false, "end-index",   'e', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeUnsignedInteger, "Index at which to stop printing history commands." },
-  { LLDB_OPT_SET_2, false, "clear",       'C', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeBoolean,         "Clears the current command history." },
+  { LLDB_OPT_SET_1, false, "count",       'c', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeUnsignedInteger, "How many history commands to print." },
+  { LLDB_OPT_SET_1, false, "start-index", 's', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeUnsignedInteger, "Index at which to start printing history commands (or end to mean tail mode)." },
+  { LLDB_OPT_SET_1, false, "end-index",   'e', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeUnsignedInteger, "Index at which to stop printing history commands." },
+  { LLDB_OPT_SET_2, false, "clear",       'C', OptionParser::eNoArgument,       nullptr, nullptr, 0, eArgTypeBoolean,         "Clears the current command history." },
     // clang-format on
 };
 
@@ -193,11 +197,11 @@ protected:
 // CommandObjectCommandsSource
 //-------------------------------------------------------------------------
 
-static constexpr OptionDefinition g_source_options[] = {
+static OptionDefinition g_source_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_ALL, false, "stop-on-error",    'e', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeBoolean, "If true, stop executing commands on error." },
-  { LLDB_OPT_SET_ALL, false, "stop-on-continue", 'c', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeBoolean, "If true, stop executing commands on continue." },
-  { LLDB_OPT_SET_ALL, false, "silent-run",       's', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeBoolean, "If true don't echo commands while executing." },
+  { LLDB_OPT_SET_ALL, false, "stop-on-error",    'e', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeBoolean, "If true, stop executing commands on error." },
+  { LLDB_OPT_SET_ALL, false, "stop-on-continue", 'c', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeBoolean, "If true, stop executing commands on continue." },
+  { LLDB_OPT_SET_ALL, false, "silent-run",       's', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeBoolean, "If true don't echo commands while executing." },
     // clang-format on
 };
 
@@ -304,8 +308,7 @@ protected:
       return false;
     }
 
-    FileSpec cmd_file(command[0].ref);
-    FileSystem::Instance().Resolve(cmd_file);
+    FileSpec cmd_file(command[0].ref, true);
     ExecutionContext *exe_ctx = nullptr; // Just use the default context.
 
     // If any options were set, then use them
@@ -316,15 +319,8 @@ protected:
       CommandInterpreterRunOptions options;
       options.SetStopOnContinue(m_options.m_stop_on_continue.GetCurrentValue());
       options.SetStopOnError(m_options.m_stop_on_error.GetCurrentValue());
-
-      // Individual silent setting is override for global command echo settings.
-      if (m_options.m_silent_run.GetCurrentValue()) {
-        options.SetSilent(true);
-      } else {
-        options.SetPrintResults(true);
-        options.SetEchoCommands(m_interpreter.GetEchoCommands());
-        options.SetEchoCommentCommands(m_interpreter.GetEchoCommentCommands());
-      }
+      options.SetEchoCommands(!m_options.m_silent_run.GetCurrentValue());
+      options.SetPrintResults(!m_options.m_silent_run.GetCurrentValue());
 
       m_interpreter.HandleCommandsFromFile(cmd_file, exe_ctx, options, result);
     } else {
@@ -344,10 +340,10 @@ protected:
 // CommandObjectCommandsAlias
 //-------------------------------------------------------------------------
 
-static constexpr OptionDefinition g_alias_options[] = {
+static OptionDefinition g_alias_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_ALL, false, "help",      'h', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeHelpText, "Help text for this command" },
-  { LLDB_OPT_SET_ALL, false, "long-help", 'H', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeHelpText, "Long help text for this command" },
+  { LLDB_OPT_SET_ALL, false, "help",      'h', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeHelpText, "Help text for this command" },
+  { LLDB_OPT_SET_ALL, false, "long-help", 'H', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeHelpText, "Long help text for this command" },
     // clang-format on
 };
 
@@ -918,10 +914,10 @@ protected:
 // CommandObjectCommandsAddRegex
 //-------------------------------------------------------------------------
 
-static constexpr OptionDefinition g_regex_options[] = {
+static OptionDefinition g_regex_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_1, false, "help"  , 'h', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeNone, "The help text to display for this command." },
-  { LLDB_OPT_SET_1, false, "syntax", 's', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeNone, "A syntax string showing the typical usage syntax." },
+  { LLDB_OPT_SET_1, false, "help"  , 'h', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeNone, "The help text to display for this command." },
+  { LLDB_OPT_SET_1, false, "syntax", 's', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeNone, "A syntax string showing the typical usage syntax." },
     // clang-format on
 };
 
@@ -1398,9 +1394,9 @@ private:
 // CommandObjectCommandsScriptImport
 //-------------------------------------------------------------------------
 
-static constexpr OptionDefinition g_script_import_options[] = {
+OptionDefinition g_script_import_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_1, false, "allow-reload", 'r', OptionParser::eNoArgument, nullptr, {}, 0, eArgTypeNone, "Allow the script to be loaded even if it was already loaded before. This argument exists for backwards compatibility, but reloading is always allowed, whether you specify it or not." },
+  { LLDB_OPT_SET_1, false, "allow-reload", 'r', OptionParser::eNoArgument, nullptr, nullptr, 0, eArgTypeNone, "Allow the script to be loaded even if it was already loaded before. This argument exists for backwards compatibility, but reloading is always allowed, whether you specify it or not." },
     // clang-format on
 };
 
@@ -1523,24 +1519,22 @@ protected:
 //-------------------------------------------------------------------------
 // CommandObjectCommandsScriptAdd
 //-------------------------------------------------------------------------
-static constexpr OptionEnumValueElement g_script_synchro_type[] = {
-  {eScriptedCommandSynchronicitySynchronous, "synchronous",
-   "Run synchronous"},
-  {eScriptedCommandSynchronicityAsynchronous, "asynchronous",
-   "Run asynchronous"},
-  {eScriptedCommandSynchronicityCurrentValue, "current",
-   "Do not alter current setting"} };
 
-static constexpr OptionEnumValues ScriptSynchroType() {
-  return OptionEnumValues(g_script_synchro_type);
-}
+static OptionEnumValueElement g_script_synchro_type[] = {
+    {eScriptedCommandSynchronicitySynchronous, "synchronous",
+     "Run synchronous"},
+    {eScriptedCommandSynchronicityAsynchronous, "asynchronous",
+     "Run asynchronous"},
+    {eScriptedCommandSynchronicityCurrentValue, "current",
+     "Do not alter current setting"},
+    {0, nullptr, nullptr}};
 
-static constexpr OptionDefinition g_script_add_options[] = {
+static OptionDefinition g_script_add_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_1,   false, "function",      'f', OptionParser::eRequiredArgument, nullptr, {},                  0, eArgTypePythonFunction,               "Name of the Python function to bind to this command name." },
-  { LLDB_OPT_SET_2,   false, "class",         'c', OptionParser::eRequiredArgument, nullptr, {},                  0, eArgTypePythonClass,                  "Name of the Python class to bind to this command name." },
-  { LLDB_OPT_SET_1,   false, "help"  ,        'h', OptionParser::eRequiredArgument, nullptr, {},                  0, eArgTypeHelpText,                     "The help text to display for this command." },
-  { LLDB_OPT_SET_ALL, false, "synchronicity", 's', OptionParser::eRequiredArgument, nullptr, ScriptSynchroType(), 0, eArgTypeScriptedCommandSynchronicity, "Set the synchronicity of this command's executions with regard to LLDB event system." },
+  { LLDB_OPT_SET_1,   false, "function",      'f', OptionParser::eRequiredArgument, nullptr, nullptr,               0, eArgTypePythonFunction,               "Name of the Python function to bind to this command name." },
+  { LLDB_OPT_SET_2,   false, "class",         'c', OptionParser::eRequiredArgument, nullptr, nullptr,               0, eArgTypePythonClass,                  "Name of the Python class to bind to this command name." },
+  { LLDB_OPT_SET_1,   false, "help"  ,        'h', OptionParser::eRequiredArgument, nullptr, nullptr,               0, eArgTypeHelpText,                     "The help text to display for this command." },
+  { LLDB_OPT_SET_ALL, false, "synchronicity", 's', OptionParser::eRequiredArgument, nullptr, g_script_synchro_type, 0, eArgTypeScriptedCommandSynchronicity, "Set the synchronicity of this command's executions with regard to LLDB event system." },
     // clang-format on
 };
 

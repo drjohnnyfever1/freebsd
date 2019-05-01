@@ -164,10 +164,6 @@ MainFileName("main-file-name",
 static cl::opt<bool> SaveTempLabels("save-temp-labels",
                                     cl::desc("Don't discard temporary labels"));
 
-static cl::opt<bool> LexMasmIntegers(
-    "masm-integers",
-    cl::desc("Enable binary and hex masm integers (0b110 and 0ABCh)"));
-
 static cl::opt<bool> NoExecStack("no-exec-stack",
                                  cl::desc("File doesn't need an exec stack"));
 
@@ -297,7 +293,6 @@ static int AssembleInput(const char *ProgName, const Target *TheTarget,
     return SymbolResult;
   Parser->setShowParsedOperands(ShowInstOperands);
   Parser->setTargetParser(*TAP);
-  Parser->getLexer().setLexMasmIntegers(LexMasmIntegers);
 
   int Res = Parser->Run(NoInitialTextSection);
 
@@ -318,6 +313,7 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "llvm machine code playground\n");
   MCTargetOptions MCOptions = InitMCTargetOptionsFromFlags();
+  TripleName = Triple::normalize(TripleName);
   setDwarfDebugFlags(argc, argv);
 
   setDwarfDebugProducer();

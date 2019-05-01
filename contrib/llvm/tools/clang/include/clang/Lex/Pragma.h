@@ -113,7 +113,7 @@ public:
   bool IsEmpty() const { return Handlers.empty(); }
 
   void HandlePragma(Preprocessor &PP, PragmaIntroducerKind Introducer,
-                    Token &Tok) override;
+                    Token &FirstToken) override;
 
   PragmaNamespace *getIfNamespace() override { return this; }
 };

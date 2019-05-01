@@ -60,7 +60,6 @@
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Analysis/AssumptionCache.h"
-#include "llvm/Analysis/OrderedInstructions.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
@@ -77,6 +76,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Transforms/Utils/OrderedInstructions.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>

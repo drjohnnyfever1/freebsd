@@ -11,12 +11,15 @@
 
 #include <errno.h>
 
+// C Includes
+// C++ Includes
 #include <chrono>
 #include <csignal>
 #include <cstring>
 #include <mutex>
 #include <sstream>
 
+// Other libraries and framework includes
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Threading.h"
 
@@ -35,6 +38,7 @@
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/UriParser.h"
 
+// Project includes
 #include "lldb/Utility/StringExtractorGDBRemote.h"
 
 using namespace lldb;
@@ -164,6 +168,9 @@ Status GDBRemoteCommunicationServerPlatform::LaunchGDBServer(
 GDBRemoteCommunication::PacketResult
 GDBRemoteCommunicationServerPlatform::Handle_qLaunchGDBServer(
     StringExtractorGDBRemote &packet) {
+#ifdef _WIN32
+  return SendErrorResponse(9);
+#else
   // Spawn a local debugserver as a platform so we can then attach or launch a
   // process...
 
@@ -214,9 +221,10 @@ GDBRemoteCommunicationServerPlatform::Handle_qLaunchGDBServer(
   PacketResult packet_result = SendPacketNoLock(response.GetString());
   if (packet_result != PacketResult::Success) {
     if (debugserver_pid != LLDB_INVALID_PROCESS_ID)
-      Host::Kill(debugserver_pid, SIGINT);
+      ::kill(debugserver_pid, SIGINT);
   }
   return packet_result;
+#endif
 }
 
 GDBRemoteCommunication::PacketResult
@@ -524,7 +532,7 @@ const FileSpec &GDBRemoteCommunicationServerPlatform::GetDomainSocketDir() {
     const char *domainsocket_dir_env =
         ::getenv("LLDB_DEBUGSERVER_DOMAINSOCKET_DIR");
     if (domainsocket_dir_env != nullptr)
-      g_domainsocket_dir = FileSpec(domainsocket_dir_env);
+      g_domainsocket_dir = FileSpec(domainsocket_dir_env, false);
     else
       g_domainsocket_dir = HostInfo::GetProcessTempDir();
   });
@@ -534,15 +542,15 @@ const FileSpec &GDBRemoteCommunicationServerPlatform::GetDomainSocketDir() {
 
 FileSpec
 GDBRemoteCommunicationServerPlatform::GetDomainSocketPath(const char *prefix) {
-  llvm::SmallString<128> socket_path;
-  llvm::SmallString<128> socket_name(
+  llvm::SmallString<PATH_MAX> socket_path;
+  llvm::SmallString<PATH_MAX> socket_name(
       (llvm::StringRef(prefix) + ".%%%%%%").str());
 
   FileSpec socket_path_spec(GetDomainSocketDir());
   socket_path_spec.AppendPathComponent(socket_name.c_str());
 
   llvm::sys::fs::createUniqueFile(socket_path_spec.GetCString(), socket_path);
-  return FileSpec(socket_path.c_str());
+  return FileSpec(socket_path.c_str(), false);
 }
 
 void GDBRemoteCommunicationServerPlatform::SetPortOffset(uint16_t port_offset) {

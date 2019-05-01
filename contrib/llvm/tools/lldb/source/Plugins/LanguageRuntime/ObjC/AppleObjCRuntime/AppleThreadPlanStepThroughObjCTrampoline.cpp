@@ -8,6 +8,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "AppleThreadPlanStepThroughObjCTrampoline.h"
 #include "AppleObjCTrampolineHandler.h"
 #include "lldb/Expression/DiagnosticManager.h"
@@ -157,15 +161,13 @@ bool AppleThreadPlanStepThroughObjCTrampoline::ShouldStop(Event *event_ptr) {
 
       SymbolContext sc = m_thread.GetStackFrameAtIndex(0)->GetSymbolContext(
           eSymbolContextEverything);
-      Status status;
       const bool abort_other_plans = false;
       const bool first_insn = true;
       const uint32_t frame_idx = 0;
       m_run_to_sp = m_thread.QueueThreadPlanForStepOutNoShouldStop(
           abort_other_plans, &sc, first_insn, m_stop_others, eVoteNoOpinion,
-          eVoteNoOpinion, frame_idx, status);
-      if (m_run_to_sp && status.Success())
-        m_run_to_sp->SetPrivate(true);
+          eVoteNoOpinion, frame_idx);
+      m_run_to_sp->SetPrivate(true);
       return false;
     }
 
@@ -200,7 +202,10 @@ bool AppleThreadPlanStepThroughObjCTrampoline::ShouldStop(Event *event_ptr) {
 // The base class MischiefManaged does some cleanup - so you have to call it in
 // your MischiefManaged derived class.
 bool AppleThreadPlanStepThroughObjCTrampoline::MischiefManaged() {
-  return IsPlanComplete();
+  if (IsPlanComplete())
+    return true;
+  else
+    return false;
 }
 
 bool AppleThreadPlanStepThroughObjCTrampoline::WillStop() { return true; }
