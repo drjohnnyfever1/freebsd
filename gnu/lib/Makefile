@@ -6,7 +6,7 @@ SUBDIR=			csu
 SUBDIR+=		libdialog
 SUBDIR+=		libgcc
 
-.if ${MK_GCC} != "no" && ${MK_OPENMP} == "no"
+.if ${MK_GCC} != "no"
 SUBDIR+= libgcov libgomp
 .endif
 
