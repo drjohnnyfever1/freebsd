@@ -49,7 +49,7 @@ public:
   BinarySubstreamRef getC13LinesSubstream() const;
   BinarySubstreamRef getGlobalRefsSubstream() const;
 
-  ModuleDebugStreamRef &operator=(ModuleDebugStreamRef &&Other) = delete;
+  ModuleDebugStreamRef &operator=(ModuleDebugStreamRef &&Other) = default;
 
   iterator_range<DebugSubsectionIterator> subsections() const;
   codeview::DebugSubsectionArray getSubsectionsArray() const {

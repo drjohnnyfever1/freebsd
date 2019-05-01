@@ -92,7 +92,7 @@ protected:
   class StmtBitfields {
     friend class Stmt;
 
-    /// The statement class.
+    /// \brief The statement class.
     unsigned sClass : 8;
   };
   enum { NumStmtBits = 8 };
@@ -198,13 +198,11 @@ protected:
 
   class CastExprBitfields {
     friend class CastExpr;
-    friend class ImplicitCastExpr;
 
     unsigned : NumExprBits;
 
     unsigned Kind : 6;
-    unsigned PartOfExplicitCast : 1; // Only set for ImplicitCastExpr.
-    unsigned BasePathIsEmpty : 1;
+    unsigned BasePathSize : 32 - 6 - NumExprBits;
   };
 
   class CallExprBitfields {
@@ -239,16 +237,6 @@ protected:
     unsigned ResultIndex : 32 - 8 - NumExprBits;
   };
 
-  class OpaqueValueExprBitfields {
-    friend class OpaqueValueExpr;
-
-    unsigned : NumExprBits;
-
-    /// The OVE is a unique semantic reference to its source expressio if this
-    /// bit is set to true.
-    unsigned IsUnique : 1;
-  };
-
   class ObjCIndirectCopyRestoreExprBitfields {
     friend class ObjCIndirectCopyRestoreExpr;
 
@@ -271,17 +259,17 @@ protected:
     friend class ASTStmtReader;
     friend class ASTStmtWriter;
     friend class TypeTraitExpr;
-
+    
     unsigned : NumExprBits;
-
-    /// The kind of type trait, which is a value of a TypeTrait enumerator.
+    
+    /// \brief The kind of type trait, which is a value of a TypeTrait enumerator.
     unsigned Kind : 8;
-
-    /// If this expression is not value-dependent, this indicates whether
+    
+    /// \brief If this expression is not value-dependent, this indicates whether
     /// the trait evaluated true or false.
     unsigned Value : 1;
 
-    /// The number of arguments to this type trait.
+    /// \brief The number of arguments to this type trait.
     unsigned NumArgs : 32 - 8 - 1 - NumExprBits;
   };
 
@@ -306,7 +294,6 @@ protected:
     CallExprBitfields CallExprBits;
     ExprWithCleanupsBitfields ExprWithCleanupsBits;
     PseudoObjectExprBitfields PseudoObjectExprBits;
-    OpaqueValueExprBitfields OpaqueValueExprBits;
     ObjCIndirectCopyRestoreExprBitfields ObjCIndirectCopyRestoreExprBits;
     InitListExprBitfields InitListExprBits;
     TypeTraitExprBitfields TypeTraitExprBits;
@@ -332,7 +319,7 @@ public:
   void operator delete(void *, void *) noexcept {}
 
 public:
-  /// A placeholder type used to construct an empty shell of a
+  /// \brief A placeholder type used to construct an empty shell of a
   /// type, that will be filled in later (e.g., by some
   /// de-serialization).
   struct EmptyShell {};
@@ -371,11 +358,11 @@ protected:
   };
 
 private:
-  /// Whether statistic collection is enabled.
+  /// \brief Whether statistic collection is enabled.
   static bool StatisticsEnabled;
 
 protected:
-  /// Construct an empty statement.
+  /// \brief Construct an empty statement.
   explicit Stmt(StmtClass SC, EmptyShell) : Stmt(SC) {}
 
 public:
@@ -398,17 +385,15 @@ public:
   /// value objects created/interpreted by SourceManager. We assume AST
   /// clients will have a pointer to the respective SourceManager.
   SourceRange getSourceRange() const LLVM_READONLY;
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY;
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY;
+  SourceLocation getLocStart() const LLVM_READONLY;
+  SourceLocation getLocEnd() const LLVM_READONLY;
 
   // global temp stats (until we have a per-module visitor)
   static void addStmtClass(const StmtClass s);
   static void EnableStatistics();
   static void PrintStats();
 
-  /// Dumps the specified AST fragment and all subtrees to
+  /// \brief Dumps the specified AST fragment and all subtrees to
   /// \c llvm::errs().
   void dump() const;
   void dump(SourceManager &SM) const;
@@ -436,7 +421,7 @@ public:
     return const_cast<Stmt *>(this)->IgnoreImplicit();
   }
 
-  /// Skip no-op (attributed, compound) container stmts and skip captured
+  /// \brief Skip no-op (attributed, compound) container stmts and skip captured
   /// stmt at the top, if \a IgnoreCaptured is true.
   Stmt *IgnoreContainers(bool IgnoreCaptured = false);
   const Stmt *IgnoreContainers(bool IgnoreCaptured = false) const {
@@ -459,7 +444,6 @@ public:
   using const_child_range = llvm::iterator_range<const_child_iterator>;
 
   child_range children();
-
   const_child_range children() const {
     auto Children = const_cast<Stmt *>(this)->children();
     return const_child_range(Children.begin(), Children.end());
@@ -471,7 +455,7 @@ public:
   const_child_iterator child_begin() const { return children().begin(); }
   const_child_iterator child_end() const { return children().end(); }
 
-  /// Produce a unique representation of the given statement.
+  /// \brief Produce a unique representation of the given statement.
   ///
   /// \param ID once the profiling operation is complete, will contain
   /// the unique representation of the given statement.
@@ -486,7 +470,7 @@ public:
   void Profile(llvm::FoldingSetNodeID &ID, const ASTContext &Context,
                bool Canonical) const;
 
-  /// Calculate a unique representation for a statement that is
+  /// \brief Calculate a unique representation for a statement that is
   /// stable across compiler invocations.
   ///
   /// \param ID profile information will be stored in ID.
@@ -508,7 +492,7 @@ public:
   DeclStmt(DeclGroupRef dg, SourceLocation startLoc, SourceLocation endLoc)
       : Stmt(DeclStmtClass), DG(dg), StartLoc(startLoc), EndLoc(endLoc) {}
 
-  /// Build an empty declaration statement.
+  /// \brief Build an empty declaration statement.
   explicit DeclStmt(EmptyShell Empty) : Stmt(DeclStmtClass, Empty) {}
 
   /// isSingleDecl - This method returns true if this DeclStmt refers
@@ -524,13 +508,12 @@ public:
   DeclGroupRef getDeclGroup() { return DG; }
   void setDeclGroup(DeclGroupRef DGR) { DG = DGR; }
 
-  SourceLocation getStartLoc() const LLVM_READONLY { return getBeginLoc(); }
+  SourceLocation getStartLoc() const { return StartLoc; }
   void setStartLoc(SourceLocation L) { StartLoc = L; }
   SourceLocation getEndLoc() const { return EndLoc; }
   void setEndLoc(SourceLocation L) { EndLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return StartLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return StartLoc; }
   SourceLocation getLocEnd() const LLVM_READONLY { return EndLoc; }
 
   static bool classof(const Stmt *T) {
@@ -549,11 +532,9 @@ public:
   using decl_const_range = llvm::iterator_range<const_decl_iterator>;
 
   decl_range decls() { return decl_range(decl_begin(), decl_end()); }
-
   decl_const_range decls() const {
     return decl_const_range(decl_begin(), decl_end());
   }
-
   decl_iterator decl_begin() { return DG.begin(); }
   decl_iterator decl_end() { return DG.end(); }
   const_decl_iterator decl_begin() const { return DG.begin(); }
@@ -575,7 +556,7 @@ public:
 class NullStmt : public Stmt {
   SourceLocation SemiLoc;
 
-  /// True if the null statement was preceded by an empty macro, e.g:
+  /// \brief True if the null statement was preceded by an empty macro, e.g:
   /// @code
   ///   #define CALL(x)
   ///   CALL(0);
@@ -590,7 +571,7 @@ public:
       : Stmt(NullStmtClass), SemiLoc(L),
         HasLeadingEmptyMacro(hasLeadingEmptyMacro) {}
 
-  /// Build an empty null statement.
+  /// \brief Build an empty null statement.
   explicit NullStmt(EmptyShell Empty) : Stmt(NullStmtClass, Empty) {}
 
   SourceLocation getSemiLoc() const { return SemiLoc; }
@@ -598,10 +579,8 @@ public:
 
   bool hasLeadingEmptyMacro() const { return HasLeadingEmptyMacro; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return SemiLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return SemiLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return SemiLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return SemiLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == NullStmtClass;
@@ -629,13 +608,13 @@ public:
   static CompoundStmt *Create(const ASTContext &C, ArrayRef<Stmt *> Stmts,
                               SourceLocation LB, SourceLocation RB);
 
-  // Build an empty compound statement with a location.
+  // \brief Build an empty compound statement with a location.
   explicit CompoundStmt(SourceLocation Loc)
       : Stmt(CompoundStmtClass), LBraceLoc(Loc), RBraceLoc(Loc) {
     CompoundStmtBits.NumStmts = 0;
   }
 
-  // Build an empty compound statement.
+  // \brief Build an empty compound statement.
   static CompoundStmt *CreateEmpty(const ASTContext &C, unsigned NumStmts);
 
   bool body_empty() const { return CompoundStmtBits.NumStmts == 0; }
@@ -648,7 +627,6 @@ public:
   body_iterator body_begin() { return getTrailingObjects<Stmt *>(); }
   body_iterator body_end() { return body_begin() + size(); }
   Stmt *body_front() { return !body_empty() ? body_begin()[0] : nullptr; }
-
   Stmt *body_back() {
     return !body_empty() ? body_begin()[size() - 1] : nullptr;
   }
@@ -668,7 +646,6 @@ public:
   const_body_iterator body_begin() const {
     return getTrailingObjects<Stmt *>();
   }
-
   const_body_iterator body_end() const { return body_begin() + size(); }
 
   const Stmt *body_front() const {
@@ -700,10 +677,8 @@ public:
     return const_reverse_body_iterator(body_begin());
   }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return LBraceLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return RBraceLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return LBraceLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return RBraceLoc; }
 
   SourceLocation getLBracLoc() const { return LBraceLoc; }
   SourceLocation getRBracLoc() const { return RBraceLoc; }
@@ -751,10 +726,8 @@ public:
     return const_cast<SwitchCase*>(this)->getSubStmt();
   }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return KeywordLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY;
+  SourceLocation getLocStart() const LLVM_READONLY { return KeywordLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY;
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CaseStmtClass ||
@@ -778,7 +751,7 @@ public:
     EllipsisLoc = ellipsisLoc;
   }
 
-  /// Build an empty switch case statement.
+  /// \brief Build an empty switch case statement.
   explicit CaseStmt(EmptyShell Empty) : SwitchCase(CaseStmtClass, Empty) {}
 
   SourceLocation getCaseLoc() const { return KeywordLoc; }
@@ -806,14 +779,12 @@ public:
   void setLHS(Expr *Val) { SubExprs[LHS] = reinterpret_cast<Stmt*>(Val); }
   void setRHS(Expr *Val) { SubExprs[RHS] = reinterpret_cast<Stmt*>(Val); }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return KeywordLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return KeywordLoc; }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     // Handle deeply nested case statements with iteration instead of recursion.
     const CaseStmt *CS = this;
-    while (const auto *CS2 = dyn_cast<CaseStmt>(CS->getSubStmt()))
+    while (const CaseStmt *CS2 = dyn_cast<CaseStmt>(CS->getSubStmt()))
       CS = CS2;
 
     return CS->getSubStmt()->getLocEnd();
@@ -836,7 +807,7 @@ public:
   DefaultStmt(SourceLocation DL, SourceLocation CL, Stmt *substmt) :
     SwitchCase(DefaultStmtClass, DL, CL), SubStmt(substmt) {}
 
-  /// Build an empty default statement.
+  /// \brief Build an empty default statement.
   explicit DefaultStmt(EmptyShell Empty)
       : SwitchCase(DefaultStmtClass, Empty) {}
 
@@ -849,12 +820,8 @@ public:
   SourceLocation getColonLoc() const { return ColonLoc; }
   void setColonLoc(SourceLocation L) { ColonLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return KeywordLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
-    return SubStmt->getLocEnd();
-  }
+  SourceLocation getLocStart() const LLVM_READONLY { return KeywordLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return SubStmt->getLocEnd();}
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == DefaultStmtClass;
@@ -864,8 +831,8 @@ public:
   child_range children() { return child_range(&SubStmt, &SubStmt+1); }
 };
 
-inline SourceLocation SwitchCase::getEndLoc() const {
-  if (const auto *CS = dyn_cast<CaseStmt>(this))
+inline SourceLocation SwitchCase::getLocEnd() const {
+  if (const CaseStmt *CS = dyn_cast<CaseStmt>(this))
     return CS->getLocEnd();
   return cast<DefaultStmt>(this)->getLocEnd();
 }
@@ -885,7 +852,7 @@ public:
                   "LabelStmt too big");
   }
 
-  // Build an empty label statement.
+  // \brief Build an empty label statement.
   explicit LabelStmt(EmptyShell Empty) : Stmt(LabelStmtClass, Empty) {}
 
   SourceLocation getIdentLoc() const { return IdentLoc; }
@@ -897,12 +864,8 @@ public:
   void setIdentLoc(SourceLocation L) { IdentLoc = L; }
   void setSubStmt(Stmt *SS) { SubStmt = SS; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return IdentLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
-    return SubStmt->getLocEnd();
-  }
+  SourceLocation getLocStart() const LLVM_READONLY { return IdentLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return SubStmt->getLocEnd();}
 
   child_range children() { return child_range(&SubStmt, &SubStmt+1); }
 
@@ -911,7 +874,7 @@ public:
   }
 };
 
-/// Represents an attribute applied to a statement.
+/// \brief Represents an attribute applied to a statement.
 ///
 /// Represents an attribute applied to a statement. For example:
 ///   [[omp::for(...)]] for (...) { ... }
@@ -932,7 +895,7 @@ class AttributedStmt final
   }
 
   explicit AttributedStmt(EmptyShell Empty, unsigned NumAttrs)
-      : Stmt(AttributedStmtClass, Empty), NumAttrs(NumAttrs) {
+    : Stmt(AttributedStmtClass, Empty), NumAttrs(NumAttrs) {
     std::fill_n(getAttrArrayPtr(), NumAttrs, nullptr);
   }
 
@@ -945,7 +908,7 @@ public:
   static AttributedStmt *Create(const ASTContext &C, SourceLocation Loc,
                                 ArrayRef<const Attr*> Attrs, Stmt *SubStmt);
 
-  // Build an empty attributed statement.
+  // \brief Build an empty attributed statement.
   static AttributedStmt *CreateEmpty(const ASTContext &C, unsigned NumAttrs);
 
   SourceLocation getAttrLoc() const { return AttrLoc; }
@@ -956,12 +919,8 @@ public:
   Stmt *getSubStmt() { return SubStmt; }
   const Stmt *getSubStmt() const { return SubStmt; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return AttrLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
-    return SubStmt->getLocEnd();
-  }
+  SourceLocation getLocStart() const LLVM_READONLY { return AttrLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return SubStmt->getLocEnd();}
 
   child_range children() { return child_range(&SubStmt, &SubStmt + 1); }
 
@@ -984,10 +943,10 @@ public:
          Stmt *then, SourceLocation EL = SourceLocation(),
          Stmt *elsev = nullptr);
 
-  /// Build an empty if/then/else statement
+  /// \brief Build an empty if/then/else statement
   explicit IfStmt(EmptyShell Empty) : Stmt(IfStmtClass, Empty) {}
 
-  /// Retrieve the variable declared in this "if" statement, if any.
+  /// \brief Retrieve the variable declared in this "if" statement, if any.
   ///
   /// In the following example, "x" is the condition variable.
   /// \code
@@ -1028,11 +987,9 @@ public:
 
   bool isObjCAvailabilityCheck() const;
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return IfLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return IfLoc; }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     if (SubExprs[ELSE])
       return SubExprs[ELSE]->getLocEnd();
     else
@@ -1065,10 +1022,10 @@ class SwitchStmt : public Stmt {
 public:
   SwitchStmt(const ASTContext &C, Stmt *Init, VarDecl *Var, Expr *cond);
 
-  /// Build a empty switch statement.
+  /// \brief Build a empty switch statement.
   explicit SwitchStmt(EmptyShell Empty) : Stmt(SwitchStmtClass, Empty) {}
 
-  /// Retrieve the variable declared in this "switch" statement, if any.
+  /// \brief Retrieve the variable declared in this "switch" statement, if any.
   ///
   /// In the following example, "x" is the condition variable.
   /// \code
@@ -1099,7 +1056,7 @@ public:
   void setBody(Stmt *S) { SubExprs[BODY] = S; }
   SwitchCase *getSwitchCaseList() { return FirstCase.getPointer(); }
 
-  /// Set the case list for this switch statement.
+  /// \brief Set the case list for this switch statement.
   void setSwitchCaseList(SwitchCase *SC) { FirstCase.setPointer(SC); }
 
   SourceLocation getSwitchLoc() const { return SwitchLoc; }
@@ -1125,11 +1082,9 @@ public:
   /// have been explicitly covered.
   bool isAllEnumCasesCovered() const { return FirstCase.getInt(); }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return SwitchLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return SwitchLoc; }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     return SubExprs[BODY] ? SubExprs[BODY]->getLocEnd() : SubExprs[COND]->getLocEnd();
   }
 
@@ -1153,10 +1108,10 @@ public:
   WhileStmt(const ASTContext &C, VarDecl *Var, Expr *cond, Stmt *body,
             SourceLocation WL);
 
-  /// Build an empty while statement.
+  /// \brief Build an empty while statement.
   explicit WhileStmt(EmptyShell Empty) : Stmt(WhileStmtClass, Empty) {}
 
-  /// Retrieve the variable declared in this "while" statement, if any.
+  /// \brief Retrieve the variable declared in this "while" statement, if any.
   ///
   /// In the following example, "x" is the condition variable.
   /// \code
@@ -1183,11 +1138,9 @@ public:
   SourceLocation getWhileLoc() const { return WhileLoc; }
   void setWhileLoc(SourceLocation L) { WhileLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return WhileLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return WhileLoc; }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     return SubExprs[BODY]->getLocEnd();
   }
 
@@ -1217,7 +1170,7 @@ public:
     SubExprs[BODY] = body;
   }
 
-  /// Build an empty do-while statement.
+  /// \brief Build an empty do-while statement.
   explicit DoStmt(EmptyShell Empty) : Stmt(DoStmtClass, Empty) {}
 
   Expr *getCond() { return reinterpret_cast<Expr*>(SubExprs[COND]); }
@@ -1235,10 +1188,8 @@ public:
   SourceLocation getRParenLoc() const { return RParenLoc; }
   void setRParenLoc(SourceLocation L) { RParenLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return DoLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return DoLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return RParenLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == DoStmtClass;
@@ -1264,12 +1215,12 @@ public:
           Expr *Inc, Stmt *Body, SourceLocation FL, SourceLocation LP,
           SourceLocation RP);
 
-  /// Build an empty for statement.
+  /// \brief Build an empty for statement.
   explicit ForStmt(EmptyShell Empty) : Stmt(ForStmtClass, Empty) {}
 
   Stmt *getInit() { return SubExprs[INIT]; }
 
-  /// Retrieve the variable declared in this "for" statement, if any.
+  /// \brief Retrieve the variable declared in this "for" statement, if any.
   ///
   /// In the following example, "y" is the condition variable.
   /// \code
@@ -1307,11 +1258,9 @@ public:
   SourceLocation getRParenLoc() const { return RParenLoc; }
   void setRParenLoc(SourceLocation L) { RParenLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return ForLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return ForLoc; }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     return SubExprs[BODY]->getLocEnd();
   }
 
@@ -1335,7 +1284,7 @@ public:
   GotoStmt(LabelDecl *label, SourceLocation GL, SourceLocation LL)
       : Stmt(GotoStmtClass), Label(label), GotoLoc(GL), LabelLoc(LL) {}
 
-  /// Build an empty goto statement.
+  /// \brief Build an empty goto statement.
   explicit GotoStmt(EmptyShell Empty) : Stmt(GotoStmtClass, Empty) {}
 
   LabelDecl *getLabel() const { return Label; }
@@ -1346,10 +1295,8 @@ public:
   SourceLocation getLabelLoc() const { return LabelLoc; }
   void setLabelLoc(SourceLocation L) { LabelLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return GotoLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return LabelLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return GotoLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return LabelLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == GotoStmtClass;
@@ -1373,7 +1320,7 @@ public:
     : Stmt(IndirectGotoStmtClass), GotoLoc(gotoLoc), StarLoc(starLoc),
       Target((Stmt*)target) {}
 
-  /// Build an empty indirect goto statement.
+  /// \brief Build an empty indirect goto statement.
   explicit IndirectGotoStmt(EmptyShell Empty)
       : Stmt(IndirectGotoStmtClass, Empty) {}
 
@@ -1393,10 +1340,8 @@ public:
     return const_cast<IndirectGotoStmt*>(this)->getConstantTarget();
   }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return GotoLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return Target->getLocEnd(); }
+  SourceLocation getLocStart() const LLVM_READONLY { return GotoLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return Target->getLocEnd(); }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == IndirectGotoStmtClass;
@@ -1413,16 +1358,14 @@ class ContinueStmt : public Stmt {
 public:
   ContinueStmt(SourceLocation CL) : Stmt(ContinueStmtClass), ContinueLoc(CL) {}
 
-  /// Build an empty continue statement.
+  /// \brief Build an empty continue statement.
   explicit ContinueStmt(EmptyShell Empty) : Stmt(ContinueStmtClass, Empty) {}
 
   SourceLocation getContinueLoc() const { return ContinueLoc; }
   void setContinueLoc(SourceLocation L) { ContinueLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return ContinueLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return ContinueLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return ContinueLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return ContinueLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == ContinueStmtClass;
@@ -1444,16 +1387,14 @@ public:
                   "BreakStmt too large");
   }
 
-  /// Build an empty break statement.
+  /// \brief Build an empty break statement.
   explicit BreakStmt(EmptyShell Empty) : Stmt(BreakStmtClass, Empty) {}
 
   SourceLocation getBreakLoc() const { return BreakLoc; }
   void setBreakLoc(SourceLocation L) { BreakLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return BreakLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return BreakLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return BreakLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return BreakLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == BreakStmtClass;
@@ -1485,7 +1426,7 @@ public:
       : Stmt(ReturnStmtClass), RetLoc(RL), RetExpr((Stmt *)E),
         NRVOCandidate(NRVOCandidate) {}
 
-  /// Build an empty return expression.
+  /// \brief Build an empty return expression.
   explicit ReturnStmt(EmptyShell Empty) : Stmt(ReturnStmtClass, Empty) {}
 
   const Expr *getRetValue() const;
@@ -1495,7 +1436,7 @@ public:
   SourceLocation getReturnLoc() const { return RetLoc; }
   void setReturnLoc(SourceLocation L) { RetLoc = L; }
 
-  /// Retrieve the variable that might be used for the named return
+  /// \brief Retrieve the variable that might be used for the named return
   /// value optimization.
   ///
   /// The optimization itself can only be performed if the variable is
@@ -1503,11 +1444,9 @@ public:
   const VarDecl *getNRVOCandidate() const { return NRVOCandidate; }
   void setNRVOCandidate(const VarDecl *Var) { NRVOCandidate = Var; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return RetLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return RetLoc; }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     return RetExpr ? RetExpr->getLocEnd() : RetLoc;
   }
 
@@ -1529,11 +1468,11 @@ protected:
 
   SourceLocation AsmLoc;
 
-  /// True if the assembly statement does not have any input or output
+  /// \brief True if the assembly statement does not have any input or output
   /// operands.
   bool IsSimple;
 
-  /// If true, treat this inline assembly as having side effects.
+  /// \brief If true, treat this inline assembly as having side effects.
   /// This assembly statement should not be optimized, deleted or moved.
   bool IsVolatile;
 
@@ -1550,7 +1489,7 @@ protected:
         NumClobbers(numclobbers) {}
 
 public:
-  /// Build an empty inline-assembly statement.
+  /// \brief Build an empty inline-assembly statement.
   explicit AsmStmt(StmtClass SC, EmptyShell Empty) : Stmt(SC, Empty) {}
 
   SourceLocation getAsmLoc() const { return AsmLoc; }
@@ -1562,10 +1501,8 @@ public:
   bool isVolatile() const { return IsVolatile; }
   void setVolatile(bool V) { IsVolatile = V; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return {}; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return {}; }
+  SourceLocation getLocStart() const LLVM_READONLY { return SourceLocation(); }
+  SourceLocation getLocEnd() const LLVM_READONLY { return SourceLocation(); }
 
   //===--- Asm String Analysis ---===//
 
@@ -1601,7 +1538,7 @@ public:
   /// getInputConstraint - Return the specified input constraint.  Unlike output
   /// constraints, these can be empty.
   StringRef getInputConstraint(unsigned i) const;
-
+  
   const Expr *getInputExpr(unsigned i) const;
 
   //===--- Other ---===//
@@ -1698,7 +1635,7 @@ public:
              StringLiteral *asmstr, unsigned numclobbers,
              StringLiteral **clobbers, SourceLocation rparenloc);
 
-  /// Build an empty inline-assembly statement.
+  /// \brief Build an empty inline-assembly statement.
   explicit GCCAsmStmt(EmptyShell Empty) : AsmStmt(GCCAsmStmtClass, Empty) {}
 
   SourceLocation getRParenLoc() const { return RParenLoc; }
@@ -1738,7 +1675,9 @@ public:
     bool isString() const { return MyKind == String; }
     bool isOperand() const { return MyKind == Operand; }
 
-    const std::string &getString() const { return Str; }
+    const std::string &getString() const {
+      return Str;
+    }
 
     unsigned getOperandNo() const {
       assert(isOperand());
@@ -1768,13 +1707,15 @@ public:
 
   //===--- Output operands ---===//
 
-  IdentifierInfo *getOutputIdentifier(unsigned i) const { return Names[i]; }
+  IdentifierInfo *getOutputIdentifier(unsigned i) const {
+    return Names[i];
+  }
 
   StringRef getOutputName(unsigned i) const {
     if (IdentifierInfo *II = getOutputIdentifier(i))
       return II->getName();
 
-    return {};
+    return StringRef();
   }
 
   StringRef getOutputConstraint(unsigned i) const;
@@ -1802,7 +1743,7 @@ public:
     if (IdentifierInfo *II = getInputIdentifier(i))
       return II->getName();
 
-    return {};
+    return StringRef();
   }
 
   StringRef getInputConstraint(unsigned i) const;
@@ -1846,10 +1787,8 @@ public:
     return Clobbers[i];
   }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return AsmLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return AsmLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return RParenLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == GCCAsmStmtClass;
@@ -1877,7 +1816,7 @@ public:
             ArrayRef<Expr*> exprs, StringRef asmstr,
             ArrayRef<StringRef> clobbers, SourceLocation endloc);
 
-  /// Build an empty MS-style inline-assembly statement.
+  /// \brief Build an empty MS-style inline-assembly statement.
   explicit MSAsmStmt(EmptyShell Empty) : AsmStmt(MSAsmStmtClass, Empty) {}
 
   SourceLocation getLBraceLoc() const { return LBraceLoc; }
@@ -1946,9 +1885,8 @@ private:
                   ArrayRef<Expr*> Exprs, ArrayRef<StringRef> Clobbers);
 
 public:
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return AsmLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
+  SourceLocation getLocStart() const LLVM_READONLY { return AsmLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return EndLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == MSAsmStmtClass;
@@ -1977,8 +1915,7 @@ public:
                                Expr *FilterExpr,
                                Stmt *Block);
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return getExceptLoc(); }
+  SourceLocation getLocStart() const LLVM_READONLY { return getExceptLoc(); }
   SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
 
   SourceLocation getExceptLoc() const { return Loc; }
@@ -1993,7 +1930,7 @@ public:
   }
 
   child_range children() {
-    return child_range(Children, Children+2);
+    return child_range(Children,Children+2);
   }
 
   static bool classof(const Stmt *T) {
@@ -2016,8 +1953,7 @@ public:
                                 SourceLocation FinallyLoc,
                                 Stmt *Block);
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return getFinallyLoc(); }
+  SourceLocation getLocStart() const LLVM_READONLY { return getFinallyLoc(); }
   SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
 
   SourceLocation getFinallyLoc() const { return Loc; }
@@ -2056,8 +1992,7 @@ public:
                             SourceLocation TryLoc, Stmt *TryBlock,
                             Stmt *Handler);
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return getTryLoc(); }
+  SourceLocation getLocStart() const LLVM_READONLY { return getTryLoc(); }
   SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
 
   SourceLocation getTryLoc() const { return TryLoc; }
@@ -2076,7 +2011,7 @@ public:
   SEHFinallyStmt *getFinallyHandler() const;
 
   child_range children() {
-    return child_range(Children, Children+2);
+    return child_range(Children,Children+2);
   }
 
   static bool classof(const Stmt *T) {
@@ -2092,16 +2027,14 @@ public:
   explicit SEHLeaveStmt(SourceLocation LL)
       : Stmt(SEHLeaveStmtClass), LeaveLoc(LL) {}
 
-  /// Build an empty __leave statement.
+  /// \brief Build an empty __leave statement.
   explicit SEHLeaveStmt(EmptyShell Empty) : Stmt(SEHLeaveStmtClass, Empty) {}
 
   SourceLocation getLeaveLoc() const { return LeaveLoc; }
   void setLeaveLoc(SourceLocation L) { LeaveLoc = L; }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY { return LeaveLoc; }
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY { return LeaveLoc; }
+  SourceLocation getLocStart() const LLVM_READONLY { return LeaveLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return LeaveLoc; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == SEHLeaveStmtClass;
@@ -2113,7 +2046,7 @@ public:
   }
 };
 
-/// This captures a statement into a function. For example, the following
+/// \brief This captures a statement into a function. For example, the following
 /// pragma annotated compound statement can be represented as a CapturedStmt,
 /// and this compound statement is the body of an anonymous outlined function.
 /// @code
@@ -2124,7 +2057,7 @@ public:
 /// @endcode
 class CapturedStmt : public Stmt {
 public:
-  /// The different capture forms: by 'this', by reference, capture for
+  /// \brief The different capture forms: by 'this', by reference, capture for
   /// variable-length array type etc.
   enum VariableCaptureKind {
     VCK_This,
@@ -2133,7 +2066,7 @@ public:
     VCK_VLAType,
   };
 
-  /// Describes the capture of either a variable, or 'this', or
+  /// \brief Describes the capture of either a variable, or 'this', or
   /// variable-length array type.
   class Capture {
     llvm::PointerIntPair<VarDecl *, 2, VariableCaptureKind> VarAndKind;
@@ -2142,7 +2075,7 @@ public:
   public:
     friend class ASTStmtReader;
 
-    /// Create a new capture.
+    /// \brief Create a new capture.
     ///
     /// \param Loc The source location associated with this capture.
     ///
@@ -2152,52 +2085,52 @@ public:
     Capture(SourceLocation Loc, VariableCaptureKind Kind,
             VarDecl *Var = nullptr);
 
-    /// Determine the kind of capture.
+    /// \brief Determine the kind of capture.
     VariableCaptureKind getCaptureKind() const;
 
-    /// Retrieve the source location at which the variable or 'this' was
+    /// \brief Retrieve the source location at which the variable or 'this' was
     /// first used.
     SourceLocation getLocation() const { return Loc; }
 
-    /// Determine whether this capture handles the C++ 'this' pointer.
+    /// \brief Determine whether this capture handles the C++ 'this' pointer.
     bool capturesThis() const { return getCaptureKind() == VCK_This; }
 
-    /// Determine whether this capture handles a variable (by reference).
+    /// \brief Determine whether this capture handles a variable (by reference).
     bool capturesVariable() const { return getCaptureKind() == VCK_ByRef; }
 
-    /// Determine whether this capture handles a variable by copy.
+    /// \brief Determine whether this capture handles a variable by copy.
     bool capturesVariableByCopy() const {
       return getCaptureKind() == VCK_ByCopy;
     }
 
-    /// Determine whether this capture handles a variable-length array
+    /// \brief Determine whether this capture handles a variable-length array
     /// type.
     bool capturesVariableArrayType() const {
       return getCaptureKind() == VCK_VLAType;
     }
 
-    /// Retrieve the declaration of the variable being captured.
+    /// \brief Retrieve the declaration of the variable being captured.
     ///
     /// This operation is only valid if this capture captures a variable.
     VarDecl *getCapturedVar() const;
   };
 
 private:
-  /// The number of variable captured, including 'this'.
+  /// \brief The number of variable captured, including 'this'.
   unsigned NumCaptures;
 
-  /// The pointer part is the implicit the outlined function and the
+  /// \brief The pointer part is the implicit the outlined function and the 
   /// int part is the captured region kind, 'CR_Default' etc.
-  llvm::PointerIntPair<CapturedDecl *, 2, CapturedRegionKind> CapDeclAndKind;
+  llvm::PointerIntPair<CapturedDecl *, 1, CapturedRegionKind> CapDeclAndKind;
 
-  /// The record for captured variables, a RecordDecl or CXXRecordDecl.
+  /// \brief The record for captured variables, a RecordDecl or CXXRecordDecl.
   RecordDecl *TheRecordDecl = nullptr;
 
-  /// Construct a captured statement.
+  /// \brief Construct a captured statement.
   CapturedStmt(Stmt *S, CapturedRegionKind Kind, ArrayRef<Capture> Captures,
                ArrayRef<Expr *> CaptureInits, CapturedDecl *CD, RecordDecl *RD);
 
-  /// Construct an empty captured statement.
+  /// \brief Construct an empty captured statement.
   CapturedStmt(EmptyShell Empty, unsigned NumCaptures);
 
   Stmt **getStoredStmts() { return reinterpret_cast<Stmt **>(this + 1); }
@@ -2222,36 +2155,36 @@ public:
   static CapturedStmt *CreateDeserialized(const ASTContext &Context,
                                           unsigned NumCaptures);
 
-  /// Retrieve the statement being captured.
+  /// \brief Retrieve the statement being captured.
   Stmt *getCapturedStmt() { return getStoredStmts()[NumCaptures]; }
   const Stmt *getCapturedStmt() const { return getStoredStmts()[NumCaptures]; }
 
-  /// Retrieve the outlined function declaration.
+  /// \brief Retrieve the outlined function declaration.
   CapturedDecl *getCapturedDecl();
   const CapturedDecl *getCapturedDecl() const;
 
-  /// Set the outlined function declaration.
+  /// \brief Set the outlined function declaration.
   void setCapturedDecl(CapturedDecl *D);
 
-  /// Retrieve the captured region kind.
+  /// \brief Retrieve the captured region kind.
   CapturedRegionKind getCapturedRegionKind() const;
 
-  /// Set the captured region kind.
+  /// \brief Set the captured region kind.
   void setCapturedRegionKind(CapturedRegionKind Kind);
 
-  /// Retrieve the record declaration for captured variables.
+  /// \brief Retrieve the record declaration for captured variables.
   const RecordDecl *getCapturedRecordDecl() const { return TheRecordDecl; }
 
-  /// Set the record declaration for captured variables.
+  /// \brief Set the record declaration for captured variables.
   void setCapturedRecordDecl(RecordDecl *D) {
     assert(D && "null RecordDecl");
     TheRecordDecl = D;
   }
 
-  /// True if this variable has been captured.
+  /// \brief True if this variable has been captured.
   bool capturesVariable(const VarDecl *Var) const;
 
-  /// An iterator that walks over the captures.
+  /// \brief An iterator that walks over the captures.
   using capture_iterator = Capture *;
   using const_capture_iterator = const Capture *;
   using capture_range = llvm::iterator_range<capture_iterator>;
@@ -2264,24 +2197,24 @@ public:
     return capture_const_range(capture_begin(), capture_end());
   }
 
-  /// Retrieve an iterator pointing to the first capture.
+  /// \brief Retrieve an iterator pointing to the first capture.
   capture_iterator capture_begin() { return getStoredCaptures(); }
   const_capture_iterator capture_begin() const { return getStoredCaptures(); }
 
-  /// Retrieve an iterator pointing past the end of the sequence of
+  /// \brief Retrieve an iterator pointing past the end of the sequence of
   /// captures.
   capture_iterator capture_end() const {
     return getStoredCaptures() + NumCaptures;
   }
 
-  /// Retrieve the number of captures, including 'this'.
+  /// \brief Retrieve the number of captures, including 'this'.
   unsigned capture_size() const { return NumCaptures; }
 
-  /// Iterator that walks over the capture initialization arguments.
+  /// \brief Iterator that walks over the capture initialization arguments.
   using capture_init_iterator = Expr **;
   using capture_init_range = llvm::iterator_range<capture_init_iterator>;
 
-  /// Const iterator that walks over the capture initialization
+  /// \brief Const iterator that walks over the capture initialization
   /// arguments.
   using const_capture_init_iterator = Expr *const *;
   using const_capture_init_range =
@@ -2295,7 +2228,7 @@ public:
     return const_capture_init_range(capture_init_begin(), capture_init_end());
   }
 
-  /// Retrieve the first initialization argument.
+  /// \brief Retrieve the first initialization argument.
   capture_init_iterator capture_init_begin() {
     return reinterpret_cast<Expr **>(getStoredStmts());
   }
@@ -2304,7 +2237,7 @@ public:
     return reinterpret_cast<Expr *const *>(getStoredStmts());
   }
 
-  /// Retrieve the iterator pointing one past the last initialization
+  /// \brief Retrieve the iterator pointing one past the last initialization
   /// argument.
   capture_init_iterator capture_init_end() {
     return capture_init_begin() + NumCaptures;
@@ -2314,13 +2247,11 @@ public:
     return capture_init_begin() + NumCaptures;
   }
 
-  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
-  SourceLocation getBeginLoc() const LLVM_READONLY {
+  SourceLocation getLocStart() const LLVM_READONLY {
     return getCapturedStmt()->getLocStart();
   }
 
-  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
-  SourceLocation getEndLoc() const LLVM_READONLY {
+  SourceLocation getLocEnd() const LLVM_READONLY {
     return getCapturedStmt()->getLocEnd();
   }
 

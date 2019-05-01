@@ -63,7 +63,7 @@ private:
   private:
     Triple::ArchType Arch;
     AMDGPUAS AS;
-    const AliasResult (*ASAliasRules)[7][7];
+    const AliasResult (*ASAliasRules)[6][6];
   } ASAliasRules;
 };
 
