@@ -261,7 +261,7 @@ public:
   }
 
 private:
-  SmallVector<BoundNodesMap, 1> Bindings;
+  SmallVector<BoundNodesMap, 16> Bindings;
 };
 
 class ASTMatchFinder;

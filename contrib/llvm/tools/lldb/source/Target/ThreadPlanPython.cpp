@@ -9,7 +9,12 @@
 
 #include "lldb/Target/ThreadPlan.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/Debugger.h"
+#include "lldb/Core/State.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/ScriptInterpreter.h"
 #include "lldb/Target/Process.h"
@@ -19,7 +24,6 @@
 #include "lldb/Target/ThreadPlan.h"
 #include "lldb/Target/ThreadPlanPython.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -31,7 +35,7 @@ using namespace lldb_private;
 ThreadPlanPython::ThreadPlanPython(Thread &thread, const char *class_name)
     : ThreadPlan(ThreadPlan::eKindPython, "Python based Thread Plan", thread,
                  eVoteNoOpinion, eVoteNoOpinion),
-      m_class_name(class_name), m_did_push(false) {
+      m_class_name(class_name) {
   SetIsMasterPlan(true);
   SetOkayToDiscard(true);
   SetPrivate(false);
@@ -43,22 +47,20 @@ ThreadPlanPython::~ThreadPlanPython() {
 }
 
 bool ThreadPlanPython::ValidatePlan(Stream *error) {
-  if (!m_did_push)
+  // I have to postpone setting up the implementation till after the constructor
+  // because I need to call
+  // shared_from_this, which you can't do in the constructor.  So I'll do it
+  // here.
+  if (m_implementation_sp)
     return true;
-
-  if (!m_implementation_sp) {
-    if (error)
-      error->Printf("Python thread plan does not have an implementation");
+  else
     return false;
-  }
-
-  return true;
 }
 
 void ThreadPlanPython::DidPush() {
   // We set up the script side in DidPush, so that it can push other plans in
   // the constructor, and doesn't have to care about the details of DidPush.
-  m_did_push = true;
+
   if (!m_class_name.empty()) {
     ScriptInterpreter *script_interp = m_thread.GetProcess()
                                            ->GetTarget()

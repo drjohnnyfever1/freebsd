@@ -24,8 +24,7 @@ enum class CudaVersion {
   CUDA_90,
   CUDA_91,
   CUDA_92,
-  CUDA_100,
-  LATEST = CUDA_100,
+  LATEST = CUDA_92,
 };
 const char *CudaVersionToString(CudaVersion V);
 
@@ -48,7 +47,6 @@ enum class CudaArch {
   SM_62,
   SM_70,
   SM_72,
-  SM_75,
   GFX600,
   GFX601,
   GFX700,
@@ -62,9 +60,6 @@ enum class CudaArch {
   GFX810,
   GFX900,
   GFX902,
-  GFX904,
-  GFX906,
-  GFX909,
   LAST,
 };
 const char *CudaArchToString(CudaArch A);
@@ -87,7 +82,6 @@ enum class CudaVirtualArch {
   COMPUTE_62,
   COMPUTE_70,
   COMPUTE_72,
-  COMPUTE_75,
   COMPUTE_AMDGCN,
 };
 const char *CudaVirtualArchToString(CudaVirtualArch A);

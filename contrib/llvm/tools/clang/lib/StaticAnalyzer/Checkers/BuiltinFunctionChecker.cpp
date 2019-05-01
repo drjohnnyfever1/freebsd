@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
@@ -101,10 +101,9 @@ bool BuiltinFunctionChecker::evalCall(const CallExpr *CE,
     // This must be resolvable at compile time, so we defer to the constant
     // evaluator for a value.
     SVal V = UnknownVal();
-    Expr::EvalResult EVResult;
-    if (CE->EvaluateAsInt(EVResult, C.getASTContext(), Expr::SE_NoSideEffects)) {
+    llvm::APSInt Result;
+    if (CE->EvaluateAsInt(Result, C.getASTContext(), Expr::SE_NoSideEffects)) {
       // Make sure the result has the correct type.
-      llvm::APSInt Result = EVResult.Val.getInt();
       SValBuilder &SVB = C.getSValBuilder();
       BasicValueFactory &BVF = SVB.getBasicValueFactory();
       BVF.getAPSIntType(CE->getType()).apply(Result);

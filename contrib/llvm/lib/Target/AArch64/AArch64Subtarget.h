@@ -56,8 +56,7 @@ public:
     ThunderX,
     ThunderXT81,
     ThunderXT83,
-    ThunderXT88,
-    TSV110
+    ThunderXT88
   };
 
 protected:
@@ -68,7 +67,6 @@ protected:
   bool HasV8_2aOps = false;
   bool HasV8_3aOps = false;
   bool HasV8_4aOps = false;
-  bool HasV8_5aOps = false;
 
   bool HasFPARMv8 = false;
   bool HasNEON = false;
@@ -80,36 +78,8 @@ protected:
   bool HasRDM = false;
   bool HasPerfMon = false;
   bool HasFullFP16 = false;
-  bool HasFP16FML = false;
   bool HasSPE = false;
 
-  // ARMv8.1 extensions
-  bool HasVH = false;
-  bool HasPAN = false;
-  bool HasLOR = false;
-
-  // ARMv8.2 extensions
-  bool HasPsUAO = false;
-  bool HasPAN_RWV = false;
-  bool HasCCPP = false;
-
-  // ARMv8.3 extensions
-  bool HasPA = false;
-  bool HasJS = false;
-  bool HasCCIDX = false;
-  bool HasComplxNum = false;
-
-  // ARMv8.4 extensions
-  bool HasNV = false;
-  bool HasRASv8_4 = false;
-  bool HasMPAM = false;
-  bool HasDIT = false;
-  bool HasTRACEV8_4 = false;
-  bool HasAM = false;
-  bool HasSEL2 = false;
-  bool HasTLB_RMI = false;
-  bool HasFMI = false;
-  bool HasRCPC_IMMO = false;
   // ARMv8.4 Crypto extensions
   bool HasSM4 = true;
   bool HasSHA3 = true;
@@ -122,25 +92,11 @@ protected:
   bool HasRCPC = false;
   bool HasAggressiveFMA = false;
 
-  // Armv8.5-A Extensions
-  bool HasAlternativeNZCV = false;
-  bool HasFRInt3264 = false;
-  bool HasSpecRestrict = false;
-  bool HasSSBS = false;
-  bool HasSB = false;
-  bool HasPredRes = false;
-  bool HasCCDP = false;
-  bool HasBTI = false;
-  bool HasRandGen = false;
-  bool HasMTE = false;
-
   // HasZeroCycleRegMove - Has zero-cycle register mov instructions.
   bool HasZeroCycleRegMove = false;
 
   // HasZeroCycleZeroing - Has zero-cycle zeroing instructions.
   bool HasZeroCycleZeroing = false;
-  bool HasZeroCycleZeroingGP = false;
-  bool HasZeroCycleZeroingFP = false;
   bool HasZeroCycleZeroingFPWorkaround = false;
 
   // StrictAlign - Disallow unaligned memory accesses.
@@ -166,13 +122,10 @@ protected:
   bool HasArithmeticCbzFusion = false;
   bool HasFuseAddress = false;
   bool HasFuseAES = false;
-  bool HasFuseArithmeticLogic = false;
   bool HasFuseCCSelect = false;
-  bool HasFuseCryptoEOR = false;
   bool HasFuseLiterals = false;
   bool DisableLatencySchedHeuristic = false;
   bool UseRSqrt = false;
-  bool Force32BitJumpTables = false;
   uint8_t MaxInterleaveFactor = 2;
   uint8_t VectorInsertExtractBaseCost = 3;
   uint16_t CacheLineSize = 0;
@@ -184,11 +137,11 @@ protected:
   unsigned MaxJumpTableSize = 0;
   unsigned WideningBaseCost = 0;
 
-  // ReserveXRegister[i] - X#i is not available as a general purpose register.
-  BitVector ReserveXRegister;
+  // ReserveX18 - X18 is not available as a general purpose register.
+  bool ReserveX18;
 
-  // CustomCallUsedXRegister[i] - X#i call saved.
-  BitVector CustomCallSavedXRegs;
+  // ReserveX20 - X20 is not available as a general purpose register.
+  bool ReserveX20 = false;
 
   bool IsLittle;
 
@@ -258,13 +211,10 @@ public:
   bool hasV8_2aOps() const { return HasV8_2aOps; }
   bool hasV8_3aOps() const { return HasV8_3aOps; }
   bool hasV8_4aOps() const { return HasV8_4aOps; }
-  bool hasV8_5aOps() const { return HasV8_5aOps; }
 
   bool hasZeroCycleRegMove() const { return HasZeroCycleRegMove; }
 
-  bool hasZeroCycleZeroingGP() const { return HasZeroCycleZeroingGP; }
-
-  bool hasZeroCycleZeroingFP() const { return HasZeroCycleZeroingFP; }
+  bool hasZeroCycleZeroing() const { return HasZeroCycleZeroing; }
 
   bool hasZeroCycleZeroingFPWorkaround() const {
     return HasZeroCycleZeroingFPWorkaround;
@@ -278,12 +228,8 @@ public:
     return MinVectorRegisterBitWidth;
   }
 
-  bool isXRegisterReserved(size_t i) const { return ReserveXRegister[i]; }
-  unsigned getNumXRegisterReserved() const { return ReserveXRegister.count(); }
-  bool isXRegCustomCalleeSaved(size_t i) const {
-    return CustomCallSavedXRegs[i];
-  }
-  bool hasCustomCallingConv() const { return CustomCallSavedXRegs.any(); }
+  bool isX18Reserved() const { return ReserveX18; }
+  bool isX20Reserved() const { return ReserveX20; }
   bool hasFPARMv8() const { return HasFPARMv8; }
   bool hasNEON() const { return HasNEON; }
   bool hasCrypto() const { return HasCrypto; }
@@ -312,20 +258,16 @@ public:
   bool hasArithmeticCbzFusion() const { return HasArithmeticCbzFusion; }
   bool hasFuseAddress() const { return HasFuseAddress; }
   bool hasFuseAES() const { return HasFuseAES; }
-  bool hasFuseArithmeticLogic() const { return HasFuseArithmeticLogic; }
   bool hasFuseCCSelect() const { return HasFuseCCSelect; }
-  bool hasFuseCryptoEOR() const { return HasFuseCryptoEOR; }
   bool hasFuseLiterals() const { return HasFuseLiterals; }
 
   /// Return true if the CPU supports any kind of instruction fusion.
   bool hasFusion() const {
     return hasArithmeticBccFusion() || hasArithmeticCbzFusion() ||
-           hasFuseAES() || hasFuseArithmeticLogic() ||
-           hasFuseCCSelect() || hasFuseLiterals();
+           hasFuseAES() || hasFuseCCSelect() || hasFuseLiterals();
   }
 
   bool useRSqrt() const { return UseRSqrt; }
-  bool force32BitJumpTables() const { return Force32BitJumpTables; }
   unsigned getMaxInterleaveFactor() const { return MaxInterleaveFactor; }
   unsigned getVectorInsertExtractBaseCost() const {
     return VectorInsertExtractBaseCost;
@@ -349,22 +291,11 @@ public:
 
   bool hasPerfMon() const { return HasPerfMon; }
   bool hasFullFP16() const { return HasFullFP16; }
-  bool hasFP16FML() const { return HasFP16FML; }
   bool hasSPE() const { return HasSPE; }
   bool hasLSLFast() const { return HasLSLFast; }
   bool hasSVE() const { return HasSVE; }
   bool hasRCPC() const { return HasRCPC; }
   bool hasAggressiveFMA() const { return HasAggressiveFMA; }
-  bool hasAlternativeNZCV() const { return HasAlternativeNZCV; }
-  bool hasFRInt3264() const { return HasFRInt3264; }
-  bool hasSpecRestrict() const { return HasSpecRestrict; }
-  bool hasSSBS() const { return HasSSBS; }
-  bool hasSB() const { return HasSB; }
-  bool hasPredRes() const { return HasPredRes; }
-  bool hasCCDP() const { return HasCCDP; }
-  bool hasBTI() const { return HasBTI; }
-  bool hasRandGen() const { return HasRandGen; }
-  bool hasMTE() const { return HasMTE; }
 
   bool isLittleEndian() const { return IsLittle; }
 
@@ -380,30 +311,6 @@ public:
   bool isTargetMachO() const { return TargetTriple.isOSBinFormatMachO(); }
 
   bool useAA() const override { return UseAA; }
-
-  bool hasVH() const { return HasVH; }
-  bool hasPAN() const { return HasPAN; }
-  bool hasLOR() const { return HasLOR; }
-
-  bool hasPsUAO() const { return HasPsUAO; }
-  bool hasPAN_RWV() const { return HasPAN_RWV; }
-  bool hasCCPP() const { return HasCCPP; }
-
-  bool hasPA() const { return HasPA; }
-  bool hasJS() const { return HasJS; }
-  bool hasCCIDX() const { return HasCCIDX; }
-  bool hasComplxNum() const { return HasComplxNum; }
-
-  bool hasNV() const { return HasNV; }
-  bool hasRASv8_4() const { return HasRASv8_4; }
-  bool hasMPAM() const { return HasMPAM; }
-  bool hasDIT() const { return HasDIT; }
-  bool hasTRACEV8_4() const { return HasTRACEV8_4; }
-  bool hasAM() const { return HasAM; }
-  bool hasSEL2() const { return HasSEL2; }
-  bool hasTLB_RMI() const { return HasTLB_RMI; }
-  bool hasFMI() const { return HasFMI; }
-  bool hasRCPC_IMMO() const { return HasRCPC_IMMO; }
 
   bool useSmallAddressing() const {
     switch (TLInfo.getTargetMachine().getCodeModel()) {
@@ -439,8 +346,6 @@ public:
   bool isCallingConvWin64(CallingConv::ID CC) const {
     switch (CC) {
     case CallingConv::C:
-    case CallingConv::Fast:
-    case CallingConv::Swift:
       return isTargetWindows();
     case CallingConv::Win64:
       return true;

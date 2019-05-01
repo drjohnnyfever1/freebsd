@@ -40,7 +40,7 @@ class OProfileJITEventListener : public JITEventListener {
   std::unique_ptr<OProfileWrapper> Wrapper;
 
   void initialize();
-  std::map<ObjectKey, OwningBinary<ObjectFile>> DebugObjects;
+  std::map<const char*, OwningBinary<ObjectFile>> DebugObjects;
 
 public:
   OProfileJITEventListener(std::unique_ptr<OProfileWrapper> LibraryWrapper)
@@ -50,10 +50,10 @@ public:
 
   ~OProfileJITEventListener();
 
-  void notifyObjectLoaded(ObjectKey Key, const ObjectFile &Obj,
-                          const RuntimeDyld::LoadedObjectInfo &L) override;
+  void NotifyObjectEmitted(const ObjectFile &Obj,
+                           const RuntimeDyld::LoadedObjectInfo &L) override;
 
-  void notifyFreeingObject(ObjectKey Key) override;
+  void NotifyFreeingObject(const ObjectFile &Obj) override;
 };
 
 void OProfileJITEventListener::initialize() {
@@ -78,9 +78,9 @@ OProfileJITEventListener::~OProfileJITEventListener() {
   }
 }
 
-void OProfileJITEventListener::notifyObjectLoaded(
-    ObjectKey Key, const ObjectFile &Obj,
-    const RuntimeDyld::LoadedObjectInfo &L) {
+void OProfileJITEventListener::NotifyObjectEmitted(
+                                       const ObjectFile &Obj,
+                                       const RuntimeDyld::LoadedObjectInfo &L) {
   if (!Wrapper->isAgentAvailable()) {
     return;
   }
@@ -137,18 +137,18 @@ void OProfileJITEventListener::notifyObjectLoaded(
     }
   }
 
-  DebugObjects[Key] = std::move(DebugObjOwner);
+  DebugObjects[Obj.getData().data()] = std::move(DebugObjOwner);
 }
 
-void OProfileJITEventListener::notifyFreeingObject(ObjectKey Key) {
+void OProfileJITEventListener::NotifyFreeingObject(const ObjectFile &Obj) {
   if (Wrapper->isAgentAvailable()) {
 
     // If there was no agent registered when the original object was loaded then
     // we won't have created a debug object for it, so bail out.
-    if (DebugObjects.find(Key) == DebugObjects.end())
+    if (DebugObjects.find(Obj.getData().data()) == DebugObjects.end())
       return;
 
-    const ObjectFile &DebugObj = *DebugObjects[Key].getBinary();
+    const ObjectFile &DebugObj = *DebugObjects[Obj.getData().data()].getBinary();
 
     // Use symbol info to iterate functions in the object.
     for (symbol_iterator I = DebugObj.symbol_begin(),
@@ -171,7 +171,7 @@ void OProfileJITEventListener::notifyFreeingObject(ObjectKey Key) {
     }
   }
 
-  DebugObjects.erase(Key);
+  DebugObjects.erase(Obj.getData().data());
 }
 
 }  // anonymous namespace.

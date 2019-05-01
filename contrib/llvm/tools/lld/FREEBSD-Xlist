@@ -1,6 +1,7 @@
 # $FreeBSD$
 MinGW/
 cmake/
+docs/
 test/
 unittests/
 utils/

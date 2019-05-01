@@ -57,6 +57,8 @@ public:
                              const VirtRegMap *VRM,
                              const LiveRegMatrix *Matrix) const override;
 
+  bool enableMultipleCopyHints() const override { return true; }
+
   // Override TargetRegisterInfo.h.
   bool requiresRegisterScavenging(const MachineFunction &MF) const override {
     return true;

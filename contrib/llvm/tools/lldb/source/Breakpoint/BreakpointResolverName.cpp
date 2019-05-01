@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointResolverName.h"
 
 #include "Plugins/Language/CPlusPlus/CPlusPlusLanguage.h"
@@ -26,7 +30,7 @@ using namespace lldb;
 using namespace lldb_private;
 
 BreakpointResolverName::BreakpointResolverName(
-    Breakpoint *bkpt, const char *name_cstr, FunctionNameType name_type_mask,
+    Breakpoint *bkpt, const char *name_cstr, uint32_t name_type_mask,
     LanguageType language, Breakpoint::MatchType type, lldb::addr_t offset,
     bool skip_prologue)
     : BreakpointResolver(bkpt, BreakpointResolver::NameResolver, offset),
@@ -47,7 +51,7 @@ BreakpointResolverName::BreakpointResolverName(
 
 BreakpointResolverName::BreakpointResolverName(
     Breakpoint *bkpt, const char *names[], size_t num_names,
-    FunctionNameType name_type_mask, LanguageType language, lldb::addr_t offset,
+    uint32_t name_type_mask, LanguageType language, lldb::addr_t offset,
     bool skip_prologue)
     : BreakpointResolver(bkpt, BreakpointResolver::NameResolver, offset),
       m_match_type(Breakpoint::Exact), m_language(language),
@@ -57,12 +61,9 @@ BreakpointResolverName::BreakpointResolverName(
   }
 }
 
-BreakpointResolverName::BreakpointResolverName(Breakpoint *bkpt,
-                                               std::vector<std::string> names,
-                                               FunctionNameType name_type_mask,
-                                               LanguageType language,
-                                               lldb::addr_t offset,
-                                               bool skip_prologue)
+BreakpointResolverName::BreakpointResolverName(
+    Breakpoint *bkpt, std::vector<std::string> names, uint32_t name_type_mask,
+    LanguageType language, lldb::addr_t offset, bool skip_prologue)
     : BreakpointResolver(bkpt, BreakpointResolver::NameResolver, offset),
       m_match_type(Breakpoint::Exact), m_language(language),
       m_skip_prologue(skip_prologue) {
@@ -160,8 +161,9 @@ BreakpointResolver *BreakpointResolverName::CreateFromStructuredData(
       return nullptr;
     }
     std::vector<std::string> names;
-    std::vector<FunctionNameType> name_masks;
+    std::vector<uint32_t> name_masks;
     for (size_t i = 0; i < num_elem; i++) {
+      uint32_t name_mask;
       llvm::StringRef name;
 
       success = names_array->GetItemAtIndexAsString(i, name);
@@ -169,14 +171,13 @@ BreakpointResolver *BreakpointResolverName::CreateFromStructuredData(
         error.SetErrorString("BRN::CFSD: name entry is not a string.");
         return nullptr;
       }
-      std::underlying_type<FunctionNameType>::type fnt;
-      success = names_mask_array->GetItemAtIndexAsInteger(i, fnt);
+      success = names_mask_array->GetItemAtIndexAsInteger(i, name_mask);
       if (!success) {
         error.SetErrorString("BRN::CFSD: name mask entry is not an integer.");
         return nullptr;
       }
       names.push_back(name);
-      name_masks.push_back(static_cast<FunctionNameType>(fnt));
+      name_masks.push_back(name_mask);
     }
 
     BreakpointResolverName *resolver = new BreakpointResolverName(
@@ -219,7 +220,7 @@ StructuredData::ObjectSP BreakpointResolverName::SerializeToStructuredData() {
 }
 
 void BreakpointResolverName::AddNameLookup(const ConstString &name,
-                                           FunctionNameType name_type_mask) {
+                                           uint32_t name_type_mask) {
   ObjCLanguage::MethodName objc_method(name.GetCString(), false);
   if (objc_method.IsValid(false)) {
     std::vector<ConstString> objc_names;
@@ -395,8 +396,8 @@ BreakpointResolverName::SearchCallback(SearchFilter &filter,
   return Searcher::eCallbackReturnContinue;
 }
 
-lldb::SearchDepth BreakpointResolverName::GetDepth() {
-  return lldb::eSearchDepthModule;
+Searcher::Depth BreakpointResolverName::GetDepth() {
+  return Searcher::eDepthModule;
 }
 
 void BreakpointResolverName::GetDescription(Stream *s) {

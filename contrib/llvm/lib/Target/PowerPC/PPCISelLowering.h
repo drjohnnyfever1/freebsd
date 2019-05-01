@@ -149,10 +149,6 @@ namespace llvm {
       /// For vector types, only the last n bits are used. See vsld.
       SRL, SRA, SHL,
 
-      /// EXTSWSLI = The PPC extswsli instruction, which does an extend-sign
-      /// word and shift left immediate.
-      EXTSWSLI,
-
       /// The combination of sra[wd]i and addze used to implemented signed
       /// integer division by a power of 2. The first operand is the dividend,
       /// and the second is the constant shift amount (representing the
@@ -373,21 +369,6 @@ namespace llvm {
       /// An SDNode for swaps that are not associated with any loads/stores
       /// and thereby have no chain.
       SWAP_NO_CHAIN,
-      
-      /// An SDNode for Power9 vector absolute value difference.
-      /// operand #0 vector
-      /// operand #1 vector
-      /// operand #2 constant i32 0 or 1, to indicate whether needs to patch
-      /// the most significant bit for signed i32
-      ///
-      /// Power9 VABSD* instructions are designed to support unsigned integer
-      /// vectors (byte/halfword/word), if we want to make use of them for signed
-      /// integer vectors, we have to flip their sign bits first. To flip sign bit
-      /// for byte/halfword integer vector would become inefficient, but for word
-      /// integer vector, we can leverage XVNEGSP to make it efficiently. eg:
-      /// abs(sub(a,b)) => VABSDUW(a+0x80000000, b+0x80000000) 
-      ///               => VABSDUW((XVNEGSP a), (XVNEGSP b))
-      VABSD,
 
       /// QVFPERM = This corresponds to the QPX qvfperm instruction.
       QVFPERM,
@@ -576,11 +557,6 @@ namespace llvm {
     /// DAG node.
     const char *getTargetNodeName(unsigned Opcode) const override;
 
-    bool isSelectSupported(SelectSupportKind Kind) const override {
-      // PowerPC does not support scalar condition selects on vectors.
-      return (Kind != SelectSupportKind::ScalarCondVectorVal);
-    }
-
     /// getPreferredVectorAction - The code we generate when vector types are
     /// legalized by promoting the integer element type is often much worse
     /// than code we generate if we widen the type for applicable vector types.
@@ -589,7 +565,7 @@ namespace llvm {
     /// of v4i8's and shuffle them. This will turn into a mess of 8 extending
     /// loads, moves back into VSR's (or memory ops if we don't have moves) and
     /// then the VPERM for the shuffle. All in all a very slow sequence.
-    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(MVT VT)
+    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(EVT VT)
       const override {
       if (VT.getScalarSizeInBits() % 8 == 0)
         return TypeWidenVector;
@@ -809,9 +785,6 @@ namespace llvm {
       return true;
     }
 
-    // Returns true if the address of the global is stored in TOC entry.
-    bool isAccessedAsGotIndirect(SDValue N) const;
-
     bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
 
     bool getTgtMemIntrinsic(IntrinsicInfo &Info,
@@ -950,9 +923,6 @@ namespace llvm {
     SDValue LowerINT_TO_FPDirectMove(SDValue Op, SelectionDAG &DAG,
                                      const SDLoc &dl) const;
 
-    SDValue LowerINT_TO_FPVector(SDValue Op, SelectionDAG &DAG,
-                                 const SDLoc &dl) const;
-
     SDValue getFramePointerFrameIndex(SelectionDAG & DAG) const;
     SDValue getReturnAddrFrameIndex(SelectionDAG & DAG) const;
 
@@ -1018,7 +988,6 @@ namespace llvm {
     SDValue LowerSCALAR_TO_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerMUL(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerABS(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue LowerVectorLoad(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVectorStore(SDValue Op, SelectionDAG &DAG) const;
@@ -1119,11 +1088,6 @@ namespace llvm {
     SDValue combineSHL(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSRA(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineSRL(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue combineADD(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue combineTRUNCATE(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue combineSetCC(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue combineABS(SDNode *N, DAGCombinerInfo &DCI) const;
-    SDValue combineVSelect(SDNode *N, DAGCombinerInfo &DCI) const;
 
     /// ConvertSETCCToSubtract - looks at SETCC that compares ints. It replaces
     /// SETCC with integer subtraction when (1) there is a legal way of doing it
@@ -1158,7 +1122,6 @@ namespace llvm {
     // tail call. This will cause the optimizers to attempt to move, or
     // duplicate return instructions to help enable tail call optimizations.
     bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
-    bool hasBitPreservingFPLogic(EVT VT) const override;
     bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const override;
   }; // end class PPCTargetLowering
 

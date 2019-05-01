@@ -10,6 +10,8 @@
 #ifndef liblldb_Platform_h_
 #define liblldb_Platform_h_
 
+// C Includes
+// C++ Includes
 #include <functional>
 #include <map>
 #include <memory>
@@ -17,6 +19,8 @@
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Core/UserSettingsController.h"
 #include "lldb/Interpreter/Options.h"
@@ -1127,6 +1131,10 @@ public:
 
   llvm::ArrayRef<OptionDefinition> GetDefinitions() override;
 
+  // Options table: Required for subclasses of Options.
+
+  static lldb_private::OptionDefinition g_option_table[];
+
   // Instance variables to hold the values for command options.
 
   bool m_rsync;
@@ -1152,6 +1160,10 @@ public:
 
   llvm::ArrayRef<OptionDefinition> GetDefinitions() override;
 
+  // Options table: Required for subclasses of Options.
+
+  static lldb_private::OptionDefinition g_option_table[];
+
   // Instance variables to hold the values for command options.
 
   bool m_ssh;
@@ -1174,6 +1186,10 @@ public:
   void OptionParsingStarting(ExecutionContext *execution_context) override;
 
   llvm::ArrayRef<OptionDefinition> GetDefinitions() override;
+
+  // Options table: Required for subclasses of Options.
+
+  static lldb_private::OptionDefinition g_option_table[];
 
   // Instance variables to hold the values for command options.
 

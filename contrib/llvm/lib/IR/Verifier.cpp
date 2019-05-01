@@ -65,6 +65,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Comdat.h"
 #include "llvm/IR/Constant.h"
@@ -139,18 +140,19 @@ private:
   }
 
   void Write(const Value *V) {
-    if (V)
-      Write(*V);
-  }
-
-  void Write(const Value &V) {
+    if (!V)
+      return;
     if (isa<Instruction>(V)) {
-      V.print(*OS, MST);
+      V->print(*OS, MST);
       *OS << '\n';
     } else {
-      V.printAsOperand(*OS, true, MST);
+      V->printAsOperand(*OS, true, MST);
       *OS << '\n';
     }
+  }
+
+  void Write(ImmutableCallSite CS) {
+    Write(CS.getInstruction());
   }
 
   void Write(const Metadata *MD) {
@@ -279,16 +281,13 @@ class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   /// Whether the current function has a DISubprogram attached to it.
   bool HasDebugInfo = false;
 
-  /// Whether source was present on the first DIFile encountered in each CU.
-  DenseMap<const DICompileUnit *, bool> HasSourceDebugInfo;
-
   /// Stores the count of how many objects were passed to llvm.localescape for a
   /// given function and the largest index passed to llvm.localrecover.
   DenseMap<Function *, std::pair<unsigned, unsigned>> FrameEscapeInfo;
 
   // Maps catchswitches and cleanuppads that unwind to siblings to the
   // terminators that indicate the unwind, used to detect cycles therein.
-  MapVector<Instruction *, Instruction *> SiblingFuncletInfo;
+  MapVector<Instruction *, TerminatorInst *> SiblingFuncletInfo;
 
   /// Cache of constants visited in search of ConstantExprs.
   SmallPtrSet<const Constant *, 32> ConstantExprVisited;
@@ -384,7 +383,6 @@ public:
 
     visitModuleFlags(M);
     visitModuleIdents(M);
-    visitModuleCommandLines(M);
 
     verifyCompileUnits();
 
@@ -407,7 +405,6 @@ private:
   void visitValueAsMetadata(const ValueAsMetadata &MD, Function *F);
   void visitComdat(const Comdat &C);
   void visitModuleIdents(const Module &M);
-  void visitModuleCommandLines(const Module &M);
   void visitModuleFlags(const Module &M);
   void visitModuleFlag(const MDNode *Op,
                        DenseMap<const MDString *, const MDNode *> &SeenIDs,
@@ -446,8 +443,6 @@ private:
   void visitBitCastInst(BitCastInst &I);
   void visitAddrSpaceCastInst(AddrSpaceCastInst &I);
   void visitPHINode(PHINode &PN);
-  void visitCallBase(CallBase &Call);
-  void visitUnaryOperator(UnaryOperator &U);
   void visitBinaryOperator(BinaryOperator &B);
   void visitICmpInst(ICmpInst &IC);
   void visitFCmpInst(FCmpInst &FC);
@@ -462,7 +457,7 @@ private:
   void visitStoreInst(StoreInst &SI);
   void verifyDominatesUse(Instruction &I, unsigned i);
   void visitInstruction(Instruction &I);
-  void visitTerminator(Instruction &I);
+  void visitTerminatorInst(TerminatorInst &I);
   void visitBranchInst(BranchInst &BI);
   void visitReturnInst(ReturnInst &RI);
   void visitSwitchInst(SwitchInst &SI);
@@ -470,9 +465,9 @@ private:
   void visitSelectInst(SelectInst &SI);
   void visitUserOp1(Instruction &I);
   void visitUserOp2(Instruction &I) { visitUserOp1(I); }
-  void visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call);
+  void visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS);
   void visitConstrainedFPIntrinsic(ConstrainedFPIntrinsic &FPI);
-  void visitDbgIntrinsic(StringRef Kind, DbgVariableIntrinsic &DII);
+  void visitDbgIntrinsic(StringRef Kind, DbgInfoIntrinsic &DII);
   void visitDbgLabelIntrinsic(StringRef Kind, DbgLabelInst &DLI);
   void visitAtomicCmpXchgInst(AtomicCmpXchgInst &CXI);
   void visitAtomicRMWInst(AtomicRMWInst &RMWI);
@@ -490,7 +485,8 @@ private:
   void visitCatchSwitchInst(CatchSwitchInst &CatchSwitch);
   void visitCleanupReturnInst(CleanupReturnInst &CRI);
 
-  void verifySwiftErrorCall(CallBase &Call, const Value *SwiftErrorVal);
+  void verifyCallSite(CallSite CS);
+  void verifySwiftErrorCallSite(CallSite CS, const Value *SwiftErrorVal);
   void verifySwiftErrorValue(const Value *SwiftErrorVal);
   void verifyMustTailCall(CallInst &CI);
   bool performTypeCheck(Intrinsic::ID ID, Function *F, Type *Ty, int VT,
@@ -505,16 +501,16 @@ private:
 
   void visitConstantExprsRecursively(const Constant *EntryC);
   void visitConstantExpr(const ConstantExpr *CE);
-  void verifyStatepoint(const CallBase &Call);
+  void verifyStatepoint(ImmutableCallSite CS);
   void verifyFrameRecoverIndices();
   void verifySiblingFuncletUnwinds();
 
-  void verifyFragmentExpression(const DbgVariableIntrinsic &I);
+  void verifyFragmentExpression(const DbgInfoIntrinsic &I);
   template <typename ValueOrMetadata>
   void verifyFragmentExpression(const DIVariable &V,
                                 DIExpression::FragmentInfo Fragment,
                                 ValueOrMetadata *Desc);
-  void verifyFnArgs(const DbgVariableIntrinsic &I);
+  void verifyFnArgs(const DbgInfoIntrinsic &I);
 
   /// Module-level debug info verification...
   void verifyCompileUnits();
@@ -522,9 +518,6 @@ private:
   /// Module-level verification that all @llvm.experimental.deoptimize
   /// declarations share the same calling convention.
   void verifyDeoptimizeCallingConvs();
-
-  /// Verify all-or-nothing property of DIFile source attribute within a CU.
-  void verifySourceDebugInfo(const DICompileUnit &U, const DIFile &F);
 };
 
 } // end anonymous namespace
@@ -639,8 +632,7 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
     if (ArrayType *ATy = dyn_cast<ArrayType>(GV.getValueType())) {
       StructType *STy = dyn_cast<StructType>(ATy->getElementType());
       PointerType *FuncPtrTy =
-          FunctionType::get(Type::getVoidTy(Context), false)->
-          getPointerTo(DL.getProgramAddressSpace());
+          FunctionType::get(Type::getVoidTy(Context), false)->getPointerTo();
       // FIXME: Reject the 2-field form in LLVM 4.0.
       Assert(STy &&
                  (STy->getNumElements() == 2 || STy->getNumElements() == 3) &&
@@ -894,8 +886,6 @@ void Verifier::visitDIBasicType(const DIBasicType &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_base_type ||
                N.getTag() == dwarf::DW_TAG_unspecified_type,
            "invalid tag", &N);
-  AssertDI(!(N.isBigEndian() && N.isLittleEndian()) ,
-            "has conflicting flags", &N);
 }
 
 void Verifier::visitDIDerivedType(const DIDerivedType &N) {
@@ -1038,8 +1028,6 @@ void Verifier::visitDICompileUnit(const DICompileUnit &N) {
   AssertDI(!N.getFile()->getFilename().empty(), "invalid filename", &N,
            N.getFile());
 
-  verifySourceDebugInfo(N, *N.getFile());
-
   AssertDI((N.getEmissionKind() <= DICompileUnit::LastEmissionKind),
            "invalid emission kind", &N);
 
@@ -1117,8 +1105,6 @@ void Verifier::visitDISubprogram(const DISubprogram &N) {
     AssertDI(N.isDistinct(), "subprogram definitions must be distinct", &N);
     AssertDI(Unit, "subprogram definitions must have a compile unit", &N);
     AssertDI(isa<DICompileUnit>(Unit), "invalid unit type", &N, Unit);
-    if (N.getFile())
-      verifySourceDebugInfo(*N.getUnit(), *N.getFile());
   } else {
     // Subprogram declarations (part of the type hierarchy).
     AssertDI(!Unit, "subprogram declarations must not have a compile unit", &N);
@@ -1131,10 +1117,6 @@ void Verifier::visitDISubprogram(const DISubprogram &N) {
       AssertDI(Op && isa<DIType>(Op), "invalid thrown type", &N, ThrownTypes,
                Op);
   }
-
-  if (N.areAllCallsDescribed())
-    AssertDI(N.isDefinition(),
-             "DIFlagAllCallsDescribed must be attached to a definition");
 }
 
 void Verifier::visitDILexicalBlockBase(const DILexicalBlockBase &N) {
@@ -1241,8 +1223,6 @@ void Verifier::visitDILocalVariable(const DILocalVariable &N) {
   AssertDI(N.getTag() == dwarf::DW_TAG_variable, "invalid tag", &N);
   AssertDI(N.getRawScope() && isa<DILocalScope>(N.getRawScope()),
            "local variable requires a valid scope", &N, N.getRawScope());
-  if (auto Ty = N.getType())
-    AssertDI(!isa<DISubroutineType>(Ty), "invalid type", &N, N.getType());
 }
 
 void Verifier::visitDILabel(const DILabel &N) {
@@ -1310,24 +1290,6 @@ void Verifier::visitModuleIdents(const Module &M) {
            "incorrect number of operands in llvm.ident metadata", N);
     Assert(dyn_cast_or_null<MDString>(N->getOperand(0)),
            ("invalid value for llvm.ident metadata entry operand"
-            "(the operand should be a string)"),
-           N->getOperand(0));
-  }
-}
-
-void Verifier::visitModuleCommandLines(const Module &M) {
-  const NamedMDNode *CommandLines = M.getNamedMetadata("llvm.commandline");
-  if (!CommandLines)
-    return;
-
-  // llvm.commandline takes a list of metadata entry. Each entry has only one
-  // string. Scan each llvm.commandline entry and make sure that this
-  // requirement is met.
-  for (const MDNode *N : CommandLines->operands()) {
-    Assert(N->getNumOperands() == 1,
-           "incorrect number of operands in llvm.commandline metadata", N);
-    Assert(dyn_cast_or_null<MDString>(N->getOperand(0)),
-           ("invalid value for llvm.commandline metadata entry operand"
             "(the operand should be a string)"),
            N->getOperand(0));
   }
@@ -1514,7 +1476,6 @@ static bool isFuncOnlyAttr(Attribute::AttrKind Kind) {
   case Attribute::InaccessibleMemOnly:
   case Attribute::InaccessibleMemOrArgMemOnly:
   case Attribute::AllocSize:
-  case Attribute::SpeculativeLoadHardening:
   case Attribute::Speculatable:
   case Attribute::StrictFP:
     return true;
@@ -1893,136 +1854,127 @@ bool Verifier::verifyAttributeCount(AttributeList Attrs, unsigned Params) {
 }
 
 /// Verify that statepoint intrinsic is well formed.
-void Verifier::verifyStatepoint(const CallBase &Call) {
-  assert(Call.getCalledFunction() &&
-         Call.getCalledFunction()->getIntrinsicID() ==
-             Intrinsic::experimental_gc_statepoint);
+void Verifier::verifyStatepoint(ImmutableCallSite CS) {
+  assert(CS.getCalledFunction() &&
+         CS.getCalledFunction()->getIntrinsicID() ==
+           Intrinsic::experimental_gc_statepoint);
 
-  Assert(!Call.doesNotAccessMemory() && !Call.onlyReadsMemory() &&
-             !Call.onlyAccessesArgMemory(),
+  const Instruction &CI = *CS.getInstruction();
+
+  Assert(!CS.doesNotAccessMemory() && !CS.onlyReadsMemory() &&
+         !CS.onlyAccessesArgMemory(),
          "gc.statepoint must read and write all memory to preserve "
          "reordering restrictions required by safepoint semantics",
-         Call);
+         &CI);
 
-  const Value *IDV = Call.getArgOperand(0);
+  const Value *IDV = CS.getArgument(0);
   Assert(isa<ConstantInt>(IDV), "gc.statepoint ID must be a constant integer",
-         Call);
+         &CI);
 
-  const Value *NumPatchBytesV = Call.getArgOperand(1);
+  const Value *NumPatchBytesV = CS.getArgument(1);
   Assert(isa<ConstantInt>(NumPatchBytesV),
          "gc.statepoint number of patchable bytes must be a constant integer",
-         Call);
+         &CI);
   const int64_t NumPatchBytes =
       cast<ConstantInt>(NumPatchBytesV)->getSExtValue();
   assert(isInt<32>(NumPatchBytes) && "NumPatchBytesV is an i32!");
-  Assert(NumPatchBytes >= 0,
-         "gc.statepoint number of patchable bytes must be "
-         "positive",
-         Call);
+  Assert(NumPatchBytes >= 0, "gc.statepoint number of patchable bytes must be "
+                             "positive",
+         &CI);
 
-  const Value *Target = Call.getArgOperand(2);
+  const Value *Target = CS.getArgument(2);
   auto *PT = dyn_cast<PointerType>(Target->getType());
   Assert(PT && PT->getElementType()->isFunctionTy(),
-         "gc.statepoint callee must be of function pointer type", Call, Target);
+         "gc.statepoint callee must be of function pointer type", &CI, Target);
   FunctionType *TargetFuncType = cast<FunctionType>(PT->getElementType());
 
-  const Value *NumCallArgsV = Call.getArgOperand(3);
+  const Value *NumCallArgsV = CS.getArgument(3);
   Assert(isa<ConstantInt>(NumCallArgsV),
          "gc.statepoint number of arguments to underlying call "
          "must be constant integer",
-         Call);
+         &CI);
   const int NumCallArgs = cast<ConstantInt>(NumCallArgsV)->getZExtValue();
   Assert(NumCallArgs >= 0,
          "gc.statepoint number of arguments to underlying call "
          "must be positive",
-         Call);
+         &CI);
   const int NumParams = (int)TargetFuncType->getNumParams();
   if (TargetFuncType->isVarArg()) {
     Assert(NumCallArgs >= NumParams,
-           "gc.statepoint mismatch in number of vararg call args", Call);
+           "gc.statepoint mismatch in number of vararg call args", &CI);
 
     // TODO: Remove this limitation
     Assert(TargetFuncType->getReturnType()->isVoidTy(),
            "gc.statepoint doesn't support wrapping non-void "
            "vararg functions yet",
-           Call);
+           &CI);
   } else
     Assert(NumCallArgs == NumParams,
-           "gc.statepoint mismatch in number of call args", Call);
+           "gc.statepoint mismatch in number of call args", &CI);
 
-  const Value *FlagsV = Call.getArgOperand(4);
+  const Value *FlagsV = CS.getArgument(4);
   Assert(isa<ConstantInt>(FlagsV),
-         "gc.statepoint flags must be constant integer", Call);
+         "gc.statepoint flags must be constant integer", &CI);
   const uint64_t Flags = cast<ConstantInt>(FlagsV)->getZExtValue();
   Assert((Flags & ~(uint64_t)StatepointFlags::MaskAll) == 0,
-         "unknown flag used in gc.statepoint flags argument", Call);
+         "unknown flag used in gc.statepoint flags argument", &CI);
 
   // Verify that the types of the call parameter arguments match
   // the type of the wrapped callee.
-  AttributeList Attrs = Call.getAttributes();
   for (int i = 0; i < NumParams; i++) {
     Type *ParamType = TargetFuncType->getParamType(i);
-    Type *ArgType = Call.getArgOperand(5 + i)->getType();
+    Type *ArgType = CS.getArgument(5 + i)->getType();
     Assert(ArgType == ParamType,
            "gc.statepoint call argument does not match wrapped "
            "function type",
-           Call);
-
-    if (TargetFuncType->isVarArg()) {
-      AttributeSet ArgAttrs = Attrs.getParamAttributes(5 + i);
-      Assert(!ArgAttrs.hasAttribute(Attribute::StructRet),
-             "Attribute 'sret' cannot be used for vararg call arguments!",
-             Call);
-    }
+           &CI);
   }
 
   const int EndCallArgsInx = 4 + NumCallArgs;
 
-  const Value *NumTransitionArgsV = Call.getArgOperand(EndCallArgsInx + 1);
+  const Value *NumTransitionArgsV = CS.getArgument(EndCallArgsInx+1);
   Assert(isa<ConstantInt>(NumTransitionArgsV),
          "gc.statepoint number of transition arguments "
          "must be constant integer",
-         Call);
+         &CI);
   const int NumTransitionArgs =
       cast<ConstantInt>(NumTransitionArgsV)->getZExtValue();
   Assert(NumTransitionArgs >= 0,
-         "gc.statepoint number of transition arguments must be positive", Call);
+         "gc.statepoint number of transition arguments must be positive", &CI);
   const int EndTransitionArgsInx = EndCallArgsInx + 1 + NumTransitionArgs;
 
-  const Value *NumDeoptArgsV = Call.getArgOperand(EndTransitionArgsInx + 1);
+  const Value *NumDeoptArgsV = CS.getArgument(EndTransitionArgsInx+1);
   Assert(isa<ConstantInt>(NumDeoptArgsV),
          "gc.statepoint number of deoptimization arguments "
          "must be constant integer",
-         Call);
+         &CI);
   const int NumDeoptArgs = cast<ConstantInt>(NumDeoptArgsV)->getZExtValue();
-  Assert(NumDeoptArgs >= 0,
-         "gc.statepoint number of deoptimization arguments "
-         "must be positive",
-         Call);
+  Assert(NumDeoptArgs >= 0, "gc.statepoint number of deoptimization arguments "
+                            "must be positive",
+         &CI);
 
   const int ExpectedNumArgs =
       7 + NumCallArgs + NumTransitionArgs + NumDeoptArgs;
-  Assert(ExpectedNumArgs <= (int)Call.arg_size(),
-         "gc.statepoint too few arguments according to length fields", Call);
+  Assert(ExpectedNumArgs <= (int)CS.arg_size(),
+         "gc.statepoint too few arguments according to length fields", &CI);
 
   // Check that the only uses of this gc.statepoint are gc.result or
   // gc.relocate calls which are tied to this statepoint and thus part
   // of the same statepoint sequence
-  for (const User *U : Call.users()) {
-    const CallInst *UserCall = dyn_cast<const CallInst>(U);
-    Assert(UserCall, "illegal use of statepoint token", Call, U);
-    if (!UserCall)
-      continue;
-    Assert(isa<GCRelocateInst>(UserCall) || isa<GCResultInst>(UserCall),
+  for (const User *U : CI.users()) {
+    const CallInst *Call = dyn_cast<const CallInst>(U);
+    Assert(Call, "illegal use of statepoint token", &CI, U);
+    if (!Call) continue;
+    Assert(isa<GCRelocateInst>(Call) || isa<GCResultInst>(Call),
            "gc.result or gc.relocate are the only value uses "
            "of a gc.statepoint",
-           Call, U);
-    if (isa<GCResultInst>(UserCall)) {
-      Assert(UserCall->getArgOperand(0) == &Call,
-             "gc.result connected to wrong gc.statepoint", Call, UserCall);
+           &CI, U);
+    if (isa<GCResultInst>(Call)) {
+      Assert(Call->getArgOperand(0) == &CI,
+             "gc.result connected to wrong gc.statepoint", &CI, Call);
     } else if (isa<GCRelocateInst>(Call)) {
-      Assert(UserCall->getArgOperand(0) == &Call,
-             "gc.relocate connected to wrong gc.statepoint", Call, UserCall);
+      Assert(Call->getArgOperand(0) == &CI,
+             "gc.relocate connected to wrong gc.statepoint", &CI, Call);
     }
   }
 
@@ -2049,7 +2001,7 @@ void Verifier::verifyFrameRecoverIndices() {
   }
 }
 
-static Instruction *getSuccPad(Instruction *Terminator) {
+static Instruction *getSuccPad(TerminatorInst *Terminator) {
   BasicBlock *UnwindDest;
   if (auto *II = dyn_cast<InvokeInst>(Terminator))
     UnwindDest = II->getUnwindDest();
@@ -2068,7 +2020,7 @@ void Verifier::verifySiblingFuncletUnwinds() {
     if (Visited.count(PredPad))
       continue;
     Active.insert(PredPad);
-    Instruction *Terminator = Pair.second;
+    TerminatorInst *Terminator = Pair.second;
     do {
       Instruction *SuccPad = getSuccPad(Terminator);
       if (Active.count(SuccPad)) {
@@ -2077,7 +2029,7 @@ void Verifier::verifySiblingFuncletUnwinds() {
         SmallVector<Instruction *, 8> CycleNodes;
         do {
           CycleNodes.push_back(CyclePad);
-          Instruction *CycleTerminator = SiblingFuncletInfo[CyclePad];
+          TerminatorInst *CycleTerminator = SiblingFuncletInfo[CyclePad];
           if (CycleTerminator != CyclePad)
             CycleNodes.push_back(CycleTerminator);
           CyclePad = getSuccPad(CycleTerminator);
@@ -2310,10 +2262,6 @@ void Verifier::visitFunction(const Function &F) {
       if (!Seen.insert(DL).second)
         continue;
 
-      Metadata *Parent = DL->getRawScope();
-      AssertDI(Parent && isa<DILocalScope>(Parent),
-               "DILocation's scope must be a DILocalScope", N, &F, &I, DL,
-               Parent);
       DILocalScope *Scope = DL->getInlinedAtScope();
       if (Scope && !Seen.insert(Scope).second)
         continue;
@@ -2345,7 +2293,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
   if (isa<PHINode>(BB.front())) {
     SmallVector<BasicBlock*, 8> Preds(pred_begin(&BB), pred_end(&BB));
     SmallVector<std::pair<BasicBlock*, Value*>, 8> Values;
-    llvm::sort(Preds);
+    llvm::sort(Preds.begin(), Preds.end());
     for (const PHINode &PN : BB.phis()) {
       // Ensure that PHI nodes have at least one entry!
       Assert(PN.getNumIncomingValues() != 0,
@@ -2363,7 +2311,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
       for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
         Values.push_back(
             std::make_pair(PN.getIncomingBlock(i), PN.getIncomingValue(i)));
-      llvm::sort(Values);
+      llvm::sort(Values.begin(), Values.end());
 
       for (unsigned i = 0, e = Values.size(); i != e; ++i) {
         // Check to make sure that if there is more than one entry for a
@@ -2392,7 +2340,7 @@ void Verifier::visitBasicBlock(BasicBlock &BB) {
   }
 }
 
-void Verifier::visitTerminator(Instruction &I) {
+void Verifier::visitTerminatorInst(TerminatorInst &I) {
   // Ensure that terminators only exist at the end of the basic block.
   Assert(&I == I.getParent()->getTerminator(),
          "Terminator found in the middle of a basic block!", I.getParent());
@@ -2404,7 +2352,7 @@ void Verifier::visitBranchInst(BranchInst &BI) {
     Assert(BI.getCondition()->getType()->isIntegerTy(1),
            "Branch condition is not 'i1' type!", &BI, BI.getCondition());
   }
-  visitTerminator(BI);
+  visitTerminatorInst(BI);
 }
 
 void Verifier::visitReturnInst(ReturnInst &RI) {
@@ -2423,7 +2371,7 @@ void Verifier::visitReturnInst(ReturnInst &RI) {
 
   // Check to make sure that the return value has necessary properties for
   // terminators...
-  visitTerminator(RI);
+  visitTerminatorInst(RI);
 }
 
 void Verifier::visitSwitchInst(SwitchInst &SI) {
@@ -2438,7 +2386,7 @@ void Verifier::visitSwitchInst(SwitchInst &SI) {
            "Duplicate integer as switch case", &SI, Case.getCaseValue());
   }
 
-  visitTerminator(SI);
+  visitTerminatorInst(SI);
 }
 
 void Verifier::visitIndirectBrInst(IndirectBrInst &BI) {
@@ -2448,7 +2396,7 @@ void Verifier::visitIndirectBrInst(IndirectBrInst &BI) {
     Assert(BI.getDestination(i)->getType()->isLabelTy(),
            "Indirectbr destinations must all have pointer type!", &BI);
 
-  visitTerminator(BI);
+  visitTerminatorInst(BI);
 }
 
 void Verifier::visitSelectInst(SelectInst &SI) {
@@ -2747,79 +2695,77 @@ void Verifier::visitPHINode(PHINode &PN) {
   visitInstruction(PN);
 }
 
-void Verifier::visitCallBase(CallBase &Call) {
-  Assert(Call.getCalledValue()->getType()->isPointerTy(),
-         "Called function must be a pointer!", Call);
-  PointerType *FPTy = cast<PointerType>(Call.getCalledValue()->getType());
+void Verifier::verifyCallSite(CallSite CS) {
+  Instruction *I = CS.getInstruction();
+
+  Assert(CS.getCalledValue()->getType()->isPointerTy(),
+         "Called function must be a pointer!", I);
+  PointerType *FPTy = cast<PointerType>(CS.getCalledValue()->getType());
 
   Assert(FPTy->getElementType()->isFunctionTy(),
-         "Called function is not pointer to function type!", Call);
+         "Called function is not pointer to function type!", I);
 
-  Assert(FPTy->getElementType() == Call.getFunctionType(),
-         "Called function is not the same type as the call!", Call);
+  Assert(FPTy->getElementType() == CS.getFunctionType(),
+         "Called function is not the same type as the call!", I);
 
-  FunctionType *FTy = Call.getFunctionType();
+  FunctionType *FTy = CS.getFunctionType();
 
   // Verify that the correct number of arguments are being passed
   if (FTy->isVarArg())
-    Assert(Call.arg_size() >= FTy->getNumParams(),
-           "Called function requires more parameters than were provided!",
-           Call);
+    Assert(CS.arg_size() >= FTy->getNumParams(),
+           "Called function requires more parameters than were provided!", I);
   else
-    Assert(Call.arg_size() == FTy->getNumParams(),
-           "Incorrect number of arguments passed to called function!", Call);
+    Assert(CS.arg_size() == FTy->getNumParams(),
+           "Incorrect number of arguments passed to called function!", I);
 
   // Verify that all arguments to the call match the function type.
   for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i)
-    Assert(Call.getArgOperand(i)->getType() == FTy->getParamType(i),
+    Assert(CS.getArgument(i)->getType() == FTy->getParamType(i),
            "Call parameter type does not match function signature!",
-           Call.getArgOperand(i), FTy->getParamType(i), Call);
+           CS.getArgument(i), FTy->getParamType(i), I);
 
-  AttributeList Attrs = Call.getAttributes();
+  AttributeList Attrs = CS.getAttributes();
 
-  Assert(verifyAttributeCount(Attrs, Call.arg_size()),
-         "Attribute after last parameter!", Call);
+  Assert(verifyAttributeCount(Attrs, CS.arg_size()),
+         "Attribute after last parameter!", I);
 
   if (Attrs.hasAttribute(AttributeList::FunctionIndex, Attribute::Speculatable)) {
     // Don't allow speculatable on call sites, unless the underlying function
     // declaration is also speculatable.
-    Function *Callee =
-        dyn_cast<Function>(Call.getCalledValue()->stripPointerCasts());
+    Function *Callee
+      = dyn_cast<Function>(CS.getCalledValue()->stripPointerCasts());
     Assert(Callee && Callee->isSpeculatable(),
-           "speculatable attribute may not apply to call sites", Call);
+           "speculatable attribute may not apply to call sites", I);
   }
 
   // Verify call attributes.
-  verifyFunctionAttrs(FTy, Attrs, &Call);
+  verifyFunctionAttrs(FTy, Attrs, I);
 
   // Conservatively check the inalloca argument.
   // We have a bug if we can find that there is an underlying alloca without
   // inalloca.
-  if (Call.hasInAllocaArgument()) {
-    Value *InAllocaArg = Call.getArgOperand(FTy->getNumParams() - 1);
+  if (CS.hasInAllocaArgument()) {
+    Value *InAllocaArg = CS.getArgument(FTy->getNumParams() - 1);
     if (auto AI = dyn_cast<AllocaInst>(InAllocaArg->stripInBoundsOffsets()))
       Assert(AI->isUsedWithInAlloca(),
-             "inalloca argument for call has mismatched alloca", AI, Call);
+             "inalloca argument for call has mismatched alloca", AI, I);
   }
 
   // For each argument of the callsite, if it has the swifterror argument,
   // make sure the underlying alloca/parameter it comes from has a swifterror as
   // well.
   for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i)
-    if (Call.paramHasAttr(i, Attribute::SwiftError)) {
-      Value *SwiftErrorArg = Call.getArgOperand(i);
+    if (CS.paramHasAttr(i, Attribute::SwiftError)) {
+      Value *SwiftErrorArg = CS.getArgument(i);
       if (auto AI = dyn_cast<AllocaInst>(SwiftErrorArg->stripInBoundsOffsets())) {
         Assert(AI->isSwiftError(),
-               "swifterror argument for call has mismatched alloca", AI, Call);
+               "swifterror argument for call has mismatched alloca", AI, I);
         continue;
       }
       auto ArgI = dyn_cast<Argument>(SwiftErrorArg);
-      Assert(ArgI,
-             "swifterror argument should come from an alloca or parameter",
-             SwiftErrorArg, Call);
+      Assert(ArgI, "swifterror argument should come from an alloca or parameter", SwiftErrorArg, I);
       Assert(ArgI->hasSwiftErrorAttr(),
-             "swifterror argument for call has mismatched parameter", ArgI,
-             Call);
+             "swifterror argument for call has mismatched parameter", ArgI, I);
     }
 
   if (FTy->isVarArg()) {
@@ -2835,97 +2781,90 @@ void Verifier::visitCallBase(CallBase &Call) {
     }
 
     // Check attributes on the varargs part.
-    for (unsigned Idx = FTy->getNumParams(); Idx < Call.arg_size(); ++Idx) {
-      Type *Ty = Call.getArgOperand(Idx)->getType();
+    for (unsigned Idx = FTy->getNumParams(); Idx < CS.arg_size(); ++Idx) {
+      Type *Ty = CS.getArgument(Idx)->getType();
       AttributeSet ArgAttrs = Attrs.getParamAttributes(Idx);
-      verifyParameterAttrs(ArgAttrs, Ty, &Call);
+      verifyParameterAttrs(ArgAttrs, Ty, I);
 
       if (ArgAttrs.hasAttribute(Attribute::Nest)) {
-        Assert(!SawNest, "More than one parameter has attribute nest!", Call);
+        Assert(!SawNest, "More than one parameter has attribute nest!", I);
         SawNest = true;
       }
 
       if (ArgAttrs.hasAttribute(Attribute::Returned)) {
         Assert(!SawReturned, "More than one parameter has attribute returned!",
-               Call);
+               I);
         Assert(Ty->canLosslesslyBitCastTo(FTy->getReturnType()),
                "Incompatible argument and return types for 'returned' "
                "attribute",
-               Call);
+               I);
         SawReturned = true;
       }
 
-      // Statepoint intrinsic is vararg but the wrapped function may be not.
-      // Allow sret here and check the wrapped function in verifyStatepoint.
-      if (!Call.getCalledFunction() ||
-          Call.getCalledFunction()->getIntrinsicID() !=
-              Intrinsic::experimental_gc_statepoint)
-        Assert(!ArgAttrs.hasAttribute(Attribute::StructRet),
-               "Attribute 'sret' cannot be used for vararg call arguments!",
-               Call);
+      Assert(!ArgAttrs.hasAttribute(Attribute::StructRet),
+             "Attribute 'sret' cannot be used for vararg call arguments!", I);
 
       if (ArgAttrs.hasAttribute(Attribute::InAlloca))
-        Assert(Idx == Call.arg_size() - 1,
-               "inalloca isn't on the last argument!", Call);
+        Assert(Idx == CS.arg_size() - 1, "inalloca isn't on the last argument!",
+               I);
     }
   }
 
   // Verify that there's no metadata unless it's a direct call to an intrinsic.
-  if (!Call.getCalledFunction() ||
-      !Call.getCalledFunction()->getName().startswith("llvm.")) {
+  if (CS.getCalledFunction() == nullptr ||
+      !CS.getCalledFunction()->getName().startswith("llvm.")) {
     for (Type *ParamTy : FTy->params()) {
       Assert(!ParamTy->isMetadataTy(),
-             "Function has metadata parameter but isn't an intrinsic", Call);
+             "Function has metadata parameter but isn't an intrinsic", I);
       Assert(!ParamTy->isTokenTy(),
-             "Function has token parameter but isn't an intrinsic", Call);
+             "Function has token parameter but isn't an intrinsic", I);
     }
   }
 
   // Verify that indirect calls don't return tokens.
-  if (!Call.getCalledFunction())
+  if (CS.getCalledFunction() == nullptr)
     Assert(!FTy->getReturnType()->isTokenTy(),
            "Return type cannot be token for indirect call!");
 
-  if (Function *F = Call.getCalledFunction())
+  if (Function *F = CS.getCalledFunction())
     if (Intrinsic::ID ID = (Intrinsic::ID)F->getIntrinsicID())
-      visitIntrinsicCall(ID, Call);
+      visitIntrinsicCallSite(ID, CS);
 
   // Verify that a callsite has at most one "deopt", at most one "funclet" and
   // at most one "gc-transition" operand bundle.
   bool FoundDeoptBundle = false, FoundFuncletBundle = false,
        FoundGCTransitionBundle = false;
-  for (unsigned i = 0, e = Call.getNumOperandBundles(); i < e; ++i) {
-    OperandBundleUse BU = Call.getOperandBundleAt(i);
+  for (unsigned i = 0, e = CS.getNumOperandBundles(); i < e; ++i) {
+    OperandBundleUse BU = CS.getOperandBundleAt(i);
     uint32_t Tag = BU.getTagID();
     if (Tag == LLVMContext::OB_deopt) {
-      Assert(!FoundDeoptBundle, "Multiple deopt operand bundles", Call);
+      Assert(!FoundDeoptBundle, "Multiple deopt operand bundles", I);
       FoundDeoptBundle = true;
     } else if (Tag == LLVMContext::OB_gc_transition) {
       Assert(!FoundGCTransitionBundle, "Multiple gc-transition operand bundles",
-             Call);
+             I);
       FoundGCTransitionBundle = true;
     } else if (Tag == LLVMContext::OB_funclet) {
-      Assert(!FoundFuncletBundle, "Multiple funclet operand bundles", Call);
+      Assert(!FoundFuncletBundle, "Multiple funclet operand bundles", I);
       FoundFuncletBundle = true;
       Assert(BU.Inputs.size() == 1,
-             "Expected exactly one funclet bundle operand", Call);
+             "Expected exactly one funclet bundle operand", I);
       Assert(isa<FuncletPadInst>(BU.Inputs.front()),
              "Funclet bundle operands should correspond to a FuncletPadInst",
-             Call);
+             I);
     }
   }
 
   // Verify that each inlinable callsite of a debug-info-bearing function in a
   // debug-info-bearing function has a debug location attached to it. Failure to
   // do so causes assertion failures when the inliner sets up inline scope info.
-  if (Call.getFunction()->getSubprogram() && Call.getCalledFunction() &&
-      Call.getCalledFunction()->getSubprogram())
-    AssertDI(Call.getDebugLoc(),
-             "inlinable function call in a function with "
-             "debug info must have a !dbg location",
-             Call);
+  if (I->getFunction()->getSubprogram() && CS.getCalledFunction() &&
+      CS.getCalledFunction()->getSubprogram())
+    AssertDI(I->getDebugLoc(), "inlinable function call in a function with "
+                               "debug info must have a !dbg location",
+             I);
 
-  visitInstruction(Call);
+  visitInstruction(*I);
 }
 
 /// Two types are "congruent" if they are identical, or if they are both pointer
@@ -3020,14 +2959,14 @@ void Verifier::verifyMustTailCall(CallInst &CI) {
 }
 
 void Verifier::visitCallInst(CallInst &CI) {
-  visitCallBase(CI);
+  verifyCallSite(&CI);
 
   if (CI.isMustTailCall())
     verifyMustTailCall(CI);
 }
 
 void Verifier::visitInvokeInst(InvokeInst &II) {
-  visitCallBase(II);
+  verifyCallSite(&II);
 
   // Verify that the first non-PHI instruction of the unwind destination is an
   // exception handling instruction.
@@ -3036,29 +2975,7 @@ void Verifier::visitInvokeInst(InvokeInst &II) {
       "The unwind destination does not have an exception handling instruction!",
       &II);
 
-  visitTerminator(II);
-}
-
-/// visitUnaryOperator - Check the argument to the unary operator.
-///
-void Verifier::visitUnaryOperator(UnaryOperator &U) {
-  Assert(U.getType() == U.getOperand(0)->getType(), 
-         "Unary operators must have same type for"
-         "operands and result!",
-         &U);
-
-  switch (U.getOpcode()) {
-  // Check that floating-point arithmetic operators are only used with
-  // floating-point operands.
-  case Instruction::FNeg:
-    Assert(U.getType()->isFPOrFPVectorTy(),
-           "FNeg operator only works with float types!", &U);
-    break;
-  default:
-    llvm_unreachable("Unknown UnaryOperator opcode!");
-  }
-
-  visitInstruction(U);
+  visitTerminatorInst(II);
 }
 
 /// visitBinaryOperator - Check that both arguments to the binary operator are
@@ -3214,12 +3131,6 @@ void Verifier::visitGetElementPtrInst(GetElementPtrInst &GEP) {
              "All GEP indices should be of integer type");
     }
   }
-
-  if (auto *PTy = dyn_cast<PointerType>(GEP.getType())) {
-    Assert(GEP.getAddressSpace() == PTy->getAddressSpace(),
-           "GEP address space doesn't match type", &GEP);
-  }
-
   visitInstruction(GEP);
 }
 
@@ -3336,15 +3247,16 @@ void Verifier::visitStoreInst(StoreInst &SI) {
 }
 
 /// Check that SwiftErrorVal is used as a swifterror argument in CS.
-void Verifier::verifySwiftErrorCall(CallBase &Call,
-                                    const Value *SwiftErrorVal) {
+void Verifier::verifySwiftErrorCallSite(CallSite CS,
+                                        const Value *SwiftErrorVal) {
   unsigned Idx = 0;
-  for (auto I = Call.arg_begin(), E = Call.arg_end(); I != E; ++I, ++Idx) {
+  for (CallSite::arg_iterator I = CS.arg_begin(), E = CS.arg_end();
+       I != E; ++I, ++Idx) {
     if (*I == SwiftErrorVal) {
-      Assert(Call.paramHasAttr(Idx, Attribute::SwiftError),
+      Assert(CS.paramHasAttr(Idx, Attribute::SwiftError),
              "swifterror value when used in a callsite should be marked "
              "with swifterror attribute",
-             SwiftErrorVal, Call);
+              SwiftErrorVal, CS);
     }
   }
 }
@@ -3363,8 +3275,10 @@ void Verifier::verifySwiftErrorValue(const Value *SwiftErrorVal) {
       Assert(StoreI->getOperand(1) == SwiftErrorVal,
              "swifterror value should be the second operand when used "
              "by stores", SwiftErrorVal, U);
-    if (auto *Call = dyn_cast<CallBase>(U))
-      verifySwiftErrorCall(*const_cast<CallBase *>(Call), SwiftErrorVal);
+    if (auto CallI = dyn_cast<CallInst>(U))
+      verifySwiftErrorCallSite(const_cast<CallInst*>(CallI), SwiftErrorVal);
+    if (auto II = dyn_cast<InvokeInst>(U))
+      verifySwiftErrorCallSite(const_cast<InvokeInst*>(II), SwiftErrorVal);
   }
 }
 
@@ -3427,19 +3341,17 @@ void Verifier::visitAtomicRMWInst(AtomicRMWInst &RMWI) {
          "atomicrmw instructions must be atomic.", &RMWI);
   Assert(RMWI.getOrdering() != AtomicOrdering::Unordered,
          "atomicrmw instructions cannot be unordered.", &RMWI);
-  auto Op = RMWI.getOperation();
   PointerType *PTy = dyn_cast<PointerType>(RMWI.getOperand(0)->getType());
   Assert(PTy, "First atomicrmw operand must be a pointer.", &RMWI);
   Type *ElTy = PTy->getElementType();
-  Assert(ElTy->isIntegerTy(), "atomicrmw " +
-         AtomicRMWInst::getOperationName(Op) +
-         " operand must have integer type!",
+  Assert(ElTy->isIntegerTy(), "atomicrmw operand must have integer type!",
          &RMWI, ElTy);
   checkAtomicMemAccessSize(ElTy, &RMWI);
   Assert(ElTy == RMWI.getOperand(1)->getType(),
          "Argument value type does not match pointer operand type!", &RMWI,
          ElTy);
-  Assert(AtomicRMWInst::FIRST_BINOP <= Op && Op <= AtomicRMWInst::LAST_BINOP,
+  Assert(AtomicRMWInst::FIRST_BINOP <= RMWI.getOperation() &&
+             RMWI.getOperation() <= AtomicRMWInst::LAST_BINOP,
          "Invalid binary operation!", &RMWI);
   visitInstruction(RMWI);
 }
@@ -3518,7 +3430,7 @@ void Verifier::visitEHPadPredecessors(Instruction &I) {
   Instruction *ToPad = &I;
   Value *ToPadParent = getParentPad(ToPad);
   for (BasicBlock *PredBB : predecessors(BB)) {
-    Instruction *TI = PredBB->getTerminator();
+    TerminatorInst *TI = PredBB->getTerminator();
     Value *FromPad;
     if (auto *II = dyn_cast<InvokeInst>(TI)) {
       Assert(II->getUnwindDest() == BB && II->getNormalDest() != BB,
@@ -3606,7 +3518,7 @@ void Verifier::visitResumeInst(ResumeInst &RI) {
            "inside a function.",
            &RI);
 
-  visitTerminator(RI);
+  visitTerminatorInst(RI);
 }
 
 void Verifier::visitCatchPadInst(CatchPadInst &CPI) {
@@ -3634,7 +3546,7 @@ void Verifier::visitCatchReturnInst(CatchReturnInst &CatchReturn) {
          "CatchReturnInst needs to be provided a CatchPad", &CatchReturn,
          CatchReturn.getOperand(0));
 
-  visitTerminator(CatchReturn);
+  visitTerminatorInst(CatchReturn);
 }
 
 void Verifier::visitCleanupPadInst(CleanupPadInst &CPI) {
@@ -3755,7 +3667,7 @@ void Verifier::visitFuncletPadInst(FuncletPadInst &FPI) {
           // Record cleanup sibling unwinds for verifySiblingFuncletUnwinds
           if (isa<CleanupPadInst>(&FPI) && !isa<ConstantTokenNone>(UnwindPad) &&
               getParentPad(UnwindPad) == getParentPad(&FPI))
-            SiblingFuncletInfo[&FPI] = cast<Instruction>(U);
+            SiblingFuncletInfo[&FPI] = cast<TerminatorInst>(U);
         }
       }
       // Make sure we visit all uses of FPI, but for nested pads stop as
@@ -3856,7 +3768,7 @@ void Verifier::visitCatchSwitchInst(CatchSwitchInst &CatchSwitch) {
   }
 
   visitEHPadPredecessors(CatchSwitch);
-  visitTerminator(CatchSwitch);
+  visitTerminatorInst(CatchSwitch);
 }
 
 void Verifier::visitCleanupReturnInst(CleanupReturnInst &CRI) {
@@ -3872,7 +3784,7 @@ void Verifier::visitCleanupReturnInst(CleanupReturnInst &CRI) {
            &CRI);
   }
 
-  visitTerminator(CRI);
+  visitTerminatorInst(CRI);
 }
 
 void Verifier::verifyDominatesUse(Instruction &I, unsigned i) {
@@ -3955,10 +3867,6 @@ void Verifier::visitInstruction(Instruction &I) {
     }
   }
 
-  // Get a pointer to the call base of the instruction if it is some form of
-  // call.
-  const CallBase *CBI = dyn_cast<CallBase>(&I);
-
   for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
     Assert(I.getOperand(i) != nullptr, "Instruction has null operand!", &I);
 
@@ -3971,9 +3879,10 @@ void Verifier::visitInstruction(Instruction &I) {
     if (Function *F = dyn_cast<Function>(I.getOperand(i))) {
       // Check to make sure that the "address of" an intrinsic function is never
       // taken.
-      Assert(!F->isIntrinsic() ||
-                 (CBI && &CBI->getCalledOperandUse() == &I.getOperandUse(i)),
-             "Cannot take the address of an intrinsic!", &I);
+      Assert(
+          !F->isIntrinsic() ||
+              i == (isa<CallInst>(I) ? e - 1 : isa<InvokeInst>(I) ? e - 3 : 0),
+          "Cannot take the address of an intrinsic!", &I);
       Assert(
           !F->isIntrinsic() || isa<CallInst>(I) ||
               F->getIntrinsicID() == Intrinsic::donothing ||
@@ -3999,7 +3908,8 @@ void Verifier::visitInstruction(Instruction &I) {
     } else if (isa<Instruction>(I.getOperand(i))) {
       verifyDominatesUse(I, i);
     } else if (isa<InlineAsm>(I.getOperand(i))) {
-      Assert(CBI && &CBI->getCalledOperandUse() == &I.getOperandUse(i),
+      Assert((i + 1 == e && isa<CallInst>(I)) ||
+                 (i + 3 == e && isa<InvokeInst>(I)),
              "Cannot take the address of an inline asm!", &I);
     } else if (ConstantExpr *CE = dyn_cast<ConstantExpr>(I.getOperand(i))) {
       if (CE->getType()->isPtrOrPtrVectorTy() ||
@@ -4074,15 +3984,15 @@ void Verifier::visitInstruction(Instruction &I) {
     visitMDNode(*N);
   }
 
-  if (auto *DII = dyn_cast<DbgVariableIntrinsic>(&I))
+  if (auto *DII = dyn_cast<DbgInfoIntrinsic>(&I))
     verifyFragmentExpression(*DII);
 
   InstsInThisBlock.insert(&I);
 }
 
 /// Allow intrinsics to be verified in different ways.
-void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
-  Function *IF = Call.getCalledFunction();
+void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
+  Function *IF = CS.getCalledFunction();
   Assert(IF->isDeclaration(), "Intrinsic functions should never be defined!",
          IF);
 
@@ -4128,15 +4038,15 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
 
   // If the intrinsic takes MDNode arguments, verify that they are either global
   // or are local to *this* function.
-  for (Value *V : Call.args())
+  for (Value *V : CS.args())
     if (auto *MD = dyn_cast<MetadataAsValue>(V))
-      visitMetadataAsValue(*MD, Call.getCaller());
+      visitMetadataAsValue(*MD, CS.getCaller());
 
   switch (ID) {
   default:
     break;
   case Intrinsic::coro_id: {
-    auto *InfoArg = Call.getArgOperand(3)->stripPointerCasts();
+    auto *InfoArg = CS.getArgOperand(3)->stripPointerCasts();
     if (isa<ConstantPointerNull>(InfoArg))
       break;
     auto *GV = dyn_cast<GlobalVariable>(InfoArg);
@@ -4151,10 +4061,10 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
   }
   case Intrinsic::ctlz:  // llvm.ctlz
   case Intrinsic::cttz:  // llvm.cttz
-    Assert(isa<ConstantInt>(Call.getArgOperand(1)),
+    Assert(isa<ConstantInt>(CS.getArgOperand(1)),
            "is_zero_undef argument of bit counting intrinsics must be a "
            "constant int",
-           Call);
+           CS);
     break;
   case Intrinsic::experimental_constrained_fadd:
   case Intrinsic::experimental_constrained_fsub:
@@ -4174,64 +4084,59 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
   case Intrinsic::experimental_constrained_log2:
   case Intrinsic::experimental_constrained_rint:
   case Intrinsic::experimental_constrained_nearbyint:
-  case Intrinsic::experimental_constrained_maxnum:
-  case Intrinsic::experimental_constrained_minnum:
-  case Intrinsic::experimental_constrained_ceil:
-  case Intrinsic::experimental_constrained_floor:
-  case Intrinsic::experimental_constrained_round:
-  case Intrinsic::experimental_constrained_trunc:
-    visitConstrainedFPIntrinsic(cast<ConstrainedFPIntrinsic>(Call));
+    visitConstrainedFPIntrinsic(
+        cast<ConstrainedFPIntrinsic>(*CS.getInstruction()));
     break;
   case Intrinsic::dbg_declare: // llvm.dbg.declare
-    Assert(isa<MetadataAsValue>(Call.getArgOperand(0)),
-           "invalid llvm.dbg.declare intrinsic call 1", Call);
-    visitDbgIntrinsic("declare", cast<DbgVariableIntrinsic>(Call));
+    Assert(isa<MetadataAsValue>(CS.getArgOperand(0)),
+           "invalid llvm.dbg.declare intrinsic call 1", CS);
+    visitDbgIntrinsic("declare", cast<DbgInfoIntrinsic>(*CS.getInstruction()));
     break;
   case Intrinsic::dbg_addr: // llvm.dbg.addr
-    visitDbgIntrinsic("addr", cast<DbgVariableIntrinsic>(Call));
+    visitDbgIntrinsic("addr", cast<DbgInfoIntrinsic>(*CS.getInstruction()));
     break;
   case Intrinsic::dbg_value: // llvm.dbg.value
-    visitDbgIntrinsic("value", cast<DbgVariableIntrinsic>(Call));
+    visitDbgIntrinsic("value", cast<DbgInfoIntrinsic>(*CS.getInstruction()));
     break;
   case Intrinsic::dbg_label: // llvm.dbg.label
-    visitDbgLabelIntrinsic("label", cast<DbgLabelInst>(Call));
+    visitDbgLabelIntrinsic("label", cast<DbgLabelInst>(*CS.getInstruction()));
     break;
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset: {
-    const auto *MI = cast<MemIntrinsic>(&Call);
+    const auto *MI = cast<MemIntrinsic>(CS.getInstruction());
     auto IsValidAlignment = [&](unsigned Alignment) -> bool {
       return Alignment == 0 || isPowerOf2_32(Alignment);
     };
     Assert(IsValidAlignment(MI->getDestAlignment()),
            "alignment of arg 0 of memory intrinsic must be 0 or a power of 2",
-           Call);
+           CS);
     if (const auto *MTI = dyn_cast<MemTransferInst>(MI)) {
       Assert(IsValidAlignment(MTI->getSourceAlignment()),
              "alignment of arg 1 of memory intrinsic must be 0 or a power of 2",
-             Call);
+             CS);
     }
-    Assert(isa<ConstantInt>(Call.getArgOperand(3)),
+    Assert(isa<ConstantInt>(CS.getArgOperand(3)),
            "isvolatile argument of memory intrinsics must be a constant int",
-           Call);
+           CS);
     break;
   }
   case Intrinsic::memcpy_element_unordered_atomic:
   case Intrinsic::memmove_element_unordered_atomic:
   case Intrinsic::memset_element_unordered_atomic: {
-    const auto *AMI = cast<AtomicMemIntrinsic>(&Call);
+    const auto *AMI = cast<AtomicMemIntrinsic>(CS.getInstruction());
 
     ConstantInt *ElementSizeCI =
         dyn_cast<ConstantInt>(AMI->getRawElementSizeInBytes());
     Assert(ElementSizeCI,
            "element size of the element-wise unordered atomic memory "
            "intrinsic must be a constant int",
-           Call);
+           CS);
     const APInt &ElementSizeVal = ElementSizeCI->getValue();
     Assert(ElementSizeVal.isPowerOf2(),
            "element size of the element-wise atomic memory intrinsic "
            "must be a power of 2",
-           Call);
+           CS);
 
     if (auto *LengthCI = dyn_cast<ConstantInt>(AMI->getLength())) {
       uint64_t Length = LengthCI->getZExtValue();
@@ -4239,7 +4144,7 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
       Assert((Length % ElementSize) == 0,
              "constant length must be a multiple of the element size in the "
              "element-wise atomic memory intrinsic",
-             Call);
+             CS);
     }
 
     auto IsValidAlignment = [&](uint64_t Alignment) {
@@ -4247,11 +4152,11 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
     };
     uint64_t DstAlignment = AMI->getDestAlignment();
     Assert(IsValidAlignment(DstAlignment),
-           "incorrect alignment of the destination argument", Call);
+           "incorrect alignment of the destination argument", CS);
     if (const auto *AMT = dyn_cast<AtomicMemTransferInst>(AMI)) {
       uint64_t SrcAlignment = AMT->getSourceAlignment();
       Assert(IsValidAlignment(SrcAlignment),
-             "incorrect alignment of the source argument", Call);
+             "incorrect alignment of the source argument", CS);
     }
     break;
   }
@@ -4260,76 +4165,76 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
   case Intrinsic::gcread:
     if (ID == Intrinsic::gcroot) {
       AllocaInst *AI =
-          dyn_cast<AllocaInst>(Call.getArgOperand(0)->stripPointerCasts());
-      Assert(AI, "llvm.gcroot parameter #1 must be an alloca.", Call);
-      Assert(isa<Constant>(Call.getArgOperand(1)),
-             "llvm.gcroot parameter #2 must be a constant.", Call);
+        dyn_cast<AllocaInst>(CS.getArgOperand(0)->stripPointerCasts());
+      Assert(AI, "llvm.gcroot parameter #1 must be an alloca.", CS);
+      Assert(isa<Constant>(CS.getArgOperand(1)),
+             "llvm.gcroot parameter #2 must be a constant.", CS);
       if (!AI->getAllocatedType()->isPointerTy()) {
-        Assert(!isa<ConstantPointerNull>(Call.getArgOperand(1)),
+        Assert(!isa<ConstantPointerNull>(CS.getArgOperand(1)),
                "llvm.gcroot parameter #1 must either be a pointer alloca, "
                "or argument #2 must be a non-null constant.",
-               Call);
+               CS);
       }
     }
 
-    Assert(Call.getParent()->getParent()->hasGC(),
-           "Enclosing function does not use GC.", Call);
+    Assert(CS.getParent()->getParent()->hasGC(),
+           "Enclosing function does not use GC.", CS);
     break;
   case Intrinsic::init_trampoline:
-    Assert(isa<Function>(Call.getArgOperand(1)->stripPointerCasts()),
+    Assert(isa<Function>(CS.getArgOperand(1)->stripPointerCasts()),
            "llvm.init_trampoline parameter #2 must resolve to a function.",
-           Call);
+           CS);
     break;
   case Intrinsic::prefetch:
-    Assert(isa<ConstantInt>(Call.getArgOperand(1)) &&
-               isa<ConstantInt>(Call.getArgOperand(2)) &&
-               cast<ConstantInt>(Call.getArgOperand(1))->getZExtValue() < 2 &&
-               cast<ConstantInt>(Call.getArgOperand(2))->getZExtValue() < 4,
-           "invalid arguments to llvm.prefetch", Call);
+    Assert(isa<ConstantInt>(CS.getArgOperand(1)) &&
+               isa<ConstantInt>(CS.getArgOperand(2)) &&
+               cast<ConstantInt>(CS.getArgOperand(1))->getZExtValue() < 2 &&
+               cast<ConstantInt>(CS.getArgOperand(2))->getZExtValue() < 4,
+           "invalid arguments to llvm.prefetch", CS);
     break;
   case Intrinsic::stackprotector:
-    Assert(isa<AllocaInst>(Call.getArgOperand(1)->stripPointerCasts()),
-           "llvm.stackprotector parameter #2 must resolve to an alloca.", Call);
+    Assert(isa<AllocaInst>(CS.getArgOperand(1)->stripPointerCasts()),
+           "llvm.stackprotector parameter #2 must resolve to an alloca.", CS);
     break;
   case Intrinsic::lifetime_start:
   case Intrinsic::lifetime_end:
   case Intrinsic::invariant_start:
-    Assert(isa<ConstantInt>(Call.getArgOperand(0)),
+    Assert(isa<ConstantInt>(CS.getArgOperand(0)),
            "size argument of memory use markers must be a constant integer",
-           Call);
+           CS);
     break;
   case Intrinsic::invariant_end:
-    Assert(isa<ConstantInt>(Call.getArgOperand(1)),
-           "llvm.invariant.end parameter #2 must be a constant integer", Call);
+    Assert(isa<ConstantInt>(CS.getArgOperand(1)),
+           "llvm.invariant.end parameter #2 must be a constant integer", CS);
     break;
 
   case Intrinsic::localescape: {
-    BasicBlock *BB = Call.getParent();
+    BasicBlock *BB = CS.getParent();
     Assert(BB == &BB->getParent()->front(),
-           "llvm.localescape used outside of entry block", Call);
+           "llvm.localescape used outside of entry block", CS);
     Assert(!SawFrameEscape,
-           "multiple calls to llvm.localescape in one function", Call);
-    for (Value *Arg : Call.args()) {
+           "multiple calls to llvm.localescape in one function", CS);
+    for (Value *Arg : CS.args()) {
       if (isa<ConstantPointerNull>(Arg))
         continue; // Null values are allowed as placeholders.
       auto *AI = dyn_cast<AllocaInst>(Arg->stripPointerCasts());
       Assert(AI && AI->isStaticAlloca(),
-             "llvm.localescape only accepts static allocas", Call);
+             "llvm.localescape only accepts static allocas", CS);
     }
-    FrameEscapeInfo[BB->getParent()].first = Call.getNumArgOperands();
+    FrameEscapeInfo[BB->getParent()].first = CS.getNumArgOperands();
     SawFrameEscape = true;
     break;
   }
   case Intrinsic::localrecover: {
-    Value *FnArg = Call.getArgOperand(0)->stripPointerCasts();
+    Value *FnArg = CS.getArgOperand(0)->stripPointerCasts();
     Function *Fn = dyn_cast<Function>(FnArg);
     Assert(Fn && !Fn->isDeclaration(),
            "llvm.localrecover first "
            "argument must be function defined in this module",
-           Call);
-    auto *IdxArg = dyn_cast<ConstantInt>(Call.getArgOperand(2));
+           CS);
+    auto *IdxArg = dyn_cast<ConstantInt>(CS.getArgOperand(2));
     Assert(IdxArg, "idx argument of llvm.localrecover must be a constant int",
-           Call);
+           CS);
     auto &Entry = FrameEscapeInfo[Fn];
     Entry.second = unsigned(
         std::max(uint64_t(Entry.second), IdxArg->getLimitedValue(~0U) + 1));
@@ -4337,46 +4242,45 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
   }
 
   case Intrinsic::experimental_gc_statepoint:
-    if (auto *CI = dyn_cast<CallInst>(&Call))
-      Assert(!CI->isInlineAsm(),
-             "gc.statepoint support for inline assembly unimplemented", CI);
-    Assert(Call.getParent()->getParent()->hasGC(),
-           "Enclosing function does not use GC.", Call);
+    Assert(!CS.isInlineAsm(),
+           "gc.statepoint support for inline assembly unimplemented", CS);
+    Assert(CS.getParent()->getParent()->hasGC(),
+           "Enclosing function does not use GC.", CS);
 
-    verifyStatepoint(Call);
+    verifyStatepoint(CS);
     break;
   case Intrinsic::experimental_gc_result: {
-    Assert(Call.getParent()->getParent()->hasGC(),
-           "Enclosing function does not use GC.", Call);
+    Assert(CS.getParent()->getParent()->hasGC(),
+           "Enclosing function does not use GC.", CS);
     // Are we tied to a statepoint properly?
-    const auto *StatepointCall = dyn_cast<CallBase>(Call.getArgOperand(0));
+    CallSite StatepointCS(CS.getArgOperand(0));
     const Function *StatepointFn =
-        StatepointCall ? StatepointCall->getCalledFunction() : nullptr;
+      StatepointCS.getInstruction() ? StatepointCS.getCalledFunction() : nullptr;
     Assert(StatepointFn && StatepointFn->isDeclaration() &&
                StatepointFn->getIntrinsicID() ==
                    Intrinsic::experimental_gc_statepoint,
-           "gc.result operand #1 must be from a statepoint", Call,
-           Call.getArgOperand(0));
+           "gc.result operand #1 must be from a statepoint", CS,
+           CS.getArgOperand(0));
 
     // Assert that result type matches wrapped callee.
-    const Value *Target = StatepointCall->getArgOperand(2);
+    const Value *Target = StatepointCS.getArgument(2);
     auto *PT = cast<PointerType>(Target->getType());
     auto *TargetFuncType = cast<FunctionType>(PT->getElementType());
-    Assert(Call.getType() == TargetFuncType->getReturnType(),
-           "gc.result result type does not match wrapped callee", Call);
+    Assert(CS.getType() == TargetFuncType->getReturnType(),
+           "gc.result result type does not match wrapped callee", CS);
     break;
   }
   case Intrinsic::experimental_gc_relocate: {
-    Assert(Call.getNumArgOperands() == 3, "wrong number of arguments", Call);
+    Assert(CS.getNumArgOperands() == 3, "wrong number of arguments", CS);
 
-    Assert(isa<PointerType>(Call.getType()->getScalarType()),
-           "gc.relocate must return a pointer or a vector of pointers", Call);
+    Assert(isa<PointerType>(CS.getType()->getScalarType()),
+           "gc.relocate must return a pointer or a vector of pointers", CS);
 
     // Check that this relocate is correctly tied to the statepoint
 
     // This is case for relocate on the unwinding path of an invoke statepoint
     if (LandingPadInst *LandingPad =
-            dyn_cast<LandingPadInst>(Call.getArgOperand(0))) {
+          dyn_cast<LandingPadInst>(CS.getArgOperand(0))) {
 
       const BasicBlock *InvokeBB =
           LandingPad->getParent()->getUniquePredecessor();
@@ -4389,196 +4293,165 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
              InvokeBB);
       Assert(isStatepoint(InvokeBB->getTerminator()),
              "gc relocate should be linked to a statepoint", InvokeBB);
-    } else {
+    }
+    else {
       // In all other cases relocate should be tied to the statepoint directly.
       // This covers relocates on a normal return path of invoke statepoint and
       // relocates of a call statepoint.
-      auto Token = Call.getArgOperand(0);
+      auto Token = CS.getArgOperand(0);
       Assert(isa<Instruction>(Token) && isStatepoint(cast<Instruction>(Token)),
-             "gc relocate is incorrectly tied to the statepoint", Call, Token);
+             "gc relocate is incorrectly tied to the statepoint", CS, Token);
     }
 
     // Verify rest of the relocate arguments.
-    const CallBase &StatepointCall =
-        *cast<CallBase>(cast<GCRelocateInst>(Call).getStatepoint());
+
+    ImmutableCallSite StatepointCS(
+        cast<GCRelocateInst>(*CS.getInstruction()).getStatepoint());
 
     // Both the base and derived must be piped through the safepoint.
-    Value *Base = Call.getArgOperand(1);
+    Value* Base = CS.getArgOperand(1);
     Assert(isa<ConstantInt>(Base),
-           "gc.relocate operand #2 must be integer offset", Call);
+           "gc.relocate operand #2 must be integer offset", CS);
 
-    Value *Derived = Call.getArgOperand(2);
+    Value* Derived = CS.getArgOperand(2);
     Assert(isa<ConstantInt>(Derived),
-           "gc.relocate operand #3 must be integer offset", Call);
+           "gc.relocate operand #3 must be integer offset", CS);
 
     const int BaseIndex = cast<ConstantInt>(Base)->getZExtValue();
     const int DerivedIndex = cast<ConstantInt>(Derived)->getZExtValue();
     // Check the bounds
-    Assert(0 <= BaseIndex && BaseIndex < (int)StatepointCall.arg_size(),
-           "gc.relocate: statepoint base index out of bounds", Call);
-    Assert(0 <= DerivedIndex && DerivedIndex < (int)StatepointCall.arg_size(),
-           "gc.relocate: statepoint derived index out of bounds", Call);
+    Assert(0 <= BaseIndex && BaseIndex < (int)StatepointCS.arg_size(),
+           "gc.relocate: statepoint base index out of bounds", CS);
+    Assert(0 <= DerivedIndex && DerivedIndex < (int)StatepointCS.arg_size(),
+           "gc.relocate: statepoint derived index out of bounds", CS);
 
     // Check that BaseIndex and DerivedIndex fall within the 'gc parameters'
     // section of the statepoint's argument.
-    Assert(StatepointCall.arg_size() > 0,
+    Assert(StatepointCS.arg_size() > 0,
            "gc.statepoint: insufficient arguments");
-    Assert(isa<ConstantInt>(StatepointCall.getArgOperand(3)),
+    Assert(isa<ConstantInt>(StatepointCS.getArgument(3)),
            "gc.statement: number of call arguments must be constant integer");
     const unsigned NumCallArgs =
-        cast<ConstantInt>(StatepointCall.getArgOperand(3))->getZExtValue();
-    Assert(StatepointCall.arg_size() > NumCallArgs + 5,
+        cast<ConstantInt>(StatepointCS.getArgument(3))->getZExtValue();
+    Assert(StatepointCS.arg_size() > NumCallArgs + 5,
            "gc.statepoint: mismatch in number of call arguments");
-    Assert(isa<ConstantInt>(StatepointCall.getArgOperand(NumCallArgs + 5)),
+    Assert(isa<ConstantInt>(StatepointCS.getArgument(NumCallArgs + 5)),
            "gc.statepoint: number of transition arguments must be "
            "a constant integer");
     const int NumTransitionArgs =
-        cast<ConstantInt>(StatepointCall.getArgOperand(NumCallArgs + 5))
+        cast<ConstantInt>(StatepointCS.getArgument(NumCallArgs + 5))
             ->getZExtValue();
     const int DeoptArgsStart = 4 + NumCallArgs + 1 + NumTransitionArgs + 1;
-    Assert(isa<ConstantInt>(StatepointCall.getArgOperand(DeoptArgsStart)),
+    Assert(isa<ConstantInt>(StatepointCS.getArgument(DeoptArgsStart)),
            "gc.statepoint: number of deoptimization arguments must be "
            "a constant integer");
     const int NumDeoptArgs =
-        cast<ConstantInt>(StatepointCall.getArgOperand(DeoptArgsStart))
+        cast<ConstantInt>(StatepointCS.getArgument(DeoptArgsStart))
             ->getZExtValue();
     const int GCParamArgsStart = DeoptArgsStart + 1 + NumDeoptArgs;
-    const int GCParamArgsEnd = StatepointCall.arg_size();
+    const int GCParamArgsEnd = StatepointCS.arg_size();
     Assert(GCParamArgsStart <= BaseIndex && BaseIndex < GCParamArgsEnd,
            "gc.relocate: statepoint base index doesn't fall within the "
            "'gc parameters' section of the statepoint call",
-           Call);
+           CS);
     Assert(GCParamArgsStart <= DerivedIndex && DerivedIndex < GCParamArgsEnd,
            "gc.relocate: statepoint derived index doesn't fall within the "
            "'gc parameters' section of the statepoint call",
-           Call);
+           CS);
 
     // Relocated value must be either a pointer type or vector-of-pointer type,
     // but gc_relocate does not need to return the same pointer type as the
     // relocated pointer. It can be casted to the correct type later if it's
     // desired. However, they must have the same address space and 'vectorness'
-    GCRelocateInst &Relocate = cast<GCRelocateInst>(Call);
+    GCRelocateInst &Relocate = cast<GCRelocateInst>(*CS.getInstruction());
     Assert(Relocate.getDerivedPtr()->getType()->isPtrOrPtrVectorTy(),
-           "gc.relocate: relocated value must be a gc pointer", Call);
+           "gc.relocate: relocated value must be a gc pointer", CS);
 
-    auto ResultType = Call.getType();
+    auto ResultType = CS.getType();
     auto DerivedType = Relocate.getDerivedPtr()->getType();
     Assert(ResultType->isVectorTy() == DerivedType->isVectorTy(),
            "gc.relocate: vector relocates to vector and pointer to pointer",
-           Call);
+           CS);
     Assert(
         ResultType->getPointerAddressSpace() ==
             DerivedType->getPointerAddressSpace(),
         "gc.relocate: relocating a pointer shouldn't change its address space",
-        Call);
+        CS);
     break;
   }
   case Intrinsic::eh_exceptioncode:
   case Intrinsic::eh_exceptionpointer: {
-    Assert(isa<CatchPadInst>(Call.getArgOperand(0)),
-           "eh.exceptionpointer argument must be a catchpad", Call);
+    Assert(isa<CatchPadInst>(CS.getArgOperand(0)),
+           "eh.exceptionpointer argument must be a catchpad", CS);
     break;
   }
   case Intrinsic::masked_load: {
-    Assert(Call.getType()->isVectorTy(), "masked_load: must return a vector",
-           Call);
+    Assert(CS.getType()->isVectorTy(), "masked_load: must return a vector", CS);
 
-    Value *Ptr = Call.getArgOperand(0);
-    // Value *Alignment = Call.getArgOperand(1);
-    Value *Mask = Call.getArgOperand(2);
-    Value *PassThru = Call.getArgOperand(3);
-    Assert(Mask->getType()->isVectorTy(), "masked_load: mask must be vector",
-           Call);
+    Value *Ptr = CS.getArgOperand(0);
+    //Value *Alignment = CS.getArgOperand(1);
+    Value *Mask = CS.getArgOperand(2);
+    Value *PassThru = CS.getArgOperand(3);
+    Assert(Mask->getType()->isVectorTy(),
+           "masked_load: mask must be vector", CS);
 
     // DataTy is the overloaded type
     Type *DataTy = cast<PointerType>(Ptr->getType())->getElementType();
-    Assert(DataTy == Call.getType(),
-           "masked_load: return must match pointer type", Call);
+    Assert(DataTy == CS.getType(),
+           "masked_load: return must match pointer type", CS);
     Assert(PassThru->getType() == DataTy,
-           "masked_load: pass through and data type must match", Call);
+           "masked_load: pass through and data type must match", CS);
     Assert(Mask->getType()->getVectorNumElements() ==
-               DataTy->getVectorNumElements(),
-           "masked_load: vector mask must be same length as data", Call);
+           DataTy->getVectorNumElements(),
+           "masked_load: vector mask must be same length as data", CS);
     break;
   }
   case Intrinsic::masked_store: {
-    Value *Val = Call.getArgOperand(0);
-    Value *Ptr = Call.getArgOperand(1);
-    // Value *Alignment = Call.getArgOperand(2);
-    Value *Mask = Call.getArgOperand(3);
-    Assert(Mask->getType()->isVectorTy(), "masked_store: mask must be vector",
-           Call);
+    Value *Val = CS.getArgOperand(0);
+    Value *Ptr = CS.getArgOperand(1);
+    //Value *Alignment = CS.getArgOperand(2);
+    Value *Mask = CS.getArgOperand(3);
+    Assert(Mask->getType()->isVectorTy(),
+           "masked_store: mask must be vector", CS);
 
     // DataTy is the overloaded type
     Type *DataTy = cast<PointerType>(Ptr->getType())->getElementType();
     Assert(DataTy == Val->getType(),
-           "masked_store: storee must match pointer type", Call);
+           "masked_store: storee must match pointer type", CS);
     Assert(Mask->getType()->getVectorNumElements() ==
-               DataTy->getVectorNumElements(),
-           "masked_store: vector mask must be same length as data", Call);
+           DataTy->getVectorNumElements(),
+           "masked_store: vector mask must be same length as data", CS);
     break;
   }
 
   case Intrinsic::experimental_guard: {
-    Assert(isa<CallInst>(Call), "experimental_guard cannot be invoked", Call);
-    Assert(Call.countOperandBundlesOfType(LLVMContext::OB_deopt) == 1,
+    Assert(CS.isCall(), "experimental_guard cannot be invoked", CS);
+    Assert(CS.countOperandBundlesOfType(LLVMContext::OB_deopt) == 1,
            "experimental_guard must have exactly one "
            "\"deopt\" operand bundle");
     break;
   }
 
   case Intrinsic::experimental_deoptimize: {
-    Assert(isa<CallInst>(Call), "experimental_deoptimize cannot be invoked",
-           Call);
-    Assert(Call.countOperandBundlesOfType(LLVMContext::OB_deopt) == 1,
+    Assert(CS.isCall(), "experimental_deoptimize cannot be invoked", CS);
+    Assert(CS.countOperandBundlesOfType(LLVMContext::OB_deopt) == 1,
            "experimental_deoptimize must have exactly one "
            "\"deopt\" operand bundle");
-    Assert(Call.getType() == Call.getFunction()->getReturnType(),
+    Assert(CS.getType() == CS.getInstruction()->getFunction()->getReturnType(),
            "experimental_deoptimize return type must match caller return type");
 
-    if (isa<CallInst>(Call)) {
-      auto *RI = dyn_cast<ReturnInst>(Call.getNextNode());
+    if (CS.isCall()) {
+      auto *DeoptCI = CS.getInstruction();
+      auto *RI = dyn_cast<ReturnInst>(DeoptCI->getNextNode());
       Assert(RI,
              "calls to experimental_deoptimize must be followed by a return");
 
-      if (!Call.getType()->isVoidTy() && RI)
-        Assert(RI->getReturnValue() == &Call,
+      if (!CS.getType()->isVoidTy() && RI)
+        Assert(RI->getReturnValue() == DeoptCI,
                "calls to experimental_deoptimize must be followed by a return "
                "of the value computed by experimental_deoptimize");
     }
 
-    break;
-  }
-  case Intrinsic::sadd_sat:
-  case Intrinsic::uadd_sat:
-  case Intrinsic::ssub_sat:
-  case Intrinsic::usub_sat: {
-    Value *Op1 = Call.getArgOperand(0);
-    Value *Op2 = Call.getArgOperand(1);
-    Assert(Op1->getType()->isIntOrIntVectorTy(),
-           "first operand of [us][add|sub]_sat must be an int type or vector "
-           "of ints");
-    Assert(Op2->getType()->isIntOrIntVectorTy(),
-           "second operand of [us][add|sub]_sat must be an int type or vector "
-           "of ints");
-    break;
-  }
-  case Intrinsic::smul_fix: {
-    Value *Op1 = Call.getArgOperand(0);
-    Value *Op2 = Call.getArgOperand(1);
-    Assert(Op1->getType()->isIntOrIntVectorTy(),
-           "first operand of smul_fix must be an int type or vector "
-           "of ints");
-    Assert(Op2->getType()->isIntOrIntVectorTy(),
-           "second operand of smul_fix must be an int type or vector "
-           "of ints");
-
-    auto *Op3 = dyn_cast<ConstantInt>(Call.getArgOperand(2));
-    Assert(Op3, "third argument of smul_fix must be a constant integer");
-    Assert(Op3->getType()->getBitWidth() <= 32,
-           "third argument of smul_fix must fit within 32 bits");
-    Assert(Op3->getZExtValue() < Op1->getType()->getScalarSizeInBits(),
-           "the scale of smul_fix must be less than the width of the operands");
     break;
   }
   };
@@ -4618,7 +4491,7 @@ void Verifier::visitConstrainedFPIntrinsic(ConstrainedFPIntrinsic &FPI) {
          "invalid exception behavior argument", &FPI);
 }
 
-void Verifier::visitDbgIntrinsic(StringRef Kind, DbgVariableIntrinsic &DII) {
+void Verifier::visitDbgIntrinsic(StringRef Kind, DbgInfoIntrinsic &DII) {
   auto *MD = cast<MetadataAsValue>(DII.getArgOperand(0))->getMetadata();
   AssertDI(isa<ValueAsMetadata>(MD) ||
              (isa<MDNode>(MD) && !cast<MDNode>(MD)->getNumOperands()),
@@ -4654,21 +4527,13 @@ void Verifier::visitDbgIntrinsic(StringRef Kind, DbgVariableIntrinsic &DII) {
            &DII, BB, F, Var, Var->getScope()->getSubprogram(), Loc,
            Loc->getScope()->getSubprogram());
 
-  // This check is redundant with one in visitLocalVariable().
-  AssertDI(isType(Var->getRawType()), "invalid type ref", Var,
-           Var->getRawType());
-  if (auto *Type = dyn_cast_or_null<DIType>(Var->getRawType()))
-    if (Type->isBlockByrefStruct())
-      AssertDI(DII.getExpression() && DII.getExpression()->getNumElements(),
-               "BlockByRef variable without complex expression", Var, &DII);
-
   verifyFnArgs(DII);
 }
 
 void Verifier::visitDbgLabelIntrinsic(StringRef Kind, DbgLabelInst &DLI) {
-  AssertDI(isa<DILabel>(DLI.getRawLabel()),
+  AssertDI(isa<DILabel>(DLI.getRawVariable()),
          "invalid llvm.dbg." + Kind + " intrinsic variable", &DLI,
-         DLI.getRawLabel());
+         DLI.getRawVariable());
 
   // Ignore broken !dbg attachments; they're checked elsewhere.
   if (MDNode *N = DLI.getDebugLoc().getAsMDNode())
@@ -4695,7 +4560,10 @@ void Verifier::visitDbgLabelIntrinsic(StringRef Kind, DbgLabelInst &DLI) {
            Loc->getScope()->getSubprogram());
 }
 
-void Verifier::verifyFragmentExpression(const DbgVariableIntrinsic &I) {
+void Verifier::verifyFragmentExpression(const DbgInfoIntrinsic &I) {
+  if (dyn_cast<DbgLabelInst>(&I))
+    return;
+
   DILocalVariable *V = dyn_cast_or_null<DILocalVariable>(I.getRawVariable());
   DIExpression *E = dyn_cast_or_null<DIExpression>(I.getRawExpression());
 
@@ -4737,7 +4605,7 @@ void Verifier::verifyFragmentExpression(const DIVariable &V,
   AssertDI(FragSize != *VarSize, "fragment covers entire variable", Desc, &V);
 }
 
-void Verifier::verifyFnArgs(const DbgVariableIntrinsic &I) {
+void Verifier::verifyFnArgs(const DbgInfoIntrinsic &I) {
   // This function does not take the scope of noninlined function arguments into
   // account. Don't run it if current function is nodebug, because it may
   // contain inlined debug intrinsics.
@@ -4792,14 +4660,6 @@ void Verifier::verifyDeoptimizeCallingConvs() {
            "calling convention",
            First, F);
   }
-}
-
-void Verifier::verifySourceDebugInfo(const DICompileUnit &U, const DIFile &F) {
-  bool HasSource = F.getSource().hasValue();
-  if (!HasSourceDebugInfo.count(&U))
-    HasSourceDebugInfo[&U] = HasSource;
-  AssertDI(HasSource == HasSourceDebugInfo[&U],
-           "inconsistent use of embedded source");
 }
 
 //===----------------------------------------------------------------------===//
@@ -4858,10 +4718,9 @@ struct VerifierLegacyPass : public FunctionPass {
   }
 
   bool runOnFunction(Function &F) override {
-    if (!V->verify(F) && FatalErrors) {
-      errs() << "in function " << F.getName() << '\n'; 
+    if (!V->verify(F) && FatalErrors)
       report_fatal_error("Broken function found, compilation aborted!");
-    }
+
     return false;
   }
 

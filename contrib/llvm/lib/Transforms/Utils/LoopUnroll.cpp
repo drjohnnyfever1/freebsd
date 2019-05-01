@@ -54,10 +54,10 @@ UnrollRuntimeEpilog("unroll-runtime-epilog", cl::init(false), cl::Hidden,
 static cl::opt<bool>
 UnrollVerifyDomtree("unroll-verify-domtree", cl::Hidden,
                     cl::desc("Verify domtree after unrolling"),
-#ifdef EXPENSIVE_CHECKS
-    cl::init(true)
-#else
+#ifdef NDEBUG
     cl::init(false)
+#else
+    cl::init(true)
 #endif
                     );
 
@@ -275,7 +275,8 @@ void llvm::simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
   // inserted code, doing constant propagation and dead code elimination as we
   // go.
   const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
-  for (BasicBlock *BB : L->getBlocks()) {
+  const std::vector<BasicBlock *> &NewLoopBlocks = L->getBlocks();
+  for (BasicBlock *BB : NewLoopBlocks) {
     for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E;) {
       Instruction *Inst = &*I++;
 
@@ -329,15 +330,12 @@ void llvm::simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
 ///
 /// This utility preserves LoopInfo. It will also preserve ScalarEvolution and
 /// DominatorTree if they are non-null.
-///
-/// If RemainderLoop is non-null, it will receive the remainder loop (if
-/// required and not fully unrolled).
 LoopUnrollResult llvm::UnrollLoop(
     Loop *L, unsigned Count, unsigned TripCount, bool Force, bool AllowRuntime,
     bool AllowExpensiveTripCount, bool PreserveCondBr, bool PreserveOnlyFirst,
     unsigned TripMultiple, unsigned PeelCount, bool UnrollRemainder,
     LoopInfo *LI, ScalarEvolution *SE, DominatorTree *DT, AssumptionCache *AC,
-    OptimizationRemarkEmitter *ORE, bool PreserveLCSSA, Loop **RemainderLoop) {
+    OptimizationRemarkEmitter *ORE, bool PreserveLCSSA) {
 
   BasicBlock *Preheader = L->getLoopPreheader();
   if (!Preheader) {
@@ -471,7 +469,7 @@ LoopUnrollResult llvm::UnrollLoop(
   if (RuntimeTripCount && TripMultiple % Count != 0 &&
       !UnrollRuntimeLoopRemainder(L, Count, AllowExpensiveTripCount,
                                   EpilogProfitability, UnrollRemainder, LI, SE,
-                                  DT, AC, PreserveLCSSA, RemainderLoop)) {
+                                  DT, AC, PreserveLCSSA)) {
     if (Force)
       RuntimeTripCount = false;
     else {
@@ -598,15 +596,8 @@ LoopUnrollResult llvm::UnrollLoop(
     for (BasicBlock *BB : L->getBlocks())
       for (Instruction &I : *BB)
         if (!isa<DbgInfoIntrinsic>(&I))
-          if (const DILocation *DIL = I.getDebugLoc()) {
-            auto NewDIL = DIL->cloneWithDuplicationFactor(Count);
-            if (NewDIL)
-              I.setDebugLoc(NewDIL.getValue());
-            else
-              LLVM_DEBUG(dbgs()
-                         << "Failed to create new discriminator: "
-                         << DIL->getFilename() << " Line: " << DIL->getLine());
-          }
+          if (const DILocation *DIL = I.getDebugLoc())
+            I.setDebugLoc(DIL->cloneWithDuplicationFactor(Count));
 
   for (unsigned It = 1; It != Count; ++It) {
     std::vector<BasicBlock*> NewBlocks;
@@ -791,7 +782,7 @@ LoopUnrollResult llvm::UnrollLoop(
         // there is no such latch.
         NewIDom = Latches.back();
         for (BasicBlock *IterLatch : Latches) {
-          Instruction *Term = IterLatch->getTerminator();
+          TerminatorInst *Term = IterLatch->getTerminator();
           if (isa<BranchInst>(Term) && cast<BranchInst>(Term)->isConditional()) {
             NewIDom = IterLatch;
             break;

@@ -702,7 +702,7 @@ AArch64LoadStoreOpt::mergeNarrowZeroStores(MachineBasicBlock::iterator I,
             .addReg(isNarrowStore(Opc) ? AArch64::WZR : AArch64::XZR)
             .add(BaseRegOp)
             .addImm(OffsetImm)
-            .cloneMergedMemRefs({&*I, &*MergeMI})
+            .setMemRefs(I->mergeMemRefsWith(*MergeMI))
             .setMIFlags(I->mergeFlagsWith(*MergeMI));
   (void)MIB;
 
@@ -819,7 +819,7 @@ AArch64LoadStoreOpt::mergePairedInsns(MachineBasicBlock::iterator I,
             .add(RegOp1)
             .add(BaseRegOp)
             .addImm(OffsetImm)
-            .cloneMergedMemRefs({&*I, &*Paired})
+            .setMemRefs(I->mergeMemRefsWith(*Paired))
             .setMIFlags(I->mergeFlagsWith(*Paired));
 
   (void)MIB;
@@ -1338,7 +1338,7 @@ AArch64LoadStoreOpt::mergeUpdateInsn(MachineBasicBlock::iterator I,
               .add(getLdStRegOp(*I))
               .add(getLdStBaseOp(*I))
               .addImm(Value)
-              .setMemRefs(I->memoperands())
+              .setMemRefs(I->memoperands_begin(), I->memoperands_end())
               .setMIFlags(I->mergeFlagsWith(*Update));
   } else {
     // Paired instruction.
@@ -1349,7 +1349,7 @@ AArch64LoadStoreOpt::mergeUpdateInsn(MachineBasicBlock::iterator I,
               .add(getLdStRegOp(*I, 1))
               .add(getLdStBaseOp(*I))
               .addImm(Value / Scale)
-              .setMemRefs(I->memoperands())
+              .setMemRefs(I->memoperands_begin(), I->memoperands_end())
               .setMIFlags(I->mergeFlagsWith(*Update));
   }
   (void)MIB;

@@ -467,7 +467,7 @@ public:
       : Argument(Argument), LocInfo(E) {
 
     // Permit any kind of template argument that can be represented with an
-    // expression.
+    // expression
     assert(Argument.getKind() == TemplateArgument::NullPtr ||
            Argument.getKind() == TemplateArgument::Integral ||
            Argument.getKind() == TemplateArgument::Declaration ||
@@ -530,22 +530,19 @@ public:
   }
 
   NestedNameSpecifierLoc getTemplateQualifierLoc() const {
-    if (Argument.getKind() != TemplateArgument::Template &&
-        Argument.getKind() != TemplateArgument::TemplateExpansion)
-      return NestedNameSpecifierLoc();
+    assert(Argument.getKind() == TemplateArgument::Template ||
+           Argument.getKind() == TemplateArgument::TemplateExpansion);
     return LocInfo.getTemplateQualifierLoc();
   }
 
   SourceLocation getTemplateNameLoc() const {
-    if (Argument.getKind() != TemplateArgument::Template &&
-        Argument.getKind() != TemplateArgument::TemplateExpansion)
-      return SourceLocation();
+    assert(Argument.getKind() == TemplateArgument::Template ||
+           Argument.getKind() == TemplateArgument::TemplateExpansion);
     return LocInfo.getTemplateNameLoc();
   }
 
   SourceLocation getTemplateEllipsisLoc() const {
-    if (Argument.getKind() != TemplateArgument::TemplateExpansion)
-      return SourceLocation();
+    assert(Argument.getKind() == TemplateArgument::TemplateExpansion);
     return LocInfo.getTemplateEllipsisLoc();
   }
 };
@@ -620,17 +617,13 @@ public:
   /// The number of template arguments in TemplateArgs.
   unsigned NumTemplateArgs;
 
-  SourceLocation getLAngleLoc() const { return LAngleLoc; }
-  SourceLocation getRAngleLoc() const { return RAngleLoc; }
-
   /// Retrieve the template arguments
   const TemplateArgumentLoc *getTemplateArgs() const {
     return getTrailingObjects<TemplateArgumentLoc>();
   }
-  unsigned getNumTemplateArgs() const { return NumTemplateArgs; }
 
   llvm::ArrayRef<TemplateArgumentLoc> arguments() const {
-    return llvm::makeArrayRef(getTemplateArgs(), getNumTemplateArgs());
+    return llvm::makeArrayRef(getTemplateArgs(), NumTemplateArgs);
   }
 
   const TemplateArgumentLoc &operator[](unsigned I) const {

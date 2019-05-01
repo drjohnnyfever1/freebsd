@@ -14,7 +14,7 @@
 
 #include <string>
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 
 namespace lldb_private {
 class Debugger;
@@ -30,8 +30,7 @@ public:
 
   void Flush() override;
 
-protected:
-  size_t WriteImpl(const void *src, size_t src_len) override;
+  size_t Write(const void *src, size_t src_len) override;
 
 private:
   Debugger &m_debugger;

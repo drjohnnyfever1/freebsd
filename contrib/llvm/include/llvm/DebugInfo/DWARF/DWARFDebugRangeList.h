@@ -18,6 +18,7 @@
 
 namespace llvm {
 
+struct BaseAddress;
 class raw_ostream;
 
 class DWARFDebugRangeList {
@@ -77,7 +78,7 @@ public:
   /// list. Has to be passed base address of the compile unit referencing this
   /// range list.
   DWARFAddressRangesVector
-  getAbsoluteRanges(llvm::Optional<SectionedAddress> BaseAddr) const;
+  getAbsoluteRanges(llvm::Optional<BaseAddress> BaseAddr) const;
 };
 
 } // end namespace llvm

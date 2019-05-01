@@ -19,7 +19,6 @@
 
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/ADT/SmallBitVector.h"
-#include "llvm/CodeGen/GlobalISel/GISelChangeObserver.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -52,7 +51,7 @@ raw_ostream &LegalityQuery::print(raw_ostream &OS) const {
 
   OS << Opcode << ", MMOs={";
   for (const auto &MMODescr : MMODescrs) {
-    OS << MMODescr.SizeInBits << ", ";
+    OS << MMODescr.Size << ", ";
   }
   OS << "}";
 
@@ -220,7 +219,7 @@ void LegalizerInfo::computeTables() {
             Opcode, TypeIdx, ElementSize,
             moreToWiderTypesAndLessToWidest(NumElementsActions));
       }
-      llvm::sort(ElementSizesSeen);
+      llvm::sort(ElementSizesSeen.begin(), ElementSizesSeen.end());
       SizeChangeStrategy VectorElementSizeChangeStrategy =
           &unsupportedForDifferentSizes;
       if (TypeIdx < VectorElementSizeChangeStrategies[OpcodeIdx].size() &&
@@ -299,7 +298,8 @@ LegalizeRuleSet &LegalizerInfo::getActionDefinitionsBuilder(
     std::initializer_list<unsigned> Opcodes) {
   unsigned Representative = *Opcodes.begin();
 
-  assert(!empty(Opcodes) && Opcodes.begin() + 1 != Opcodes.end() &&
+  assert(Opcodes.begin() != Opcodes.end() &&
+         Opcodes.begin() + 1 != Opcodes.end() &&
          "Initializer list must have at least two opcodes");
 
   for (auto I = Opcodes.begin() + 1, E = Opcodes.end(); I != E; ++I)
@@ -376,8 +376,7 @@ bool LegalizerInfo::isLegal(const MachineInstr &MI,
 }
 
 bool LegalizerInfo::legalizeCustom(MachineInstr &MI, MachineRegisterInfo &MRI,
-                                   MachineIRBuilder &MIRBuilder,
-                                   GISelChangeObserver &Observer) const {
+                                   MachineIRBuilder &MIRBuilder) const {
   return false;
 }
 
@@ -585,7 +584,7 @@ const MachineInstr *llvm::machineFunctionIsIllegal(const MachineFunction &MF) {
     for (const MachineBasicBlock &MBB : MF)
       for (const MachineInstr &MI : MBB)
         if (isPreISelGenericOpcode(MI.getOpcode()) && !MLI->isLegal(MI, MRI))
-          return &MI;
+	  return &MI;
   }
   return nullptr;
 }

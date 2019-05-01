@@ -46,7 +46,7 @@ SymbolFile *SymbolFileSymtab::CreateInstance(ObjectFile *obj_file) {
 }
 
 size_t SymbolFileSymtab::GetTypes(SymbolContextScope *sc_scope,
-                                  TypeClass type_mask,
+                                  uint32_t type_mask,
                                   lldb_private::TypeList &type_list) {
   return 0;
 }
@@ -131,13 +131,15 @@ CompUnitSP SymbolFileSymtab::ParseCompileUnitAtIndex(uint32_t idx) {
   return cu_sp;
 }
 
-lldb::LanguageType SymbolFileSymtab::ParseLanguage(CompileUnit &comp_unit) {
+lldb::LanguageType
+SymbolFileSymtab::ParseCompileUnitLanguage(const SymbolContext &sc) {
   return eLanguageTypeUnknown;
 }
 
-size_t SymbolFileSymtab::ParseFunctions(CompileUnit &comp_unit) {
+size_t SymbolFileSymtab::ParseCompileUnitFunctions(const SymbolContext &sc) {
   size_t num_added = 0;
   // We must at least have a valid compile unit
+  assert(sc.comp_unit != NULL);
   const Symtab *symtab = m_obj_file->GetSymtab();
   const Symbol *curr_symbol = NULL;
   const Symbol *next_symbol = NULL;
@@ -183,7 +185,7 @@ size_t SymbolFileSymtab::ParseFunctions(CompileUnit &comp_unit) {
             }
 
             FunctionSP func_sp(
-                new Function(&comp_unit,
+                new Function(sc.comp_unit,
                              symbol_idx,       // UserID is the DIE offset
                              LLDB_INVALID_UID, // We don't have any type info
                                                // for this function
@@ -192,7 +194,7 @@ size_t SymbolFileSymtab::ParseFunctions(CompileUnit &comp_unit) {
                              func_range)); // first address range
 
             if (func_sp.get() != NULL) {
-              comp_unit.AddFunction(func_sp);
+              sc.comp_unit->AddFunction(func_sp);
               ++num_added;
             }
           }
@@ -205,16 +207,16 @@ size_t SymbolFileSymtab::ParseFunctions(CompileUnit &comp_unit) {
   return num_added;
 }
 
-size_t SymbolFileSymtab::ParseTypes(CompileUnit &comp_unit) { return 0; }
-
-bool SymbolFileSymtab::ParseLineTable(CompileUnit &comp_unit) { return false; }
-
-bool SymbolFileSymtab::ParseDebugMacros(CompileUnit &comp_unit) {
+bool SymbolFileSymtab::ParseCompileUnitLineTable(const SymbolContext &sc) {
   return false;
 }
 
-bool SymbolFileSymtab::ParseSupportFiles(CompileUnit &comp_unit,
-                                         FileSpecList &support_files) {
+bool SymbolFileSymtab::ParseCompileUnitDebugMacros(const SymbolContext &sc) {
+  return false;
+}
+
+bool SymbolFileSymtab::ParseCompileUnitSupportFiles(
+    const SymbolContext &sc, FileSpecList &support_files) {
   return false;
 }
 
@@ -223,7 +225,11 @@ bool SymbolFileSymtab::ParseImportedModules(
   return false;
 }
 
-size_t SymbolFileSymtab::ParseBlocksRecursive(Function &func) { return 0; }
+size_t SymbolFileSymtab::ParseFunctionBlocks(const SymbolContext &sc) {
+  return 0;
+}
+
+size_t SymbolFileSymtab::ParseTypes(const SymbolContext &sc) { return 0; }
 
 size_t SymbolFileSymtab::ParseVariablesForContext(const SymbolContext &sc) {
   return 0;
@@ -233,18 +239,12 @@ Type *SymbolFileSymtab::ResolveTypeUID(lldb::user_id_t type_uid) {
   return NULL;
 }
 
-llvm::Optional<SymbolFile::ArrayInfo>
-SymbolFileSymtab::GetDynamicArrayInfoForUID(
-    lldb::user_id_t type_uid, const lldb_private::ExecutionContext *exe_ctx) {
-  return llvm::None;
-}
-
 bool SymbolFileSymtab::CompleteType(lldb_private::CompilerType &compiler_type) {
   return false;
 }
 
 uint32_t SymbolFileSymtab::ResolveSymbolContext(const Address &so_addr,
-                                                SymbolContextItem resolve_scope,
+                                                uint32_t resolve_scope,
                                                 SymbolContext &sc) {
   if (m_obj_file->GetSymtab() == NULL)
     return 0;

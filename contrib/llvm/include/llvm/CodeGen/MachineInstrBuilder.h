@@ -191,20 +191,15 @@ public:
     return *this;
   }
 
-  const MachineInstrBuilder &
-  setMemRefs(ArrayRef<MachineMemOperand *> MMOs) const {
-    MI->setMemRefs(*MF, MMOs);
+  const MachineInstrBuilder &setMemRefs(MachineInstr::mmo_iterator b,
+                                        MachineInstr::mmo_iterator e) const {
+    MI->setMemRefs(b, e);
     return *this;
   }
 
-  const MachineInstrBuilder &cloneMemRefs(const MachineInstr &OtherMI) const {
-    MI->cloneMemRefs(*MF, OtherMI);
-    return *this;
-  }
-
-  const MachineInstrBuilder &
-  cloneMergedMemRefs(ArrayRef<const MachineInstr *> OtherMIs) const {
-    MI->cloneMergedMemRefs(*MF, OtherMIs);
+  const MachineInstrBuilder &setMemRefs(std::pair<MachineInstr::mmo_iterator,
+                                        unsigned> MemOperandsRef) const {
+    MI->setMemRefs(MemOperandsRef);
     return *this;
   }
 

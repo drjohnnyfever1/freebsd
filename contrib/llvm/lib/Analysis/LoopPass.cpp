@@ -20,7 +20,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/OptBisect.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/IR/PassTimingInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -194,14 +193,8 @@ bool LPPassManager::runOnFunction(Function &F) {
   }
 
   // Walk Loops
-  unsigned InstrCount, FunctionSize = 0;
-  StringMap<std::pair<unsigned, unsigned>> FunctionToInstrCount;
+  unsigned InstrCount = 0;
   bool EmitICRemark = M.shouldEmitInstrCountChangedRemark();
-  // Collect the initial size of the module and the function we're looking at.
-  if (EmitICRemark) {
-    InstrCount = initSizeRemarkInfo(M, FunctionToInstrCount);
-    FunctionSize = F.getInstructionCount();
-  }
   while (!LQ.empty()) {
     CurrentLoopDeleted = false;
     CurrentLoop = LQ.back();
@@ -216,28 +209,17 @@ bool LPPassManager::runOnFunction(Function &F) {
 
       initializeAnalysisImpl(P);
 
-      bool LocalChanged = false;
       {
         PassManagerPrettyStackEntry X(P, *CurrentLoop->getHeader());
         TimeRegion PassTimer(getPassTimer(P));
-        LocalChanged = P->runOnLoop(CurrentLoop, *this);
-        Changed |= LocalChanged;
-        if (EmitICRemark) {
-          unsigned NewSize = F.getInstructionCount();
-          // Update the size of the function, emit a remark, and update the
-          // size of the module.
-          if (NewSize != FunctionSize) {
-            int64_t Delta = static_cast<int64_t>(NewSize) -
-                            static_cast<int64_t>(FunctionSize);
-            emitInstrCountChangedRemark(P, M, Delta, InstrCount,
-                                        FunctionToInstrCount, &F);
-            InstrCount = static_cast<int64_t>(InstrCount) + Delta;
-            FunctionSize = NewSize;
-          }
-        }
+        if (EmitICRemark)
+          InstrCount = initSizeRemarkInfo(M);
+        Changed |= P->runOnLoop(CurrentLoop, *this);
+        if (EmitICRemark)
+          emitInstrCountChangedRemark(P, M, InstrCount);
       }
 
-      if (LocalChanged)
+      if (Changed)
         dumpPassInfo(P, MODIFICATION_MSG, ON_LOOP_MSG,
                      CurrentLoopDeleted ? "<deleted loop>"
                                         : CurrentLoop->getName());

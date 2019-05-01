@@ -84,10 +84,10 @@ typedef void (*OptionValueChangedCallback)(void *baton,
                                            OptionValue *option_value);
 typedef bool (*ThreadPlanShouldStopHereCallback)(
     ThreadPlan *current_plan, Flags &flags, lldb::FrameComparison operation,
-    Status &status, void *baton);
+    void *baton);
 typedef lldb::ThreadPlanSP (*ThreadPlanStepFromHereCallback)(
     ThreadPlan *current_plan, Flags &flags, lldb::FrameComparison operation,
-    Status &status, void *baton);
+    void *baton);
 typedef UnwindAssembly *(*UnwindAssemblyCreateInstance)(const ArchSpec &arch);
 typedef lldb::MemoryHistorySP (*MemoryHistoryCreateInstance)(
     const lldb::ProcessSP &process_sp);

@@ -46,10 +46,10 @@ char OptionArgParser::ToChar(llvm::StringRef s, char fail_value,
 }
 
 int64_t OptionArgParser::ToOptionEnum(llvm::StringRef s,
-                                      const OptionEnumValues &enum_values,
+                                      OptionEnumValueElement *enum_values,
                                       int32_t fail_value, Status &error) {
   error.Clear();
-  if (enum_values.empty()) {
+  if (!enum_values) {
     error.SetErrorString("invalid enumeration argument");
     return fail_value;
   }
@@ -59,18 +59,16 @@ int64_t OptionArgParser::ToOptionEnum(llvm::StringRef s,
     return fail_value;
   }
 
-  for (const auto &enum_value : enum_values) {
-    llvm::StringRef this_enum(enum_value.string_value);
+  for (int i = 0; enum_values[i].string_value != nullptr; i++) {
+    llvm::StringRef this_enum(enum_values[i].string_value);
     if (this_enum.startswith(s))
-      return enum_value.value;
+      return enum_values[i].value;
   }
 
   StreamString strm;
   strm.PutCString("invalid enumeration value, valid values are: ");
-  bool is_first = true;
-  for (const auto &enum_value : enum_values) {
-    strm.Printf("%s\"%s\"",
-        is_first ? is_first = false,"" : ", ", enum_value.string_value);
+  for (int i = 0; enum_values[i].string_value != nullptr; i++) {
+    strm.Printf("%s\"%s\"", i > 0 ? ", " : "", enum_values[i].string_value);
   }
   error.SetErrorString(strm.GetString());
   return fail_value;

@@ -90,10 +90,7 @@ public:
 
   void GetDWARFDeclContext(DWARFDeclContext &dwarf_decl_ctx) const;
 
-  /// Return this DIE's decl context as it is needed to look up types
-  /// in Clang's -gmodules debug info format.
-  void
-  GetDeclContext(std::vector<lldb_private::CompilerContext> &context) const;
+  void GetDWOContext(std::vector<lldb_private::CompilerContext> &context) const;
 
   //----------------------------------------------------------------------
   // Getting attribute values from the DIE.

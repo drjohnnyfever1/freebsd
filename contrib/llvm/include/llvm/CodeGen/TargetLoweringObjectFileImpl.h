@@ -90,8 +90,6 @@ public:
   const MCExpr *lowerRelativeReference(const GlobalValue *LHS,
                                        const GlobalValue *RHS,
                                        const TargetMachine &TM) const override;
-
-  MCSection *getSectionForCommandLines() const override;
 };
 
 class TargetLoweringObjectFileMachO : public TargetLoweringObjectFile {

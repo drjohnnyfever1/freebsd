@@ -13,8 +13,7 @@ using namespace llvm;
 
 StringRef StringSaver::save(StringRef S) {
   char *P = Alloc.Allocate<char>(S.size() + 1);
-  if (!S.empty())
-    memcpy(P, S.data(), S.size());
+  memcpy(P, S.data(), S.size());
   P[S.size()] = '\0';
   return StringRef(P, S.size());
 }

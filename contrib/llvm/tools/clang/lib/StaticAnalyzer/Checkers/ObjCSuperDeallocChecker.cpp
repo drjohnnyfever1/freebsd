@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
+#include "ClangSACheckers.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
@@ -72,6 +72,7 @@ public:
         Satisfied(false) {}
 
   std::shared_ptr<PathDiagnosticPiece> VisitNode(const ExplodedNode *Succ,
+                                                 const ExplodedNode *Pred,
                                                  BugReporterContext &BRC,
                                                  BugReport &BR) override;
 
@@ -246,7 +247,8 @@ ObjCSuperDeallocChecker::isSuperDeallocMessage(const ObjCMethodCall &M) const {
 
 std::shared_ptr<PathDiagnosticPiece>
 SuperDeallocBRVisitor::VisitNode(const ExplodedNode *Succ,
-                                 BugReporterContext &BRC, BugReport &) {
+                                 const ExplodedNode *Pred,
+                                 BugReporterContext &BRC, BugReport &BR) {
   if (Satisfied)
     return nullptr;
 
@@ -255,8 +257,7 @@ SuperDeallocBRVisitor::VisitNode(const ExplodedNode *Succ,
   bool CalledNow =
       Succ->getState()->contains<CalledSuperDealloc>(ReceiverSymbol);
   bool CalledBefore =
-      Succ->getFirstPred()->getState()->contains<CalledSuperDealloc>(
-          ReceiverSymbol);
+      Pred->getState()->contains<CalledSuperDealloc>(ReceiverSymbol);
 
   // Is Succ the node on which the analyzer noted that [super dealloc] was
   // called on ReceiverSymbol?

@@ -83,21 +83,18 @@ Error mergeIdRecords(MergingTypeTableBuilder &Dest, ArrayRef<TypeIndex> Types,
 Error mergeTypeAndIdRecords(MergingTypeTableBuilder &DestIds,
                             MergingTypeTableBuilder &DestTypes,
                             SmallVectorImpl<TypeIndex> &SourceToDest,
-                            const CVTypeArray &IdsAndTypes,
-                            Optional<uint32_t> &PCHSignature);
+                            const CVTypeArray &IdsAndTypes);
 
 Error mergeTypeAndIdRecords(GlobalTypeTableBuilder &DestIds,
                             GlobalTypeTableBuilder &DestTypes,
                             SmallVectorImpl<TypeIndex> &SourceToDest,
                             const CVTypeArray &IdsAndTypes,
-                            ArrayRef<GloballyHashedType> Hashes,
-                            Optional<uint32_t> &PCHSignature);
+                            ArrayRef<GloballyHashedType> Hashes);
 
 Error mergeTypeRecords(GlobalTypeTableBuilder &Dest,
                        SmallVectorImpl<TypeIndex> &SourceToDest,
                        const CVTypeArray &Types,
-                       ArrayRef<GloballyHashedType> Hashes,
-                       Optional<uint32_t> &PCHSignature);
+                       ArrayRef<GloballyHashedType> Hashes);
 
 Error mergeIdRecords(GlobalTypeTableBuilder &Dest, ArrayRef<TypeIndex> Types,
                      SmallVectorImpl<TypeIndex> &SourceToDest,

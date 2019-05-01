@@ -78,7 +78,7 @@ bool VarBypassDetector::BuildScopeInformation(const Stmt *S,
         return false;
       ++StmtsToSkip;
     }
-    LLVM_FALLTHROUGH;
+  // Fall through
 
   case Stmt::GotoStmtClass:
     FromScopes.push_back({S, ParentScope});

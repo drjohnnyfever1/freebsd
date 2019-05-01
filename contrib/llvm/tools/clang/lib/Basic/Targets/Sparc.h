@@ -199,7 +199,7 @@ public:
     LongWidth = LongAlign = PointerWidth = PointerAlign = 64;
 
     // OpenBSD uses long long for int64_t and intmax_t.
-    if (getTriple().isOSOpenBSD())
+    if (getTriple().getOS() == llvm::Triple::OpenBSD)
       IntMaxType = SignedLongLong;
     else
       IntMaxType = SignedLong;

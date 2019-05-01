@@ -12,8 +12,10 @@
 
 #include "lldb/Host/Config.h"
 
+// C Includes
 #include <limits.h>
 
+// C++ Includes
 #include <chrono>
 #include <list>
 #include <memory>
@@ -22,8 +24,13 @@
 #include <unordered_set>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointSiteList.h"
+#include "lldb/Core/Broadcaster.h"
 #include "lldb/Core/Communication.h"
+#include "lldb/Core/Event.h"
+#include "lldb/Core/Listener.h"
 #include "lldb/Core/LoadedModuleInfoList.h"
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Core/ThreadSafeValue.h"
@@ -40,9 +47,6 @@
 #include "lldb/Target/QueueList.h"
 #include "lldb/Target/ThreadList.h"
 #include "lldb/Utility/ArchSpec.h"
-#include "lldb/Utility/Broadcaster.h"
-#include "lldb/Utility/Event.h"
-#include "lldb/Utility/Listener.h"
 #include "lldb/Utility/NameMatches.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StructuredData.h"
@@ -315,7 +319,7 @@ public:
                            NameMatch process_name_match_type)
       : m_match_info(), m_name_match_type(process_name_match_type),
         m_match_all_users(false) {
-    m_match_info.GetExecutableFile().SetFile(process_name,
+    m_match_info.GetExecutableFile().SetFile(process_name, false,
                                              FileSpec::Style::native);
   }
 
@@ -398,8 +402,7 @@ class ProcessModID {
 public:
   ProcessModID()
       : m_stop_id(0), m_last_natural_stop_id(0), m_resume_id(0), m_memory_id(0),
-        m_last_user_expression_resume(0), m_running_user_expression(false),
-        m_running_utility_function(0) {}
+        m_last_user_expression_resume(0), m_running_user_expression(false) {}
 
   ProcessModID(const ProcessModID &rhs)
       : m_stop_id(rhs.m_stop_id), m_memory_id(rhs.m_memory_id) {}
@@ -426,10 +429,6 @@ public:
     m_resume_id++;
     if (m_running_user_expression > 0)
       m_last_user_expression_resume = m_resume_id;
-  }
-
-  bool IsRunningUtilityFunction() const {
-    return m_running_utility_function > 0;
   }
 
   uint32_t GetStopID() const { return m_stop_id; }
@@ -468,17 +467,6 @@ public:
       m_running_user_expression--;
   }
 
-  void SetRunningUtilityFunction(bool on) {
-    if (on)
-      m_running_utility_function++;
-    else {
-      assert(m_running_utility_function > 0 &&
-             "Called SetRunningUtilityFunction(false) without calling "
-             "SetRunningUtilityFunction(true) before?");
-      m_running_utility_function--;
-    }
-  }
-
   void SetStopEventForLastNaturalStopID(lldb::EventSP event_sp) {
     m_last_natural_stop_event = event_sp;
   }
@@ -496,7 +484,6 @@ private:
   uint32_t m_memory_id;
   uint32_t m_last_user_expression_resume;
   uint32_t m_running_user_expression;
-  uint32_t m_running_utility_function;
   lldb::EventSP m_last_natural_stop_event;
 };
 
@@ -2081,7 +2068,7 @@ public:
   ///     An error value.
   //------------------------------------------------------------------
   virtual Status
-  GetMemoryRegions(lldb_private::MemoryRegionInfos &region_list);
+  GetMemoryRegions(std::vector<lldb::MemoryRegionInfoSP> &region_list);
 
   virtual Status GetWatchpointSupportInfo(uint32_t &num) {
     Status error;
@@ -2567,7 +2554,6 @@ public:
   virtual bool StopNoticingNewThreads() { return true; }
 
   void SetRunningUserExpression(bool on);
-  void SetRunningUtilityFunction(bool on);
 
   //------------------------------------------------------------------
   // lldb::ExecutionContextScope pure virtual functions
@@ -3237,24 +3223,6 @@ private:
   void ControlPrivateStateThread(uint32_t signal);
 
   DISALLOW_COPY_AND_ASSIGN(Process);
-};
-
-//------------------------------------------------------------------
-/// RAII guard that should be aquired when an utility function is called within
-/// a given process.
-//------------------------------------------------------------------
-class UtilityFunctionScope {
-  Process *m_process;
-
-public:
-  UtilityFunctionScope(Process *p) : m_process(p) {
-    if (m_process)
-      m_process->SetRunningUtilityFunction(true);
-  }
-  ~UtilityFunctionScope() {
-    if (m_process)
-      m_process->SetRunningUtilityFunction(false);
-  }
 };
 
 } // namespace lldb_private

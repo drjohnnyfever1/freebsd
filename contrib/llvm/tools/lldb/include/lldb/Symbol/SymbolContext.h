@@ -10,10 +10,14 @@
 #ifndef liblldb_SymbolContext_h_
 #define liblldb_SymbolContext_h_
 
+// C Includes
+// C++ Includes
 #include <memory>
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/Address.h"
 #include "lldb/Core/Mangled.h"
 #include "lldb/Symbol/LineEntry.h"
@@ -228,7 +232,7 @@ public:
 
   bool GetAddressRangeFromHereToEndLine(uint32_t end_line, AddressRange &range,
                                         Status &error);
-
+  
   //------------------------------------------------------------------
   /// Find the best global data symbol visible from this context.
   ///
@@ -465,6 +469,10 @@ public:
 
   bool AppendIfUnique(const SymbolContext &sc, bool merge_symbol_into_function);
 
+  bool MergeSymbolContextIntoFunctionContext(const SymbolContext &symbol_sc,
+                                             uint32_t start_idx = 0,
+                                             uint32_t stop_idx = UINT32_MAX);
+
   uint32_t AppendIfUnique(const SymbolContextList &sc_list,
                           bool merge_symbol_into_function);
 
@@ -522,6 +530,18 @@ public:
   const SymbolContext &operator[](size_t idx) const {
     return m_symbol_contexts[idx];
   }
+
+  //------------------------------------------------------------------
+  /// Get accessor for the last symbol context in the list.
+  ///
+  /// @param[out] sc
+  ///     A reference to the symbol context to fill in.
+  ///
+  /// @return
+  ///     Returns \b true if \a sc was filled in, \b false if the
+  ///     list is empty.
+  //------------------------------------------------------------------
+  bool GetLastContext(SymbolContext &sc) const;
 
   bool RemoveContextAtIndex(size_t idx);
 

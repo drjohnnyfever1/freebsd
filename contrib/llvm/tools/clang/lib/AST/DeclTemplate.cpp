@@ -149,8 +149,6 @@ void *allocateDefaultArgStorageChain(const ASTContext &C) {
 // RedeclarableTemplateDecl Implementation
 //===----------------------------------------------------------------------===//
 
-void RedeclarableTemplateDecl::anchor() {}
-
 RedeclarableTemplateDecl::CommonBase *RedeclarableTemplateDecl::getCommonPtr() const {
   if (Common)
     return Common;
@@ -300,40 +298,6 @@ ArrayRef<TemplateArgument> FunctionTemplateDecl::getInjectedTemplateArgs() {
   }
 
   return llvm::makeArrayRef(CommonPtr->InjectedArgs, Params->size());
-}
-
-void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
-  using Base = RedeclarableTemplateDecl;
-
-  // If we haven't created a common pointer yet, then it can just be created
-  // with the usual method.
-  if (!Base::Common)
-    return;
-
-  Common *ThisCommon = static_cast<Common *>(Base::Common);
-  Common *PrevCommon = nullptr;
-  SmallVector<FunctionTemplateDecl *, 8> PreviousDecls;
-  for (; Prev; Prev = Prev->getPreviousDecl()) {
-    if (Prev->Base::Common) {
-      PrevCommon = static_cast<Common *>(Prev->Base::Common);
-      break;
-    }
-    PreviousDecls.push_back(Prev);
-  }
-
-  // If the previous redecl chain hasn't created a common pointer yet, then just
-  // use this common pointer.
-  if (!PrevCommon) {
-    for (auto *D : PreviousDecls)
-      D->Base::Common = ThisCommon;
-    return;
-  }
-
-  // Ensure we don't leak any important state.
-  assert(ThisCommon->Specializations.size() == 0 &&
-         "Can't merge incompatible declarations!");
-
-  Base::Common = PrevCommon;
 }
 
 //===----------------------------------------------------------------------===//
@@ -509,7 +473,7 @@ SourceLocation TemplateTypeParmDecl::getDefaultArgumentLoc() const {
 
 SourceRange TemplateTypeParmDecl::getSourceRange() const {
   if (hasDefaultArgument() && !defaultArgumentWasInherited())
-    return SourceRange(getBeginLoc(),
+    return SourceRange(getLocStart(),
                        getDefaultArgumentInfo()->getTypeLoc().getEndLoc());
   else
     return TypeDecl::getSourceRange();
@@ -748,7 +712,7 @@ ClassTemplateSpecializationDecl::Create(ASTContext &Context, TagKind TK,
       new (Context, DC) ClassTemplateSpecializationDecl(
           Context, ClassTemplateSpecialization, TK, DC, StartLoc, IdLoc,
           SpecializedTemplate, Args, PrevDecl);
-  Result->setMayHaveOutOfDateDef(false);
+  Result->MayHaveOutOfDateDef = false;
 
   Context.getTypeDeclType(Result, PrevDecl);
   return Result;
@@ -759,7 +723,7 @@ ClassTemplateSpecializationDecl::CreateDeserialized(ASTContext &C,
                                                     unsigned ID) {
   auto *Result =
     new (C, ID) ClassTemplateSpecializationDecl(C, ClassTemplateSpecialization);
-  Result->setMayHaveOutOfDateDef(false);
+  Result->MayHaveOutOfDateDef = false;
   return Result;
 }
 
@@ -866,7 +830,7 @@ Create(ASTContext &Context, TagKind TK,DeclContext *DC,
                                              Params, SpecializedTemplate, Args,
                                              ASTArgInfos, PrevDecl);
   Result->setSpecializationKind(TSK_ExplicitSpecialization);
-  Result->setMayHaveOutOfDateDef(false);
+  Result->MayHaveOutOfDateDef = false;
 
   Context.getInjectedClassNameType(Result, CanonInjectedType);
   return Result;
@@ -876,7 +840,7 @@ ClassTemplatePartialSpecializationDecl *
 ClassTemplatePartialSpecializationDecl::CreateDeserialized(ASTContext &C,
                                                            unsigned ID) {
   auto *Result = new (C, ID) ClassTemplatePartialSpecializationDecl(C);
-  Result->setMayHaveOutOfDateDef(false);
+  Result->MayHaveOutOfDateDef = false;
   return Result;
 }
 

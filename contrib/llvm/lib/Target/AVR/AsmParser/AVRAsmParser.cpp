@@ -34,9 +34,8 @@
 
 #define DEBUG_TYPE "avr-asm-parser"
 
-using namespace llvm;
+namespace llvm {
 
-namespace {
 /// Parses AVR assembly from a stream.
 class AVRAsmParser : public MCTargetAsmParser {
   const MCSubtargetInfo &STI;
@@ -245,8 +244,6 @@ public:
     O << "\n";
   }
 };
-
-} // end anonymous namespace.
 
 // Auto-generated Match Functions
 
@@ -513,7 +510,6 @@ bool AVRAsmParser::parseOperand(OperandVector &Operands) {
     case AsmToken::Real:
       if (!tryParseExpression(Operands))
         return false;
-      break;
     default:
       break;
     }
@@ -712,3 +708,5 @@ unsigned AVRAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
   }
   return Match_InvalidOperand;
 }
+
+} // end of namespace llvm

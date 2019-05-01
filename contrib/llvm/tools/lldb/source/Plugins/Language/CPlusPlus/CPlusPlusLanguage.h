@@ -10,12 +10,15 @@
 #ifndef liblldb_CPlusPlusLanguage_h_
 #define liblldb_CPlusPlusLanguage_h_
 
+// C Includes
+// C++ Includes
 #include <set>
 #include <vector>
 
+// Other libraries and framework includes
 #include "llvm/ADT/StringRef.h"
 
-#include "Plugins/Language/ClangCommon/ClangHighlighter.h"
+// Project includes
 #include "lldb/Target/Language.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-private.h"
@@ -23,8 +26,6 @@
 namespace lldb_private {
 
 class CPlusPlusLanguage : public Language {
-  ClangHighlighter m_highlighter;
-
 public:
   class MethodName {
   public:
@@ -88,10 +89,6 @@ public:
 
   HardcodedFormatters::HardcodedSyntheticFinder
   GetHardcodedSynthetics() override;
-
-  bool IsSourceFile(llvm::StringRef file_path) const override;
-
-  const Highlighter *GetHighlighter() const override { return &m_highlighter; }
 
   //------------------------------------------------------------------
   // Static Functions

@@ -28,12 +28,11 @@
 using namespace llvm;
 
 AMDGPUCallLowering::AMDGPUCallLowering(const AMDGPUTargetLowering &TLI)
-  : CallLowering(&TLI) {
+  : CallLowering(&TLI), AMDGPUASI(TLI.getAMDGPUAS()) {
 }
 
 bool AMDGPUCallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
-                                     const Value *Val,
-                                     ArrayRef<unsigned> VRegs) const {
+                                     const Value *Val, unsigned VReg) const {
   // FIXME: Add support for non-void returns.
   if (Val)
     return false;
@@ -51,7 +50,7 @@ unsigned AMDGPUCallLowering::lowerParameterPtr(MachineIRBuilder &MIRBuilder,
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const Function &F = MF.getFunction();
   const DataLayout &DL = F.getParent()->getDataLayout();
-  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUAS::CONSTANT_ADDRESS);
+  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUASI.CONSTANT_ADDRESS);
   LLT PtrType = getLLTForType(*PtrTy, DL);
   unsigned DstReg = MRI.createGenericVirtualRegister(PtrType);
   unsigned KernArgSegmentPtr =
@@ -73,7 +72,7 @@ void AMDGPUCallLowering::lowerParameter(MachineIRBuilder &MIRBuilder,
   MachineFunction &MF = MIRBuilder.getMF();
   const Function &F = MF.getFunction();
   const DataLayout &DL = F.getParent()->getDataLayout();
-  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUAS::CONSTANT_ADDRESS);
+  PointerType *PtrTy = PointerType::get(ParamTy, AMDGPUASI.CONSTANT_ADDRESS);
   MachinePointerInfo PtrInfo(UndefValue::get(PtrTy));
   unsigned TypeSize = DL.getTypeStoreSize(ParamTy);
   unsigned PtrReg = lowerParameterPtr(MIRBuilder, ParamTy, Offset);

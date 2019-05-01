@@ -134,10 +134,10 @@ rescheduleLexographically(std::vector<MachineInstr *> instructions,
     StringInstrMap.push_back({(i == std::string::npos) ? S : S.substr(i), II});
   }
 
-  llvm::sort(StringInstrMap,
-             [](const StringInstrPair &a, const StringInstrPair &b) -> bool {
-               return (a.first < b.first);
-             });
+  llvm::sort(StringInstrMap.begin(), StringInstrMap.end(),
+            [](const StringInstrPair &a, const StringInstrPair &b) -> bool {
+              return (a.first < b.first);
+            });
 
   for (auto &II : StringInstrMap) {
 
@@ -677,7 +677,8 @@ static bool runOnBasicBlock(MachineBasicBlock *MBB,
 
   std::vector<MachineInstr *> Candidates = populateCandidates(MBB);
   std::vector<MachineInstr *> VisitedMIs;
-  llvm::copy(Candidates, std::back_inserter(VisitedMIs));
+  std::copy(Candidates.begin(), Candidates.end(),
+            std::back_inserter(VisitedMIs));
 
   std::vector<TypedVReg> VRegs;
   for (auto candidate : Candidates) {

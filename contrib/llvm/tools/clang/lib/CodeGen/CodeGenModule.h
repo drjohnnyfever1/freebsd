@@ -119,28 +119,14 @@ struct OrderGlobalInits {
 struct ObjCEntrypoints {
   ObjCEntrypoints() { memset(this, 0, sizeof(*this)); }
 
-  /// void objc_alloc(id);
-  llvm::Constant *objc_alloc;
-
-  /// void objc_allocWithZone(id);
-  llvm::Constant *objc_allocWithZone;
-
-  /// void objc_autoreleasePoolPop(void*);
+    /// void objc_autoreleasePoolPop(void*);
   llvm::Constant *objc_autoreleasePoolPop;
-
-  /// void objc_autoreleasePoolPop(void*);
-  /// Note this method is used when we are using exception handling
-  llvm::Constant *objc_autoreleasePoolPopInvoke;
 
   /// void *objc_autoreleasePoolPush(void);
   llvm::Constant *objc_autoreleasePoolPush;
 
   /// id objc_autorelease(id);
   llvm::Constant *objc_autorelease;
-
-  /// id objc_autorelease(id);
-  /// Note this is the runtime method not the intrinsic.
-  llvm::Constant *objc_autoreleaseRuntimeFunction;
 
   /// id objc_autoreleaseReturnValue(id);
   llvm::Constant *objc_autoreleaseReturnValue;
@@ -166,10 +152,6 @@ struct ObjCEntrypoints {
   /// id objc_retain(id);
   llvm::Constant *objc_retain;
 
-  /// id objc_retain(id);
-  /// Note this is the runtime method not the intrinsic.
-  llvm::Constant *objc_retainRuntimeFunction;
-
   /// id objc_retainAutorelease(id);
   llvm::Constant *objc_retainAutorelease;
 
@@ -184,10 +166,6 @@ struct ObjCEntrypoints {
 
   /// void objc_release(id);
   llvm::Constant *objc_release;
-
-  /// void objc_release(id);
-  /// Note this is the runtime method not the intrinsic.
-  llvm::Constant *objc_releaseRuntimeFunction;
 
   /// void objc_storeStrong(id*, id);
   llvm::Constant *objc_storeStrong;
@@ -786,8 +764,7 @@ public:
   /// bitcast to the new variable.
   llvm::GlobalVariable *
   CreateOrReplaceCXXRuntimeVariable(StringRef Name, llvm::Type *Ty,
-                                    llvm::GlobalValue::LinkageTypes Linkage,
-                                    unsigned Alignment);
+                                    llvm::GlobalValue::LinkageTypes Linkage);
 
   llvm::Function *
   CreateGlobalInitOrDestructFunction(llvm::FunctionType *ty, const Twine &name,
@@ -1065,7 +1042,8 @@ public:
                                      const CGFunctionInfo &FI);
 
   /// Set the LLVM function attributes (sext, zext, etc).
-  void SetLLVMFunctionAttributes(GlobalDecl GD, const CGFunctionInfo &Info,
+  void SetLLVMFunctionAttributes(const Decl *D,
+                                 const CGFunctionInfo &Info,
                                  llvm::Function *F);
 
   /// Set the LLVM function attributes which only apply to a function
@@ -1125,7 +1103,8 @@ public:
 
   // Fills in the supplied string map with the set of target features for the
   // passed in function.
-  void getFunctionFeatureMap(llvm::StringMap<bool> &FeatureMap, GlobalDecl GD);
+  void getFunctionFeatureMap(llvm::StringMap<bool> &FeatureMap,
+                             const FunctionDecl *FD);
 
   StringRef getMangledName(GlobalDecl GD);
   StringRef getBlockMangledName(GlobalDecl GD, const BlockDecl *BD);
@@ -1244,10 +1223,6 @@ public:
   void EmitOMPDeclareReduction(const OMPDeclareReductionDecl *D,
                                CodeGenFunction *CGF = nullptr);
 
-  /// Emit a code for requires directive.
-  /// \param D Requires declaration
-  void EmitOMPRequiresDecl(const OMPRequiresDecl *D);
-
   /// Returns whether the given record has hidden LTO visibility and therefore
   /// may participate in (single-module) CFI and whole-program vtable
   /// optimization.
@@ -1313,9 +1288,9 @@ private:
       llvm::AttributeList ExtraAttrs = llvm::AttributeList(),
       ForDefinition_t IsForDefinition = NotForDefinition);
 
-  llvm::Constant *GetOrCreateMultiVersionResolver(GlobalDecl GD,
-                                                  llvm::Type *DeclTy,
-                                                  const FunctionDecl *FD);
+  llvm::Constant *GetOrCreateMultiVersionIFunc(GlobalDecl GD,
+                                               llvm::Type *DeclTy,
+                                               const FunctionDecl *FD);
   void UpdateMultiVersionNames(GlobalDecl GD, const FunctionDecl *FD);
 
   llvm::Constant *GetOrCreateLLVMGlobal(StringRef MangledName,
@@ -1324,7 +1299,7 @@ private:
                                         ForDefinition_t IsForDefinition
                                           = NotForDefinition);
 
-  bool GetCPUAndFeaturesAttributes(GlobalDecl GD,
+  bool GetCPUAndFeaturesAttributes(const Decl *D,
                                    llvm::AttrBuilder &AttrBuilder);
   void setNonAliasAttributes(GlobalDecl GD, llvm::GlobalObject *GO);
 
@@ -1335,8 +1310,6 @@ private:
   void EmitGlobalDefinition(GlobalDecl D, llvm::GlobalValue *GV = nullptr);
 
   void EmitGlobalFunctionDefinition(GlobalDecl GD, llvm::GlobalValue *GV);
-  void EmitMultiVersionFunctionDefinition(GlobalDecl GD, llvm::GlobalValue *GV);
-
   void EmitGlobalVarDefinition(const VarDecl *D, bool IsTentative = false);
   void EmitAliasDefinition(GlobalDecl GD);
   void emitIFuncDefinition(GlobalDecl GD);
@@ -1423,9 +1396,6 @@ private:
 
   /// Emit the Clang version as llvm.ident metadata.
   void EmitVersionIdentMetadata();
-
-  /// Emit the Clang commandline as llvm.commandline metadata.
-  void EmitCommandLineMetadata();
 
   /// Emits target specific Metadata for global declarations.
   void EmitTargetMetadata();

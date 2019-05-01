@@ -42,8 +42,6 @@ template <typename PointerTy, unsigned IntBits, typename IntType = unsigned,
           typename PtrTraits = PointerLikeTypeTraits<PointerTy>,
           typename Info = PointerIntPairInfo<PointerTy, IntBits, PtrTraits>>
 class PointerIntPair {
-  // Used by MSVC visualizer and generally helpful for debugging/visualizing.
-  using InfoTy = Info;
   intptr_t Value = 0;
 
 public:

@@ -23,13 +23,20 @@ namespace llvm {
 static bool isAESPair(const MachineInstr *FirstMI,
                       const MachineInstr &SecondMI) {
   // Assume the 1st instr to be a wildcard if it is unspecified.
-  switch(SecondMI.getOpcode()) {
+  unsigned FirstOpcode =
+      FirstMI ? FirstMI->getOpcode()
+              : static_cast<unsigned>(ARM::INSTRUCTION_LIST_END);
+  unsigned SecondOpcode = SecondMI.getOpcode();
+
+  switch(SecondOpcode) {
   // AES encode.
   case ARM::AESMC :
-    return FirstMI == nullptr || FirstMI->getOpcode() == ARM::AESE;
+    return FirstOpcode == ARM::AESE ||
+           FirstOpcode == ARM::INSTRUCTION_LIST_END;
   // AES decode.
   case ARM::AESIMC:
-    return FirstMI == nullptr || FirstMI->getOpcode() == ARM::AESD;
+    return FirstOpcode == ARM::AESD ||
+           FirstOpcode == ARM::INSTRUCTION_LIST_END;
   }
 
   return false;
@@ -39,8 +46,15 @@ static bool isAESPair(const MachineInstr *FirstMI,
 static bool isLiteralsPair(const MachineInstr *FirstMI,
                            const MachineInstr &SecondMI) {
   // Assume the 1st instr to be a wildcard if it is unspecified.
-  if ((FirstMI == nullptr || FirstMI->getOpcode() == ARM::MOVi16) &&
-      SecondMI.getOpcode() == ARM::MOVTi16)
+  unsigned FirstOpcode =
+      FirstMI ? FirstMI->getOpcode()
+              : static_cast<unsigned>(ARM::INSTRUCTION_LIST_END);
+  unsigned SecondOpcode = SecondMI.getOpcode();
+
+  // 32 bit immediate.
+  if ((FirstOpcode == ARM::INSTRUCTION_LIST_END ||
+       FirstOpcode == ARM::MOVi16) &&
+      SecondOpcode == ARM::MOVTi16)
     return true;
 
   return false;

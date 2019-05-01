@@ -50,7 +50,7 @@ class Symbol;
 
 // If -reproduce option is given, all input files are written
 // to this tar archive.
-extern std::unique_ptr<llvm::TarWriter> Tar;
+extern llvm::TarWriter *Tar;
 
 // Opens a given file.
 llvm::Optional<MemoryBufferRef> readFile(StringRef Path);
@@ -86,9 +86,7 @@ public:
 
   // Returns object file symbols. It is a runtime error to call this
   // function on files of other types.
-  ArrayRef<Symbol *> getSymbols() { return getMutableSymbols(); }
-
-  std::vector<Symbol *> &getMutableSymbols() {
+  ArrayRef<Symbol *> getSymbols() {
     assert(FileKind == BinaryKind || FileKind == ObjKind ||
            FileKind == BitcodeKind);
     return Symbols;
@@ -171,10 +169,10 @@ template <class ELFT> class ObjFile : public ELFFileBase<ELFT> {
   typedef typename ELFT::Sym Elf_Sym;
   typedef typename ELFT::Shdr Elf_Shdr;
   typedef typename ELFT::Word Elf_Word;
-  typedef typename ELFT::CGProfile Elf_CGProfile;
 
   StringRef getShtGroupSignature(ArrayRef<Elf_Shdr> Sections,
                                  const Elf_Shdr &Sec);
+  ArrayRef<Elf_Word> getShtGroupEntries(const Elf_Shdr &Sec);
 
 public:
   static bool classof(const InputFile *F) { return F->kind() == Base::ObjKind; }
@@ -219,9 +217,6 @@ public:
 
   // Pointer to this input file's .llvm_addrsig section, if it has one.
   const Elf_Shdr *AddrsigSec = nullptr;
-
-  // SHT_LLVM_CALL_GRAPH_PROFILE table
-  ArrayRef<Elf_CGProfile> CGProfile;
 
 private:
   void
@@ -277,6 +272,8 @@ public:
   bool AddedToLink = false;
 
 private:
+  template <class ELFT> void addElfSymbols();
+
   uint64_t OffsetInArchive;
 };
 
@@ -323,7 +320,6 @@ template <class ELFT> class SharedFile : public ELFFileBase<ELFT> {
 
 public:
   std::vector<const Elf_Verdef *> Verdefs;
-  std::vector<StringRef> DtNeeded;
   std::string SoName;
 
   static bool classof(const InputFile *F) {
@@ -332,7 +328,7 @@ public:
 
   SharedFile(MemoryBufferRef M, StringRef DefaultSoName);
 
-  void parseDynamic();
+  void parseSoName();
   void parseRest();
   uint32_t getAlignment(ArrayRef<Elf_Shdr> Sections, const Elf_Sym &Sym);
   std::vector<const Elf_Verdef *> parseVerdefs();
@@ -349,9 +345,6 @@ public:
   // Mapping from Elf_Verdef data structures to information about Elf_Vernaux
   // data structures in the output file.
   std::map<const Elf_Verdef *, NeededVer> VerdefMap;
-
-  // Used for --no-allow-shlib-undefined.
-  bool AllNeededIsKnown;
 
   // Used for --as-needed
   bool IsNeeded;

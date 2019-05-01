@@ -208,7 +208,6 @@ class Call_nr<bits<5> nbits, bit isPred, bit isFalse, dag iops,
     let isPredicable = 0;  // !if(isPred, 0, 1);
     let isPredicated = 0;  // isPred;
     let isPredicatedFalse = isFalse;
-    let Itinerary = itin;
 }
 
 def PS_call_nr : Call_nr<24, 0, 0, (ins s32_0Imm:$Ii), J2_call.Itinerary>;
@@ -526,11 +525,11 @@ let isCodeGenOnly = 1, isPseudo = 1, Defs = [CS], Uses = [CS],
     addrMode = PostInc, accessSize = MS, hasSideEffects = 0 in {
   def NAME#_pci : LDInst<(outs RC:$Rd32, IntRegs:$Rx32),
        (ins IntRegs:$Rx32in, s4_0Imm:$Ii, ModRegs:$Mu2, IntRegs:$Cs),
-       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_e93a3d71>;
+       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_4403ca65>;
 
   def NAME#_pcr : LDInst<(outs RC:$Rd32, IntRegs:$Rx32),
        (ins IntRegs:$Rx32in, ModRegs:$Mu2, IntRegs:$Cs),
-       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_44d3da28>;
+       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_2fc0c436>;
 }
 }
 
@@ -547,11 +546,11 @@ let isCodeGenOnly = 1, isPseudo = 1, Defs = [CS], Uses = [CS],
     addrMode = PostInc, accessSize = MS, hasSideEffects = 0 in {
   def NAME#_pci : STInst<(outs IntRegs:$Rx32),
        (ins IntRegs:$Rx32in, s4_0Imm:$Ii, ModRegs:$Mu2, RC:$Rt32, IntRegs:$Cs),
-       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_e86aa961>;
+       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_9fdb5406>;
 
   def NAME#_pcr : STInst<(outs IntRegs:$Rx32),
        (ins IntRegs:$Rx32in, ModRegs:$Mu2, RC:$Rt32, IntRegs:$Cs),
-       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_da97ee82>;
+       ".error \"should not emit\" ", [], "$Rx32 = $Rx32in", tc_f86c328a>;
 }
 }
 

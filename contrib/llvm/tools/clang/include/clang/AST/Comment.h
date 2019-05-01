@@ -215,8 +215,10 @@ public:
 
   SourceRange getSourceRange() const LLVM_READONLY { return Range; }
 
+  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const LLVM_READONLY { return Range.getBegin(); }
 
+  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
   SourceLocation getEndLoc() const LLVM_READONLY { return Range.getEnd(); }
 
   SourceLocation getLocation() const LLVM_READONLY { return Loc; }
@@ -347,7 +349,8 @@ public:
   }
 
   SourceRange getCommandNameRange() const {
-    return SourceRange(getBeginLoc().getLocWithOffset(-1), getEndLoc());
+    return SourceRange(getLocStart().getLocWithOffset(-1),
+                       getLocEnd());
   }
 
   RenderKind getRenderKind() const {
@@ -561,9 +564,9 @@ public:
 
     ParagraphCommentBits.IsWhitespaceValid = false;
 
-    setSourceRange(SourceRange(Content.front()->getBeginLoc(),
-                               Content.back()->getEndLoc()));
-    setLocation(Content.front()->getBeginLoc());
+    setSourceRange(SourceRange(Content.front()->getLocStart(),
+                               Content.back()->getLocEnd()));
+    setLocation(Content.front()->getLocStart());
   }
 
   static bool classof(const Comment *C) {
@@ -657,13 +660,13 @@ public:
   }
 
   SourceLocation getCommandNameBeginLoc() const {
-    return getBeginLoc().getLocWithOffset(1);
+    return getLocStart().getLocWithOffset(1);
   }
 
   SourceRange getCommandNameRange(const CommandTraits &Traits) const {
     StringRef Name = getCommandName(Traits);
     return SourceRange(getCommandNameBeginLoc(),
-                       getBeginLoc().getLocWithOffset(1 + Name.size()));
+                       getLocStart().getLocWithOffset(1 + Name.size()));
   }
 
   unsigned getNumArgs() const {
@@ -683,7 +686,7 @@ public:
     if (Args.size() > 0) {
       SourceLocation NewLocEnd = Args.back().Range.getEnd();
       if (NewLocEnd.isValid())
-        setSourceRange(SourceRange(getBeginLoc(), NewLocEnd));
+        setSourceRange(SourceRange(getLocStart(), NewLocEnd));
     }
   }
 
@@ -697,9 +700,9 @@ public:
 
   void setParagraph(ParagraphComment *PC) {
     Paragraph = PC;
-    SourceLocation NewLocEnd = PC->getEndLoc();
+    SourceLocation NewLocEnd = PC->getLocEnd();
     if (NewLocEnd.isValid())
-      setSourceRange(SourceRange(getBeginLoc(), NewLocEnd));
+      setSourceRange(SourceRange(getLocStart(), NewLocEnd));
   }
 
   CommandMarkerKind getCommandMarker() const LLVM_READONLY {
@@ -973,7 +976,7 @@ public:
   }
 
   SourceRange getTextRange() const {
-    return SourceRange(TextBegin, getEndLoc());
+    return SourceRange(TextBegin, getLocEnd());
   }
 };
 
@@ -1100,9 +1103,9 @@ public:
     if (Blocks.empty())
       return;
 
-    setSourceRange(
-        SourceRange(Blocks.front()->getBeginLoc(), Blocks.back()->getEndLoc()));
-    setLocation(Blocks.front()->getBeginLoc());
+    setSourceRange(SourceRange(Blocks.front()->getLocStart(),
+                               Blocks.back()->getLocEnd()));
+    setLocation(Blocks.front()->getLocStart());
   }
 
   static bool classof(const Comment *C) {

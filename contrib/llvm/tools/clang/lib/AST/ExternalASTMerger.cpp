@@ -144,14 +144,14 @@ public:
     }
     if (auto *ToTag = dyn_cast<TagDecl>(To)) {
       ToTag->setHasExternalLexicalStorage();
-      ToTag->getPrimaryContext()->setMustBuildLookupTable();
+      ToTag->setMustBuildLookupTable();
       assert(Parent.CanComplete(ToTag));
     } else if (auto *ToNamespace = dyn_cast<NamespaceDecl>(To)) {
       ToNamespace->setHasExternalVisibleStorage();
       assert(Parent.CanComplete(ToNamespace));
     } else if (auto *ToContainer = dyn_cast<ObjCContainerDecl>(To)) {
       ToContainer->setHasExternalLexicalStorage();
-      ToContainer->getPrimaryContext()->setMustBuildLookupTable();
+      ToContainer->setMustBuildLookupTable();
       assert(Parent.CanComplete(ToContainer));
     }
     return To;
@@ -230,8 +230,7 @@ void ExternalASTMerger::CompleteType(TagDecl *Tag) {
     if (!SourceTag->getDefinition())
       return false;
     Forward.MapImported(SourceTag, Tag);
-    if (llvm::Error Err = Forward.ImportDefinition_New(SourceTag))
-      llvm::consumeError(std::move(Err));
+    Forward.ImportDefinition(SourceTag);
     Tag->setCompleteDefinition(SourceTag->isCompleteDefinition());
     return true;
   });
@@ -250,8 +249,7 @@ void ExternalASTMerger::CompleteType(ObjCInterfaceDecl *Interface) {
         if (!SourceInterface->getDefinition())
           return false;
         Forward.MapImported(SourceInterface, Interface);
-        if (llvm::Error Err = Forward.ImportDefinition_New(SourceInterface))
-          llvm::consumeError(std::move(Err));
+        Forward.ImportDefinition(SourceInterface);
         return true;
       });
 }

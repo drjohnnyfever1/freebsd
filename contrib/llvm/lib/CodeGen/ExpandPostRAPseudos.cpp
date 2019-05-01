@@ -97,8 +97,6 @@ bool ExpandPostRA::LowerSubregToReg(MachineInstr *MI) {
 
   if (MI->allDefsAreDead()) {
     MI->setDesc(TII->get(TargetOpcode::KILL));
-    MI->RemoveOperand(3); // SubIdx
-    MI->RemoveOperand(1); // Imm
     LLVM_DEBUG(dbgs() << "subreg: replaced by: " << *MI);
     return true;
   }

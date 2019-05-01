@@ -891,7 +891,14 @@ void HexagonExpandCondsets::predicateAt(const MachineOperand &DefOp,
       MB.add(MO);
     Ox++;
   }
-  MB.cloneMemRefs(MI);
+
+  MachineFunction &MF = *B.getParent();
+  MachineInstr::mmo_iterator I = MI.memoperands_begin();
+  unsigned NR = std::distance(I, MI.memoperands_end());
+  MachineInstr::mmo_iterator MemRefs = MF.allocateMemRefsArray(NR);
+  for (unsigned i = 0; i < NR; ++i)
+    MemRefs[i] = *I++;
+  MB.setMemRefs(MemRefs, MemRefs+NR);
 
   MachineInstr *NewI = MB;
   NewI->clearKillInfo();

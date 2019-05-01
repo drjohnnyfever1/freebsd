@@ -57,8 +57,7 @@ struct MsanMapUnmapCallback {
     static const uptr kMetadataSize = sizeof(Metadata);
     typedef __sanitizer::CompactSizeClassMap SizeClassMap;
     static const uptr kRegionSizeLog = __msan::kRegionSizeLog;
-    using AddressSpaceView = LocalAddressSpaceView;
-    using ByteMap = __msan::ByteMap;
+    typedef __msan::ByteMap ByteMap;
     typedef MsanMapUnmapCallback MapUnmapCallback;
     static const uptr kFlags = 0;
   };
@@ -79,7 +78,6 @@ struct MsanMapUnmapCallback {
     typedef DefaultSizeClassMap SizeClassMap;
     typedef MsanMapUnmapCallback MapUnmapCallback;
     static const uptr kFlags = 0;
-    using AddressSpaceView = LocalAddressSpaceView;
   };
 
   typedef SizeClassAllocator64<AP64> PrimaryAllocator;
@@ -94,7 +92,6 @@ struct MsanMapUnmapCallback {
     typedef DefaultSizeClassMap SizeClassMap;
     typedef MsanMapUnmapCallback MapUnmapCallback;
     static const uptr kFlags = 0;
-    using AddressSpaceView = LocalAddressSpaceView;
   };
 
   typedef SizeClassAllocator64<AP64> PrimaryAllocator;
@@ -110,8 +107,7 @@ struct MsanMapUnmapCallback {
     static const uptr kMetadataSize = sizeof(Metadata);
     typedef __sanitizer::CompactSizeClassMap SizeClassMap;
     static const uptr kRegionSizeLog = __msan::kRegionSizeLog;
-    using AddressSpaceView = LocalAddressSpaceView;
-    using ByteMap = __msan::ByteMap;
+    typedef __msan::ByteMap ByteMap;
     typedef MsanMapUnmapCallback MapUnmapCallback;
     static const uptr kFlags = 0;
   };

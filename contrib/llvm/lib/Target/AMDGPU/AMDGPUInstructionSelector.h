@@ -105,6 +105,9 @@ private:
 #define GET_GLOBALISEL_TEMPORARIES_DECL
 #include "AMDGPUGenGlobalISel.inc"
 #undef GET_GLOBALISEL_TEMPORARIES_DECL
+
+protected:
+  AMDGPUAS AMDGPUASI;
 };
 
 } // End llvm namespace.

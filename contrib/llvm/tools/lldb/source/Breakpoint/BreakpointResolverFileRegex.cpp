@@ -9,6 +9,10 @@
 
 #include "lldb/Breakpoint/BreakpointResolverFileRegex.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/SourceManager.h"
 #include "lldb/Symbol/CompileUnit.h"
@@ -153,8 +157,8 @@ BreakpointResolverFileRegex::SearchCallback(SearchFilter &filter,
   return Searcher::eCallbackReturnContinue;
 }
 
-lldb::SearchDepth BreakpointResolverFileRegex::GetDepth() {
-  return lldb::eSearchDepthCompUnit;
+Searcher::Depth BreakpointResolverFileRegex::GetDepth() {
+  return Searcher::eDepthCompUnit;
 }
 
 void BreakpointResolverFileRegex::GetDescription(Stream *s) {

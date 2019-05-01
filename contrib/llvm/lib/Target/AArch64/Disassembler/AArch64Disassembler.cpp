@@ -12,6 +12,7 @@
 
 #include "AArch64Disassembler.h"
 #include "AArch64ExternalSymbolizer.h"
+#include "AArch64Subtarget.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "Utils/AArch64BaseInfo.h"
@@ -19,8 +20,6 @@
 #include "llvm/MC/MCDisassembler/MCRelocationInfo.h"
 #include "llvm/MC/MCFixedLenDisassembler.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -160,8 +159,8 @@ static DecodeStatus DecodeModImmTiedInstruction(MCInst &Inst, uint32_t insn,
                                                 const void *Decoder);
 static DecodeStatus DecodeAdrInstruction(MCInst &Inst, uint32_t insn,
                                          uint64_t Address, const void *Decoder);
-static DecodeStatus DecodeAddSubImmShift(MCInst &Inst, uint32_t insn,
-                                         uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeBaseAddSubImm(MCInst &Inst, uint32_t insn,
+                                        uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeUnconditionalBranch(MCInst &Inst, uint32_t insn,
                                               uint64_t Address,
                                               const void *Decoder);
@@ -219,11 +218,6 @@ static DecodeStatus DecodeImm8OptLsl(MCInst &Inst, unsigned Imm,
                                      uint64_t Addr, const void *Decoder);
 static DecodeStatus DecodeSVEIncDecImm(MCInst &Inst, unsigned Imm,
                                        uint64_t Addr, const void *Decoder);
-
-static DecodeStatus DecodeLoadAllocTagArrayInstruction(MCInst &Inst,
-                                                       uint32_t insn,
-                                                       uint64_t address,
-                                                       const void* Decoder);
 
 static bool Check(DecodeStatus &Out, DecodeStatus In) {
   switch (In) {
@@ -1408,8 +1402,6 @@ static DecodeStatus DecodePairLdStInstruction(MCInst &Inst, uint32_t insn,
   case AArch64::STPSpost:
   case AArch64::LDPSpre:
   case AArch64::STPSpre:
-  case AArch64::STGPpre:
-  case AArch64::STGPpost:
     DecodeGPR64spRegisterClass(Inst, Rn, Addr, Decoder);
     break;
   }
@@ -1423,8 +1415,6 @@ static DecodeStatus DecodePairLdStInstruction(MCInst &Inst, uint32_t insn,
   case AArch64::LDPXpre:
   case AArch64::STPXpre:
   case AArch64::LDPSWpre:
-  case AArch64::STGPpre:
-  case AArch64::STGPpost:
     NeedsDisjointWritebackTransfer = true;
     LLVM_FALLTHROUGH;
   case AArch64::LDNPXi:
@@ -1432,7 +1422,6 @@ static DecodeStatus DecodePairLdStInstruction(MCInst &Inst, uint32_t insn,
   case AArch64::LDPXi:
   case AArch64::STPXi:
   case AArch64::LDPSWi:
-  case AArch64::STGPi:
     DecodeGPR64RegisterClass(Inst, Rt, Addr, Decoder);
     DecodeGPR64RegisterClass(Inst, Rt2, Addr, Decoder);
     break;
@@ -1663,8 +1652,8 @@ static DecodeStatus DecodeAdrInstruction(MCInst &Inst, uint32_t insn,
   return Success;
 }
 
-static DecodeStatus DecodeAddSubImmShift(MCInst &Inst, uint32_t insn,
-                                         uint64_t Addr, const void *Decoder) {
+static DecodeStatus DecodeBaseAddSubImm(MCInst &Inst, uint32_t insn,
+                                        uint64_t Addr, const void *Decoder) {
   unsigned Rd = fieldFromInstruction(insn, 0, 5);
   unsigned Rn = fieldFromInstruction(insn, 5, 5);
   unsigned Imm = fieldFromInstruction(insn, 10, 14);
@@ -1722,17 +1711,11 @@ static DecodeStatus DecodeSystemPStateInstruction(MCInst &Inst, uint32_t insn,
   uint64_t op1 = fieldFromInstruction(insn, 16, 3);
   uint64_t op2 = fieldFromInstruction(insn, 5, 3);
   uint64_t crm = fieldFromInstruction(insn, 8, 4);
+
   uint64_t pstate_field = (op1 << 3) | op2;
 
-  switch (pstate_field) {
-  case 0x01: // XAFlag
-  case 0x02: // AXFlag
-    return Fail;
-  }
-
   if ((pstate_field == AArch64PState::PAN  ||
-       pstate_field == AArch64PState::UAO  ||
-       pstate_field == AArch64PState::SSBS) && crm > 1)
+       pstate_field == AArch64PState::UAO) && crm > 1)
     return Fail;
 
   Inst.addOperand(MCOperand::createImm(pstate_field));
@@ -1779,8 +1762,8 @@ static DecodeStatus DecodeGPRSeqPairsClassRegisterClass(MCInst &Inst,
   if (RegNo & 0x1)
     return Fail;
 
-  unsigned Reg = AArch64MCRegisterClasses[RegClassID].getRegister(RegNo / 2);
-  Inst.addOperand(MCOperand::createReg(Reg));
+  unsigned Register = AArch64MCRegisterClasses[RegClassID].getRegister(RegNo);
+  Inst.addOperand(MCOperand::createReg(Register));
   return Success;
 }
 
@@ -1851,26 +1834,4 @@ static DecodeStatus DecodeSVEIncDecImm(MCInst &Inst, unsigned Imm,
                                        uint64_t Addr, const void *Decoder) {
   Inst.addOperand(MCOperand::createImm(Imm + 1));
   return Success;
-}
-
-static DecodeStatus DecodeLoadAllocTagArrayInstruction(MCInst &Inst,
-                                                       uint32_t insn,
-                                                       uint64_t address,
-                                                       const void* Decoder) {
-  unsigned Rn = fieldFromInstruction(insn, 5, 5);
-  unsigned Rt = fieldFromInstruction(insn, 0, 5);
-
-  // Outputs
-  DecodeGPR64spRegisterClass(Inst, Rn, address, Decoder);
-  DecodeGPR64RegisterClass(Inst, Rt, address, Decoder);
-
-  // Input (Rn again)
-  Inst.addOperand(Inst.getOperand(0));
-
-  //Do this post decode since the raw number for xzr and sp is the same
-  if (Inst.getOperand(0).getReg() == Inst.getOperand(1).getReg()) {
-    return SoftFail;
-  } else {
-    return Success;
-  }
 }

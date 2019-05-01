@@ -72,18 +72,18 @@ static bool isSafeToMove(Instruction *Inst, AliasAnalysis &AA,
         return false;
   }
 
-  if (Inst->isTerminator() || isa<PHINode>(Inst) || Inst->isEHPad() ||
+  if (isa<TerminatorInst>(Inst) || isa<PHINode>(Inst) || Inst->isEHPad() ||
       Inst->mayThrow())
     return false;
 
-  if (auto *Call = dyn_cast<CallBase>(Inst)) {
+  if (auto CS = CallSite(Inst)) {
     // Convergent operations cannot be made control-dependent on additional
     // values.
-    if (Call->hasFnAttr(Attribute::Convergent))
+    if (CS.hasFnAttr(Attribute::Convergent))
       return false;
 
     for (Instruction *S : Stores)
-      if (isModSet(AA.getModRefInfo(S, Call)))
+      if (isModSet(AA.getModRefInfo(S, CS)))
         return false;
   }
 
@@ -104,7 +104,7 @@ static bool IsAcceptableTarget(Instruction *Inst, BasicBlock *SuccToSinkTo,
 
   // It's never legal to sink an instruction into a block which terminates in an
   // EH-pad.
-  if (SuccToSinkTo->getTerminator()->isExceptionalTerminator())
+  if (SuccToSinkTo->getTerminator()->isExceptional())
     return false;
 
   // If the block has multiple predecessors, this would introduce computation

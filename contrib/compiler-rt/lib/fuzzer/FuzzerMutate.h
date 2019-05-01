@@ -93,10 +93,16 @@ public:
 
   Random &GetRand() { return Rand; }
 
+  void PrintMutationStats();
+
+  void RecordUsefulMutations();
+
  private:
   struct Mutator {
     size_t (MutationDispatcher::*Fn)(uint8_t *Data, size_t Size, size_t Max);
     const char *Name;
+    uint64_t UsefulCount;
+    uint64_t TotalCount;
   };
 
   size_t AddWordFromDictionary(Dictionary &D, uint8_t *Data, size_t Size,
@@ -135,6 +141,7 @@ public:
   Dictionary PersistentAutoDictionary;
 
   Vector<DictionaryEntry *> CurrentDictionaryEntrySequence;
+  Vector<Mutator *> CurrentMutatorSequence;
 
   static const size_t kCmpDictionaryEntriesDequeSize = 16;
   DictionaryEntry CmpDictionaryEntriesDeque[kCmpDictionaryEntriesDequeSize];
@@ -149,7 +156,6 @@ public:
 
   Vector<Mutator> Mutators;
   Vector<Mutator> DefaultMutators;
-  Vector<Mutator> CurrentMutatorSequence;
 };
 
 }  // namespace fuzzer

@@ -39,17 +39,6 @@ struct TypeMismatchData {
 /// type.
 RECOVERABLE(type_mismatch_v1, TypeMismatchData *Data, ValueHandle Pointer)
 
-struct AlignmentAssumptionData {
-  SourceLocation Loc;
-  SourceLocation AssumptionLoc;
-  const TypeDescriptor &Type;
-};
-
-/// \brief Handle a runtime alignment assumption check failure,
-/// caused by a misaligned pointer.
-RECOVERABLE(alignment_assumption, AlignmentAssumptionData *Data,
-            ValueHandle Pointer, ValueHandle Alignment, ValueHandle Offset)
-
 struct OverflowData {
   SourceLocation Loc;
   const TypeDescriptor &Type;
@@ -136,11 +125,7 @@ RECOVERABLE(load_invalid_value, InvalidValueData *Data, ValueHandle Val)
 /// Known implicit conversion check kinds.
 /// Keep in sync with the enum of the same name in CGExprScalar.cpp
 enum ImplicitConversionCheckKind : unsigned char {
-  ICCK_IntegerTruncation = 0, // Legacy, was only used by clang 7.
-  ICCK_UnsignedIntegerTruncation = 1,
-  ICCK_SignedIntegerTruncation = 2,
-  ICCK_IntegerSignChange = 3,
-  ICCK_SignedIntegerTruncationOrSignChange = 4,
+  ICCK_IntegerTruncation = 0,
 };
 
 struct ImplicitConversionData {

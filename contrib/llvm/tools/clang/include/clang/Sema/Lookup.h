@@ -540,7 +540,7 @@ public:
   }
 
   /// Clears out any current state.
-  LLVM_ATTRIBUTE_REINITIALIZES void clear() {
+  void clear() {
     ResultKind = NotFound;
     Decls.clear();
     if (Paths) deletePaths(Paths);
@@ -709,9 +709,7 @@ private:
 
   // Results.
   LookupResultKind ResultKind = NotFound;
-  // ill-defined unless ambiguous. Still need to be initialized it will be
-  // copied/moved.
-  AmbiguityKind Ambiguity = {};
+  AmbiguityKind Ambiguity; // ill-defined unless ambiguous
   UnresolvedSet<8> Decls;
   CXXBasePaths *Paths = nullptr;
   CXXRecordDecl *NamingClass = nullptr;

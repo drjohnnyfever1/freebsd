@@ -155,15 +155,17 @@ private:
     } else if (BitsRecTy *BI = dyn_cast<BitsRecTy>(Field.RecType)) {
       unsigned NumBits = BI->getNumBits();
       if (NumBits <= 8)
-        return "uint8_t";
-      if (NumBits <= 16)
-        return "uint16_t";
-      if (NumBits <= 32)
-        return "uint32_t";
-      if (NumBits <= 64)
-        return "uint64_t";
-      PrintFatalError(Twine("bitfield '") + Field.Name +
-                      "' too large to search");
+        NumBits = 8;
+      else if (NumBits <= 16)
+        NumBits = 16;
+      else if (NumBits <= 32)
+        NumBits = 32;
+      else if (NumBits <= 64)
+        NumBits = 64;
+      else
+        PrintFatalError(Twine("bitfield '") + Field.Name +
+                        "' too large to search");
+      return "uint" + utostr(NumBits) + "_t";
     } else if (Field.Enum || Field.IsIntrinsic || Field.IsInstruction)
       return "unsigned";
     PrintFatalError(Twine("Field '") + Field.Name + "' has unknown type '" +
@@ -428,15 +430,6 @@ void SearchableTableEmitter::emitLookupFunction(const GenericTable &Table,
          << ").compare(RHS." << Field.Name << ");\n";
       OS << "      if (Cmp" << Field.Name << " < 0) return true;\n";
       OS << "      if (Cmp" << Field.Name << " > 0) return false;\n";
-    } else if (Field.Enum) {
-      // Explicitly cast to unsigned, because the signedness of enums is
-      // compiler-dependent.
-      OS << "      if ((unsigned)LHS." << Field.Name << " < (unsigned)RHS."
-         << Field.Name << ")\n";
-      OS << "        return true;\n";
-      OS << "      if ((unsigned)LHS." << Field.Name << " > (unsigned)RHS."
-         << Field.Name << ")\n";
-      OS << "        return false;\n";
     } else {
       OS << "      if (LHS." << Field.Name << " < RHS." << Field.Name << ")\n";
       OS << "        return true;\n";

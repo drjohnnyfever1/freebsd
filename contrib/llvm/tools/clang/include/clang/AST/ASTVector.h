@@ -18,7 +18,6 @@
 #ifndef LLVM_CLANG_AST_ASTVECTOR_H
 #define LLVM_CLANG_AST_ASTVECTOR_H
 
-#include "clang/AST/ASTContextAllocate.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include <algorithm>
 #include <cassert>

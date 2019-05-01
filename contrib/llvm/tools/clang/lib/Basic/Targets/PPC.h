@@ -176,8 +176,6 @@ public:
 
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override;
 
-  ArrayRef<TargetInfo::AddlRegName> getGCCAddlRegNames() const override;
-
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &Info) const override {
     switch (*Name) {
@@ -203,7 +201,6 @@ public:
       case 's': // VSX vector register to hold scalar float data
       case 'a': // Any VSX register
       case 'c': // An individual CR bit
-      case 'i': // FP or VSX register to hold 64-bit integers data
         break;
       default:
         return false;
@@ -331,15 +328,9 @@ public:
       break;
     }
 
-    switch (getTriple().getOS()) {
-    case llvm::Triple::FreeBSD:
-    case llvm::Triple::NetBSD:
-    case llvm::Triple::OpenBSD:
+    if (getTriple().getOS() == llvm::Triple::FreeBSD) {
       LongDoubleWidth = LongDoubleAlign = 64;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
-      break;
-    default:
-      break;
     }
 
     // PPC32 supports atomics up to 4 bytes.

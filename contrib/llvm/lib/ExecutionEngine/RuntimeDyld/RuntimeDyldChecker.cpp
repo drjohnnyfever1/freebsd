@@ -14,10 +14,8 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/Support/MSVCErrorWorkarounds.h"
 #include "llvm/Support/Path.h"
 #include <cctype>
-#include <future>
 #include <memory>
 #include <utility>
 
@@ -731,35 +729,15 @@ bool RuntimeDyldCheckerImpl::checkAllRulesInBuffer(StringRef RulePrefix,
   return DidAllTestsPass && (NumRules != 0);
 }
 
-Expected<JITSymbolResolver::LookupResult> RuntimeDyldCheckerImpl::lookup(
-    const JITSymbolResolver::LookupSet &Symbols) const {
-
-#ifdef _MSC_VER
-  using ExpectedLookupResult = MSVCPExpected<JITSymbolResolver::LookupResult>;
-#else
-  using ExpectedLookupResult = Expected<JITSymbolResolver::LookupResult>;
-#endif
-
-  auto ResultP = std::make_shared<std::promise<ExpectedLookupResult>>();
-  auto ResultF = ResultP->get_future();
-
-  getRTDyld().Resolver.lookup(
-      Symbols, [=](Expected<JITSymbolResolver::LookupResult> Result) {
-        ResultP->set_value(std::move(Result));
-      });
-  return ResultF.get();
-}
-
 bool RuntimeDyldCheckerImpl::isSymbolValid(StringRef Symbol) const {
   if (getRTDyld().getSymbol(Symbol))
     return true;
-  auto Result = lookup({Symbol});
-
+  JITSymbolResolver::LookupSet Symbols({Symbol});
+  auto Result = getRTDyld().Resolver.lookup(Symbols);
   if (!Result) {
     logAllUnhandledErrors(Result.takeError(), errs(), "RTDyldChecker: ");
     return false;
   }
-
   assert(Result->count(Symbol) && "Missing symbol result");
   return true;
 }
@@ -773,7 +751,8 @@ uint64_t RuntimeDyldCheckerImpl::getSymbolRemoteAddr(StringRef Symbol) const {
   if (auto InternalSymbol = getRTDyld().getSymbol(Symbol))
     return InternalSymbol.getAddress();
 
-  auto Result = lookup({Symbol});
+  JITSymbolResolver::LookupSet Symbols({Symbol});
+  auto Result = getRTDyld().Resolver.lookup(Symbols);
   if (!Result) {
     logAllUnhandledErrors(Result.takeError(), errs(), "RTDyldChecker: ");
     return 0;

@@ -755,12 +755,12 @@ class Sema;
     ConversionFixItGenerator Fix;
 
     /// Viable - True to indicate that this overload candidate is viable.
-    bool Viable : 1;
+    bool Viable;
 
     /// IsSurrogate - True to indicate that this candidate is a
     /// surrogate for a conversion to a function pointer or reference
     /// (C++ [over.call.object]).
-    bool IsSurrogate : 1;
+    bool IsSurrogate;
 
     /// IgnoreObjectArgument - True to indicate that the first
     /// argument's conversion, which for this function represents the
@@ -769,10 +769,7 @@ class Sema;
     /// implicit object argument is just a placeholder) or a
     /// non-static member function when the call doesn't have an
     /// object argument.
-    bool IgnoreObjectArgument : 1;
-
-    /// True if the candidate was found using ADL.
-    CallExpr::ADLCallKind IsADLCandidate : 1;
+    bool IgnoreObjectArgument;
 
     /// FailureKind - The reason why this candidate is not viable.
     /// Actually an OverloadFailureKind.
@@ -826,10 +823,6 @@ class Sema;
         return Function->getNumParams();
       return ExplicitCallArguments;
     }
-
-  private:
-    friend class OverloadCandidateSet;
-    OverloadCandidate() : IsADLCandidate(CallExpr::NotADL) {}
   };
 
   /// OverloadCandidateSet - A set of overload candidates, used in C++

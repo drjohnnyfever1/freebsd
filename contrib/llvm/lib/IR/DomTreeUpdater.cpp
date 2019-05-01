@@ -152,34 +152,39 @@ bool DomTreeUpdater::forceFlushDeletedBB() {
   return true;
 }
 
-void DomTreeUpdater::recalculate(Function &F) {
+bool DomTreeUpdater::recalculate(Function &F) {
+  if (!DT && !PDT)
+    return false;
 
   if (Strategy == UpdateStrategy::Eager) {
     if (DT)
       DT->recalculate(F);
     if (PDT)
       PDT->recalculate(F);
-    return;
+    return true;
   }
-
-  // There is little performance gain if we pend the recalculation under
-  // Lazy UpdateStrategy so we recalculate available trees immediately.
 
   // Prevent forceFlushDeletedBB() from erasing DomTree or PostDomTree nodes.
   IsRecalculatingDomTree = IsRecalculatingPostDomTree = true;
 
   // Because all trees are going to be up-to-date after recalculation,
   // flush awaiting deleted BasicBlocks.
-  forceFlushDeletedBB();
-  if (DT)
-    DT->recalculate(F);
-  if (PDT)
-    PDT->recalculate(F);
+  if (forceFlushDeletedBB() || hasPendingUpdates()) {
+    if (DT)
+      DT->recalculate(F);
+    if (PDT)
+      PDT->recalculate(F);
+
+    // Resume forceFlushDeletedBB() to erase DomTree or PostDomTree nodes.
+    IsRecalculatingDomTree = IsRecalculatingPostDomTree = false;
+    PendDTUpdateIndex = PendPDTUpdateIndex = PendUpdates.size();
+    dropOutOfDateUpdates();
+    return true;
+  }
 
   // Resume forceFlushDeletedBB() to erase DomTree or PostDomTree nodes.
   IsRecalculatingDomTree = IsRecalculatingPostDomTree = false;
-  PendDTUpdateIndex = PendPDTUpdateIndex = PendUpdates.size();
-  dropOutOfDateUpdates();
+  return false;
 }
 
 bool DomTreeUpdater::hasPendingUpdates() const {

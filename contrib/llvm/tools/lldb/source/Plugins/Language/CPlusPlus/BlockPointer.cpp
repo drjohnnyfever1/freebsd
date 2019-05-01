@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "BlockPointer.h"
 
 #include "lldb/Core/ValueObject.h"
@@ -85,7 +89,7 @@ public:
 
   size_t CalculateNumChildren() override {
     const bool omit_empty_base_classes = false;
-    return m_block_struct_type.GetNumChildren(omit_empty_base_classes, nullptr);
+    return m_block_struct_type.GetNumChildren(omit_empty_base_classes);
   }
 
   lldb::ValueObjectSP GetChildAtIndex(size_t idx) override {

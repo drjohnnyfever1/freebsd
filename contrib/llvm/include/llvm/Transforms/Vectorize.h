@@ -110,8 +110,8 @@ struct VectorizeConfig {
 //
 // LoopVectorize - Create a loop vectorization pass.
 //
-Pass *createLoopVectorizePass(bool InterleaveOnlyWhenForced = false,
-                              bool VectorizeOnlyWhenForced = false);
+Pass *createLoopVectorizePass(bool NoUnrolling = false,
+                              bool AlwaysVectorize = true);
 
 //===----------------------------------------------------------------------===//
 //

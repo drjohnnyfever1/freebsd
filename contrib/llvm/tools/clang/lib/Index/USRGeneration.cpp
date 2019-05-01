@@ -97,7 +97,6 @@ public:
   void VisitTypedefDecl(const TypedefDecl *D);
   void VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D);
   void VisitVarDecl(const VarDecl *D);
-  void VisitBindingDecl(const BindingDecl *D);
   void VisitNonTypeTemplateParmDecl(const NonTypeTemplateParmDecl *D);
   void VisitTemplateTemplateParmDecl(const TemplateTemplateParmDecl *D);
   void VisitUnresolvedUsingValueDecl(const UnresolvedUsingValueDecl *D);
@@ -270,8 +269,7 @@ void USRGenerator::VisitFunctionDecl(const FunctionDecl *D) {
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(D)) {
     if (MD->isStatic())
       Out << 'S';
-    // FIXME: OpenCL: Need to consider address spaces
-    if (unsigned quals = MD->getTypeQualifiers().getCVRUQualifiers())
+    if (unsigned quals = MD->getTypeQualifiers())
       Out << (char)('0' + quals);
     switch (MD->getRefQualifier()) {
     case RQ_None: break;
@@ -334,12 +332,6 @@ void USRGenerator::VisitVarDecl(const VarDecl *D) {
       VisitTemplateArgument(Args.get(I));
     }
   }
-}
-
-void USRGenerator::VisitBindingDecl(const BindingDecl *D) {
-  if (isLocal(D) && GenLoc(D, /*IncludeOffset=*/true))
-    return;
-  VisitNamedDecl(D);
 }
 
 void USRGenerator::VisitNonTypeTemplateParmDecl(
@@ -607,7 +599,7 @@ bool USRGenerator::GenLoc(const Decl *D, bool IncludeOffset) {
   D = D->getCanonicalDecl();
 
   IgnoreResults =
-      IgnoreResults || printLoc(Out, D->getBeginLoc(),
+      IgnoreResults || printLoc(Out, D->getLocStart(),
                                 Context->getSourceManager(), IncludeOffset);
 
   return IgnoreResults;
@@ -712,9 +704,6 @@ void USRGenerator::VisitType(QualType T) {
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) \
         case BuiltinType::Id:
 #include "clang/Basic/OpenCLImageTypes.def"
-#define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
-        case BuiltinType::Id:
-#include "clang/Basic/OpenCLExtensionTypes.def"
         case BuiltinType::OCLEvent:
         case BuiltinType::OCLClkEvent:
         case BuiltinType::OCLQueue:
@@ -946,7 +935,7 @@ void USRGenerator::VisitTemplateArgument(const TemplateArgument &Arg) {
 
   case TemplateArgument::TemplateExpansion:
     Out << 'P'; // pack expansion of...
-    LLVM_FALLTHROUGH;
+    // Fall through
   case TemplateArgument::Template:
     VisitTemplateName(Arg.getAsTemplateOrTemplatePattern());
     break;
@@ -1103,42 +1092,5 @@ bool clang::index::generateUSRForMacro(StringRef MacroName, SourceLocation Loc,
     printLoc(Out, Loc, SM, /*IncludeOffset=*/true);
   Out << "@macro@";
   Out << MacroName;
-  return false;
-}
-
-bool clang::index::generateUSRForType(QualType T, ASTContext &Ctx,
-                                      SmallVectorImpl<char> &Buf) {
-  if (T.isNull())
-    return true;
-  T = T.getCanonicalType();
-
-  USRGenerator UG(&Ctx, Buf);
-  UG.VisitType(T);
-  return UG.ignoreResults();
-}
-
-bool clang::index::generateFullUSRForModule(const Module *Mod,
-                                            raw_ostream &OS) {
-  if (!Mod->Parent)
-    return generateFullUSRForTopLevelModuleName(Mod->Name, OS);
-  if (generateFullUSRForModule(Mod->Parent, OS))
-    return true;
-  return generateUSRFragmentForModule(Mod, OS);
-}
-
-bool clang::index::generateFullUSRForTopLevelModuleName(StringRef ModName,
-                                                        raw_ostream &OS) {
-  OS << getUSRSpacePrefix();
-  return generateUSRFragmentForModuleName(ModName, OS);
-}
-
-bool clang::index::generateUSRFragmentForModule(const Module *Mod,
-                                                raw_ostream &OS) {
-  return generateUSRFragmentForModuleName(Mod->Name, OS);
-}
-
-bool clang::index::generateUSRFragmentForModuleName(StringRef ModName,
-                                                    raw_ostream &OS) {
-  OS << "@M@" << ModName;
   return false;
 }

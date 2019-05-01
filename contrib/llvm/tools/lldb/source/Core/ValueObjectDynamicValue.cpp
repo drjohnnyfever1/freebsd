@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/ValueObjectDynamicValue.h"
+#include "lldb/Core/Scalar.h" // for Scalar, operator!=
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Symbol/CompilerType.h"
@@ -16,14 +17,13 @@
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/DataExtractor.h" // for DataExtractor
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
-#include "lldb/Utility/Scalar.h"
-#include "lldb/Utility/Status.h"
-#include "lldb/lldb-types.h"
+#include "lldb/Utility/Logging.h" // for GetLogIfAllCategoriesSet
+#include "lldb/Utility/Status.h"  // for Status
+#include "lldb/lldb-types.h"      // for addr_t, offset_t
 
-#include <string.h>
+#include <string.h> // for strcmp, size_t
 namespace lldb_private {
 class Declaration;
 }
@@ -92,8 +92,7 @@ ConstString ValueObjectDynamicValue::GetDisplayTypeName() {
 size_t ValueObjectDynamicValue::CalculateNumChildren(uint32_t max) {
   const bool success = UpdateValueIfNeeded(false);
   if (success && m_dynamic_type_info.HasType()) {
-    ExecutionContext exe_ctx(GetExecutionContextRef());
-    auto children_count = GetCompilerType().GetNumChildren(true, &exe_ctx);
+    auto children_count = GetCompilerType().GetNumChildren(true);
     return children_count <= max ? children_count : max;
   } else
     return m_parent->GetNumChildren(max);

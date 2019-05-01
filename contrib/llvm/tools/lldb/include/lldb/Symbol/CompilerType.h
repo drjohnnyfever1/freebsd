@@ -10,10 +10,14 @@
 #ifndef liblldb_CompilerType_h_
 #define liblldb_CompilerType_h_
 
+// C Includes
+// C++ Includes
 #include <functional>
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/ClangForward.h"
 #include "lldb/lldb-private.h"
 #include "llvm/ADT/APSInt.h"
@@ -287,10 +291,9 @@ public:
 
   struct IntegralTemplateArgument;
 
-  /// Return the size of the type in bytes.
-  llvm::Optional<uint64_t> GetByteSize(ExecutionContextScope *exe_scope) const;
-  /// Return the size of the type in bits.
-  llvm::Optional<uint64_t> GetBitSize(ExecutionContextScope *exe_scope) const;
+  uint64_t GetByteSize(ExecutionContextScope *exe_scope) const;
+
+  uint64_t GetBitSize(ExecutionContextScope *exe_scope) const;
 
   lldb::Encoding GetEncoding(uint64_t &count) const;
 
@@ -298,8 +301,7 @@ public:
 
   size_t GetTypeBitAlign() const;
 
-  uint32_t GetNumChildren(bool omit_empty_base_classes,
-                          const ExecutionContext *exe_ctx) const;
+  uint32_t GetNumChildren(bool omit_empty_base_classes) const;
 
   lldb::BasicType GetBasicTypeEnumeration() const;
 

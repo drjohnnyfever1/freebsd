@@ -76,8 +76,8 @@ struct RegisteredObjectInfo {
 };
 
 // Buffer for an in-memory object file in executable memory
-typedef llvm::DenseMap<JITEventListener::ObjectKey, RegisteredObjectInfo>
-    RegisteredObjectBufferMap;
+typedef llvm::DenseMap< const char*, RegisteredObjectInfo>
+  RegisteredObjectBufferMap;
 
 /// Global access point for the JIT debugging interface designed for use with a
 /// singleton toolbox. Handles thread-safe registration and deregistration of
@@ -99,13 +99,13 @@ public:
   /// Creates an entry in the JIT registry for the buffer @p Object,
   /// which must contain an object file in executable memory with any
   /// debug information for the debugger.
-  void notifyObjectLoaded(ObjectKey K, const ObjectFile &Obj,
-                          const RuntimeDyld::LoadedObjectInfo &L) override;
+  void NotifyObjectEmitted(const ObjectFile &Object,
+                           const RuntimeDyld::LoadedObjectInfo &L) override;
 
   /// Removes the internal registration of @p Object, and
   /// frees associated resources.
   /// Returns true if @p Object was found in ObjectBufferMap.
-  void notifyFreeingObject(ObjectKey K) override;
+  void NotifyFreeingObject(const ObjectFile &Object) override;
 
 private:
   /// Deregister the debug info for the given object file from the debugger
@@ -147,11 +147,11 @@ GDBJITRegistrationListener::~GDBJITRegistrationListener() {
   ObjectBufferMap.clear();
 }
 
-void GDBJITRegistrationListener::notifyObjectLoaded(
-    ObjectKey K, const ObjectFile &Obj,
-    const RuntimeDyld::LoadedObjectInfo &L) {
+void GDBJITRegistrationListener::NotifyObjectEmitted(
+                                       const ObjectFile &Object,
+                                       const RuntimeDyld::LoadedObjectInfo &L) {
 
-  OwningBinary<ObjectFile> DebugObj = L.getObjectForDebug(Obj);
+  OwningBinary<ObjectFile> DebugObj = L.getObjectForDebug(Object);
 
   // Bail out if debug objects aren't supported.
   if (!DebugObj.getBinary())
@@ -160,8 +160,11 @@ void GDBJITRegistrationListener::notifyObjectLoaded(
   const char *Buffer = DebugObj.getBinary()->getMemoryBufferRef().getBufferStart();
   size_t      Size = DebugObj.getBinary()->getMemoryBufferRef().getBufferSize();
 
+  const char *Key = Object.getMemoryBufferRef().getBufferStart();
+
+  assert(Key && "Attempt to register a null object with a debugger.");
   llvm::MutexGuard locked(*JITDebugLock);
-  assert(ObjectBufferMap.find(K) == ObjectBufferMap.end() &&
+  assert(ObjectBufferMap.find(Key) == ObjectBufferMap.end() &&
          "Second attempt to perform debug registration.");
   jit_code_entry* JITCodeEntry = new jit_code_entry();
 
@@ -172,15 +175,16 @@ void GDBJITRegistrationListener::notifyObjectLoaded(
     JITCodeEntry->symfile_addr = Buffer;
     JITCodeEntry->symfile_size = Size;
 
-    ObjectBufferMap[K] =
-        RegisteredObjectInfo(Size, JITCodeEntry, std::move(DebugObj));
+    ObjectBufferMap[Key] = RegisteredObjectInfo(Size, JITCodeEntry,
+                                                std::move(DebugObj));
     NotifyDebugger(JITCodeEntry);
   }
 }
 
-void GDBJITRegistrationListener::notifyFreeingObject(ObjectKey K) {
+void GDBJITRegistrationListener::NotifyFreeingObject(const ObjectFile& Object) {
+  const char *Key = Object.getMemoryBufferRef().getBufferStart();
   llvm::MutexGuard locked(*JITDebugLock);
-  RegisteredObjectBufferMap::iterator I = ObjectBufferMap.find(K);
+  RegisteredObjectBufferMap::iterator I = ObjectBufferMap.find(Key);
 
   if (I != ObjectBufferMap.end()) {
     deregisterObjectInternal(I);

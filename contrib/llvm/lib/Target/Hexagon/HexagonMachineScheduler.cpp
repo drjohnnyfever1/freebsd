@@ -105,7 +105,6 @@ bool VLIWResourceModel::isResourceAvailable(SUnit *SU, bool IsTop) {
   default:
     if (!ResourcesModel->canReserveResources(*SU->getInstr()))
       return false;
-    break;
   case TargetOpcode::EXTRACT_SUBREG:
   case TargetOpcode::INSERT_SUBREG:
   case TargetOpcode::SUBREG_TO_REG:
@@ -216,7 +215,8 @@ void VLIWMachineScheduler::schedule() {
                   ++su) if (SUnits[su].getDepth() > maxD) maxD =
                  SUnits[su].getDepth();
              dbgs() << "Max Depth " << maxD << "\n";);
-  LLVM_DEBUG(dump());
+  LLVM_DEBUG(for (unsigned su = 0, e = SUnits.size(); su != e; ++su) SUnits[su]
+                 .dumpAll(this));
 
   initQueues(TopRoots, BotRoots);
 
@@ -489,7 +489,7 @@ void ConvergingVLIWScheduler::traceCandidate(const char *Label,
   else
     dbgs() << "     ";
   dbgs() << "cost(" << Cost << ")\t";
-  DAG->dumpNode(*SU);
+  SU->dump(DAG);
 }
 
 // Very detailed queue dump, to be used with higher verbosity levels.
@@ -982,7 +982,7 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
                     << " Scheduling instruction in cycle "
                     << (IsTopNode ? Top.CurrCycle : Bot.CurrCycle) << " ("
                     << reportPackets() << ")\n";
-             DAG->dumpNode(*SU));
+             SU->dump(DAG));
   return SU;
 }
 

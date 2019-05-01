@@ -46,10 +46,10 @@ namespace llvm {
 class BasicBlock;
 class CallInst;
 class Function;
-class LLVMTargetMachine;
-class MMIAddrLabelMap;
 class MachineFunction;
+class MMIAddrLabelMap;
 class Module;
+class TargetMachine;
 
 //===----------------------------------------------------------------------===//
 /// This class can be derived from and used by targets to hold private
@@ -76,7 +76,7 @@ protected:
 /// for specific use.
 ///
 class MachineModuleInfo : public ImmutablePass {
-  const LLVMTargetMachine &TM;
+  const TargetMachine &TM;
 
   /// This is the MCContext used for the entire code generator.
   MCContext Context;
@@ -145,7 +145,7 @@ class MachineModuleInfo : public ImmutablePass {
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  explicit MachineModuleInfo(const LLVMTargetMachine *TM = nullptr);
+  explicit MachineModuleInfo(const TargetMachine *TM = nullptr);
   ~MachineModuleInfo() override;
 
   // Initialization and Finalization

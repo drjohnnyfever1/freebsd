@@ -558,6 +558,7 @@ BlockContentComment *Parser::parseParagraphOrBlockCommand() {
     case tok::verbatim_block_begin:
     case tok::verbatim_line_name:
     case tok::eof:
+      assert(Content.size() != 0);
       break; // Block content or EOF ahead, finish this parapgaph.
 
     case tok::unknown_command:

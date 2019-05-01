@@ -79,7 +79,6 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Vectorize.h"
-#include "llvm/Transforms/Vectorize/LoadStoreVectorizer.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -206,12 +205,12 @@ private:
                           unsigned Alignment);
 };
 
-class LoadStoreVectorizerLegacyPass : public FunctionPass {
+class LoadStoreVectorizer : public FunctionPass {
 public:
   static char ID;
 
-  LoadStoreVectorizerLegacyPass() : FunctionPass(ID) {
-    initializeLoadStoreVectorizerLegacyPassPass(*PassRegistry::getPassRegistry());
+  LoadStoreVectorizer() : FunctionPass(ID) {
+    initializeLoadStoreVectorizerPass(*PassRegistry::getPassRegistry());
   }
 
   bool runOnFunction(Function &F) override;
@@ -231,23 +230,30 @@ public:
 
 } // end anonymous namespace
 
-char LoadStoreVectorizerLegacyPass::ID = 0;
+char LoadStoreVectorizer::ID = 0;
 
-INITIALIZE_PASS_BEGIN(LoadStoreVectorizerLegacyPass, DEBUG_TYPE,
+INITIALIZE_PASS_BEGIN(LoadStoreVectorizer, DEBUG_TYPE,
                       "Vectorize load and Store instructions", false, false)
 INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
-INITIALIZE_PASS_END(LoadStoreVectorizerLegacyPass, DEBUG_TYPE,
+INITIALIZE_PASS_END(LoadStoreVectorizer, DEBUG_TYPE,
                     "Vectorize load and store instructions", false, false)
 
 Pass *llvm::createLoadStoreVectorizerPass() {
-  return new LoadStoreVectorizerLegacyPass();
+  return new LoadStoreVectorizer();
 }
 
-bool LoadStoreVectorizerLegacyPass::runOnFunction(Function &F) {
+// The real propagateMetadata expects a SmallVector<Value*>, but we deal in
+// vectors of Instructions.
+static void propagateMetadata(Instruction *I, ArrayRef<Instruction *> IL) {
+  SmallVector<Value *, 8> VL(IL.begin(), IL.end());
+  propagateMetadata(I, VL);
+}
+
+bool LoadStoreVectorizer::runOnFunction(Function &F) {
   // Don't vectorize when the attribute NoImplicitFloat is used.
   if (skipFunction(F) || F.hasFnAttribute(Attribute::NoImplicitFloat))
     return false;
@@ -260,30 +266,6 @@ bool LoadStoreVectorizerLegacyPass::runOnFunction(Function &F) {
 
   Vectorizer V(F, AA, DT, SE, TTI);
   return V.run();
-}
-
-PreservedAnalyses LoadStoreVectorizerPass::run(Function &F, FunctionAnalysisManager &AM) {
-  // Don't vectorize when the attribute NoImplicitFloat is used.
-  if (F.hasFnAttribute(Attribute::NoImplicitFloat))
-    return PreservedAnalyses::all();
-
-  AliasAnalysis &AA = AM.getResult<AAManager>(F);
-  DominatorTree &DT = AM.getResult<DominatorTreeAnalysis>(F);
-  ScalarEvolution &SE = AM.getResult<ScalarEvolutionAnalysis>(F);
-  TargetTransformInfo &TTI = AM.getResult<TargetIRAnalysis>(F);
-
-  Vectorizer V(F, AA, DT, SE, TTI);
-  bool Changed = V.run();
-  PreservedAnalyses PA;
-  PA.preserveSet<CFGAnalyses>();
-  return Changed ? PA : PreservedAnalyses::all();
-}
-
-// The real propagateMetadata expects a SmallVector<Value*>, but we deal in
-// vectors of Instructions.
-static void propagateMetadata(Instruction *I, ArrayRef<Instruction *> IL) {
-  SmallVector<Value *, 8> VL(IL.begin(), IL.end());
-  propagateMetadata(I, VL);
 }
 
 // Vectorizer Implementation
@@ -972,6 +954,11 @@ bool Vectorizer::vectorizeStoreChain(
   // try again.
   unsigned EltSzInBytes = Sz / 8;
   unsigned SzInBytes = EltSzInBytes * ChainSize;
+  if (!TTI.isLegalToVectorizeStoreChain(SzInBytes, Alignment, AS)) {
+    auto Chains = splitOddVectorElts(Chain, Sz);
+    return vectorizeStoreChain(Chains.first, InstructionsProcessed) |
+           vectorizeStoreChain(Chains.second, InstructionsProcessed);
+  }
 
   VectorType *VecTy;
   VectorType *VecStoreTy = dyn_cast<VectorType>(StoreTy);
@@ -1004,23 +991,14 @@ bool Vectorizer::vectorizeStoreChain(
 
   // If the store is going to be misaligned, don't vectorize it.
   if (accessIsMisaligned(SzInBytes, AS, Alignment)) {
-    if (S0->getPointerAddressSpace() != DL.getAllocaAddrSpace()) {
-      auto Chains = splitOddVectorElts(Chain, Sz);
-      return vectorizeStoreChain(Chains.first, InstructionsProcessed) |
-             vectorizeStoreChain(Chains.second, InstructionsProcessed);
-    }
+    if (S0->getPointerAddressSpace() != 0)
+      return false;
 
     unsigned NewAlign = getOrEnforceKnownAlignment(S0->getPointerOperand(),
                                                    StackAdjustedAlignment,
                                                    DL, S0, nullptr, &DT);
-    if (NewAlign != 0)
-      Alignment = NewAlign;
-  }
-
-  if (!TTI.isLegalToVectorizeStoreChain(SzInBytes, Alignment, AS)) {
-    auto Chains = splitOddVectorElts(Chain, Sz);
-    return vectorizeStoreChain(Chains.first, InstructionsProcessed) |
-           vectorizeStoreChain(Chains.second, InstructionsProcessed);
+    if (NewAlign < StackAdjustedAlignment)
+      return false;
   }
 
   BasicBlock::iterator First, Last;
@@ -1059,11 +1037,13 @@ bool Vectorizer::vectorizeStoreChain(
     }
   }
 
-  StoreInst *SI = Builder.CreateAlignedStore(
-    Vec,
-    Builder.CreateBitCast(S0->getPointerOperand(), VecTy->getPointerTo(AS)),
-    Alignment);
+  // This cast is safe because Builder.CreateStore() always creates a bona fide
+  // StoreInst.
+  StoreInst *SI = cast<StoreInst>(
+      Builder.CreateStore(Vec, Builder.CreateBitCast(S0->getPointerOperand(),
+                                                     VecTy->getPointerTo(AS))));
   propagateMetadata(SI, Chain);
+  SI->setAlignment(Alignment);
 
   eraseInstructions(Chain);
   ++NumVectorInstructions;
@@ -1122,6 +1102,12 @@ bool Vectorizer::vectorizeLoadChain(
   // try again.
   unsigned EltSzInBytes = Sz / 8;
   unsigned SzInBytes = EltSzInBytes * ChainSize;
+  if (!TTI.isLegalToVectorizeLoadChain(SzInBytes, Alignment, AS)) {
+    auto Chains = splitOddVectorElts(Chain, Sz);
+    return vectorizeLoadChain(Chains.first, InstructionsProcessed) |
+           vectorizeLoadChain(Chains.second, InstructionsProcessed);
+  }
+
   VectorType *VecTy;
   VectorType *VecLoadTy = dyn_cast<VectorType>(LoadTy);
   if (VecLoadTy)
@@ -1146,25 +1132,16 @@ bool Vectorizer::vectorizeLoadChain(
 
   // If the load is going to be misaligned, don't vectorize it.
   if (accessIsMisaligned(SzInBytes, AS, Alignment)) {
-    if (L0->getPointerAddressSpace() != DL.getAllocaAddrSpace()) {
-      auto Chains = splitOddVectorElts(Chain, Sz);
-      return vectorizeLoadChain(Chains.first, InstructionsProcessed) |
-             vectorizeLoadChain(Chains.second, InstructionsProcessed);
-    }
+    if (L0->getPointerAddressSpace() != 0)
+      return false;
 
     unsigned NewAlign = getOrEnforceKnownAlignment(L0->getPointerOperand(),
                                                    StackAdjustedAlignment,
                                                    DL, L0, nullptr, &DT);
-    if (NewAlign != 0)
-      Alignment = NewAlign;
+    if (NewAlign < StackAdjustedAlignment)
+      return false;
 
     Alignment = NewAlign;
-  }
-
-  if (!TTI.isLegalToVectorizeLoadChain(SzInBytes, Alignment, AS)) {
-    auto Chains = splitOddVectorElts(Chain, Sz);
-    return vectorizeLoadChain(Chains.first, InstructionsProcessed) |
-           vectorizeLoadChain(Chains.second, InstructionsProcessed);
   }
 
   LLVM_DEBUG({
@@ -1182,8 +1159,11 @@ bool Vectorizer::vectorizeLoadChain(
 
   Value *Bitcast =
       Builder.CreateBitCast(L0->getPointerOperand(), VecTy->getPointerTo(AS));
-  LoadInst *LI = Builder.CreateAlignedLoad(Bitcast, Alignment);
+  // This cast is safe because Builder.CreateLoad always creates a bona fide
+  // LoadInst.
+  LoadInst *LI = cast<LoadInst>(Builder.CreateLoad(Bitcast));
   propagateMetadata(LI, Chain);
+  LI->setAlignment(Alignment);
 
   if (VecLoadTy) {
     SmallVector<Instruction *, 16> InstrsToErase;

@@ -9,6 +9,10 @@
 
 #include "lldb/Interpreter/OptionGroupUUID.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Host/OptionParser.h"
 
 using namespace lldb;
@@ -18,9 +22,9 @@ OptionGroupUUID::OptionGroupUUID() : m_uuid() {}
 
 OptionGroupUUID::~OptionGroupUUID() {}
 
-static constexpr OptionDefinition g_option_table[] = {
+static OptionDefinition g_option_table[] = {
     {LLDB_OPT_SET_1, false, "uuid", 'u', OptionParser::eRequiredArgument,
-     nullptr, {}, 0, eArgTypeNone, "A module UUID value."},
+     nullptr, nullptr, 0, eArgTypeNone, "A module UUID value."},
 };
 
 llvm::ArrayRef<OptionDefinition> OptionGroupUUID::GetDefinitions() {

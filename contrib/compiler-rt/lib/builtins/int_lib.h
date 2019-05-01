@@ -45,7 +45,7 @@
 
 #define AEABI_RTABI __attribute__((__pcs__("aapcs")))
 
-#if defined(_MSC_VER) && !defined(__clang__)
+#ifdef _MSC_VER
 #define ALWAYS_INLINE __forceinline
 #define NOINLINE __declspec(noinline)
 #define NORETURN __declspec(noreturn)
