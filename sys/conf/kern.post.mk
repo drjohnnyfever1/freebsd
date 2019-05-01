@@ -8,7 +8,7 @@
 # should be defined in the kern.pre.mk so that port makefiles can
 # override or augment them.
 
-.if defined(DTS) || defined(DTSO)
+.if defined(DTS) || defined(DTSO) || defined(FDT_DTS_FILE)
 .include "dtb.build.mk"
 
 KERNEL_EXTRA+=	${DTB} ${DTBO}
@@ -122,6 +122,8 @@ kernel-obj:
 
 .if !defined(MODULES_WITH_WORLD) && !defined(NO_MODULES) && exists($S/modules)
 modules: modules-all
+modules-depend: beforebuild
+modules-all: beforebuild
 
 .if !defined(NO_MODULES_OBJ)
 modules-all modules-depend: modules-obj
