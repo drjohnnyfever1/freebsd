@@ -2433,12 +2433,16 @@ OLD_FILES+=usr/include/gcc/4.2/spe.h
 OLD_FILES+=usr/include/omp.h
 OLD_FILES+=usr/lib/libgcov.a
 OLD_FILES+=usr/lib/libgomp.a
+.if ${MK_OPENMP} == no
 OLD_FILES+=usr/lib/libgomp.so
+.endif
 OLD_LIBS+=usr/lib/libgomp.so.1
 OLD_FILES+=usr/lib/libgomp_p.a
 OLD_FILES+=usr/lib32/libgcov.a
 OLD_FILES+=usr/lib32/libgomp.a
+.if ${MK_OPENMP} == no
 OLD_FILES+=usr/lib32/libgomp.so
+.endif
 OLD_LIBS+=usr/lib32/libgomp.so.1
 OLD_FILES+=usr/lib32/libgomp_p.a
 OLD_FILES+=usr/libexec/cc1
