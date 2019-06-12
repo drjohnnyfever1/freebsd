@@ -1,7 +1,7 @@
 // $FreeBSD$
 
-#define LLD_VERSION 8.0.0
-#define LLD_VERSION_STRING "8.0.0"
+#define LLD_VERSION 8.0.1
+#define LLD_VERSION_STRING "8.0.1"
 #define LLD_VERSION_MAJOR 8
 #define LLD_VERSION_MINOR 0
 
