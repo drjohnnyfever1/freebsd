@@ -389,6 +389,9 @@ dev/qlxgbe/ql_isr.c		optional	qlxgbe pci
 dev/qlxgbe/ql_misc.c		optional	qlxgbe pci
 dev/qlxgbe/ql_os.c		optional	qlxgbe pci
 dev/qlxgbe/ql_reset.c		optional	qlxgbe pci
+dev/qlxgbe/ql_fw.c		optional	qlxgbe pci
+dev/qlxgbe/ql_boot.c		optional	qlxgbe pci
+dev/qlxgbe/ql_minidump.c	optional	qlxgbe pci
 dev/qlnx/qlnxe/ecore_cxt.c	optional	qlnxe pci \
 	compile-with "${LINUXKPI_C}"
 dev/qlnx/qlnxe/ecore_dbg_fw_funcs.c optional	qlnxe pci \
@@ -490,6 +493,7 @@ dev/smartpqi/smartpqi_response.c	optional 	smartpqi
 dev/smartpqi/smartpqi_sis.c     optional 	smartpqi
 dev/smartpqi/smartpqi_tag.c     optional 	smartpqi
 dev/speaker/spkr.c		optional	speaker
+dev/superio/superio.c		optional	superio isa
 dev/syscons/apm/apm_saver.c	optional	apm_saver apm
 dev/syscons/scvesactl.c		optional	sc vga vesa
 dev/syscons/scvgarndr.c		optional	sc vga
