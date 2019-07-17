@@ -93,6 +93,7 @@ private:
   void defsym(Symbol *Dst, Symbol *Src);
 
   llvm::StringMap<std::vector<Symbol *>> &getDemangledSyms();
+  void handleAnonymousVersion();
   void assignExactVersion(SymbolVersion Ver, uint16_t VersionId,
                           StringRef VersionName);
   void assignWildcardVersion(SymbolVersion Ver, uint16_t VersionId);
