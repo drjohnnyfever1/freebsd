@@ -32,7 +32,6 @@
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -44,7 +43,6 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
@@ -153,8 +151,7 @@ class IndVarSimplify {
   Value *linearFunctionTestReplace(Loop *L, const SCEV *BackedgeTakenCount,
                                    PHINode *IndVar, SCEVExpander &Rewriter);
 
-  bool linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
-                                 const SCEV *ExitCount,
+  bool linearFunctionTestReplace(Loop *L, const SCEV *BackedgeTakenCount,
                                  PHINode *IndVar, SCEVExpander &Rewriter);
 
   Value *expandSCEVIfNeeded(SCEVExpander &Rewriter, const SCEV *S, Loop *L,
@@ -1034,13 +1031,24 @@ protected:
 
 } // end anonymous namespace
 
+/// Perform a quick domtree based check for loop invariance assuming that V is
+/// used within the loop. LoopInfo::isLoopInvariant() seems gratuitous for this
+/// purpose.
+static bool isLoopInvariant(Value *V, const Loop *L, const DominatorTree *DT) {
+  Instruction *Inst = dyn_cast<Instruction>(V);
+  if (!Inst)
+    return true;
+
+  return DT->properlyDominates(Inst->getParent(), L->getHeader());
+}
+
 Value *WidenIV::createExtendInst(Value *NarrowOper, Type *WideType,
                                  bool IsSigned, Instruction *Use) {
   // Set the debug location and conservative insertion point.
   IRBuilder<> Builder(Use);
   // Hoist the insertion point into loop preheaders as far as possible.
   for (const Loop *L = LI->getLoopFor(Use->getParent());
-       L && L->getLoopPreheader() && L->isLoopInvariant(NarrowOper);
+       L && L->getLoopPreheader() && isLoopInvariant(NarrowOper, L, DT);
        L = L->getParentLoop())
     Builder.SetInsertPoint(L->getLoopPreheader()->getTerminator());
 
@@ -1824,10 +1832,41 @@ void IndVarSimplify::simplifyAndExtend(Loop *L,
 //  linearFunctionTestReplace and its kin. Rewrite the loop exit condition.
 //===----------------------------------------------------------------------===//
 
-/// Given an Value which is hoped to be part of an add recurance in the given
-/// loop, return the associated Phi node if so.  Otherwise, return null.  Note
-/// that this is less general than SCEVs AddRec checking.  
-static PHINode *getLoopPhiForCounter(Value *IncV, Loop *L) {
+/// Return true if this loop's backedge taken count expression can be safely and
+/// cheaply expanded into an instruction sequence that can be used by
+/// linearFunctionTestReplace.
+///
+/// TODO: This fails for pointer-type loop counters with greater than one byte
+/// strides, consequently preventing LFTR from running. For the purpose of LFTR
+/// we could skip this check in the case that the LFTR loop counter (chosen by
+/// FindLoopCounter) is also pointer type. Instead, we could directly convert
+/// the loop test to an inequality test by checking the target data's alignment
+/// of element types (given that the initial pointer value originates from or is
+/// used by ABI constrained operation, as opposed to inttoptr/ptrtoint).
+/// However, we don't yet have a strong motivation for converting loop tests
+/// into inequality tests.
+static bool canExpandBackedgeTakenCount(Loop *L, ScalarEvolution *SE,
+                                        SCEVExpander &Rewriter) {
+  const SCEV *BackedgeTakenCount = SE->getBackedgeTakenCount(L);
+  if (isa<SCEVCouldNotCompute>(BackedgeTakenCount) ||
+      BackedgeTakenCount->isZero())
+    return false;
+
+  if (!L->getExitingBlock())
+    return false;
+
+  // Can't rewrite non-branch yet.
+  if (!isa<BranchInst>(L->getExitingBlock()->getTerminator()))
+    return false;
+
+  if (Rewriter.isHighCostExpansion(BackedgeTakenCount, L))
+    return false;
+
+  return true;
+}
+
+/// Return the loop header phi IFF IncV adds a loop invariant value to the phi.
+static PHINode *getLoopPhiForCounter(Value *IncV, Loop *L, DominatorTree *DT) {
   Instruction *IncI = dyn_cast<Instruction>(IncV);
   if (!IncI)
     return nullptr;
@@ -1847,7 +1886,7 @@ static PHINode *getLoopPhiForCounter(Value *IncV, Loop *L) {
 
   PHINode *Phi = dyn_cast<PHINode>(IncI->getOperand(0));
   if (Phi && Phi->getParent() == L->getHeader()) {
-    if (L->isLoopInvariant(IncI->getOperand(1)))
+    if (isLoopInvariant(IncI->getOperand(1), L, DT))
       return Phi;
     return nullptr;
   }
@@ -1857,23 +1896,22 @@ static PHINode *getLoopPhiForCounter(Value *IncV, Loop *L) {
   // Allow add/sub to be commuted.
   Phi = dyn_cast<PHINode>(IncI->getOperand(1));
   if (Phi && Phi->getParent() == L->getHeader()) {
-    if (L->isLoopInvariant(IncI->getOperand(0)))
+    if (isLoopInvariant(IncI->getOperand(0), L, DT))
       return Phi;
   }
   return nullptr;
 }
 
-/// Given a loop with one backedge and one exit, return the ICmpInst
-/// controlling the sole loop exit.  There is no guarantee that the exiting
-/// block is also the latch.
-static ICmpInst *getLoopTest(Loop *L, BasicBlock *ExitingBB) {
+/// Return the compare guarding the loop latch, or NULL for unrecognized tests.
+static ICmpInst *getLoopTest(Loop *L) {
+  assert(L->getExitingBlock() && "expected loop exit");
 
   BasicBlock *LatchBlock = L->getLoopLatch();
   // Don't bother with LFTR if the loop is not properly simplified.
   if (!LatchBlock)
     return nullptr;
 
-  BranchInst *BI = dyn_cast<BranchInst>(ExitingBB->getTerminator());
+  BranchInst *BI = dyn_cast<BranchInst>(L->getExitingBlock()->getTerminator());
   assert(BI && "expected exit branch");
 
   return dyn_cast<ICmpInst>(BI->getCondition());
@@ -1881,9 +1919,9 @@ static ICmpInst *getLoopTest(Loop *L, BasicBlock *ExitingBB) {
 
 /// linearFunctionTestReplace policy. Return true unless we can show that the
 /// current exit test is already sufficiently canonical.
-static bool needsLFTR(Loop *L, BasicBlock *ExitingBB) {
+static bool needsLFTR(Loop *L, DominatorTree *DT) {
   // Do LFTR to simplify the exit condition to an ICMP.
-  ICmpInst *Cond = getLoopTest(L, ExitingBB);
+  ICmpInst *Cond = getLoopTest(L);
   if (!Cond)
     return true;
 
@@ -1895,15 +1933,15 @@ static bool needsLFTR(Loop *L, BasicBlock *ExitingBB) {
   // Look for a loop invariant RHS
   Value *LHS = Cond->getOperand(0);
   Value *RHS = Cond->getOperand(1);
-  if (!L->isLoopInvariant(RHS)) {
-    if (!L->isLoopInvariant(LHS))
+  if (!isLoopInvariant(RHS, L, DT)) {
+    if (!isLoopInvariant(LHS, L, DT))
       return true;
     std::swap(LHS, RHS);
   }
   // Look for a simple IV counter LHS
   PHINode *Phi = dyn_cast<PHINode>(LHS);
   if (!Phi)
-    Phi = getLoopPhiForCounter(LHS, L);
+    Phi = getLoopPhiForCounter(LHS, L, DT);
 
   if (!Phi)
     return true;
@@ -1915,49 +1953,7 @@ static bool needsLFTR(Loop *L, BasicBlock *ExitingBB) {
 
   // Do LFTR if the exit condition's IV is *not* a simple counter.
   Value *IncV = Phi->getIncomingValue(Idx);
-  return Phi != getLoopPhiForCounter(IncV, L);
-}
-
-/// Return true if undefined behavior would provable be executed on the path to
-/// OnPathTo if Root produced a posion result.  Note that this doesn't say
-/// anything about whether OnPathTo is actually executed or whether Root is
-/// actually poison.  This can be used to assess whether a new use of Root can
-/// be added at a location which is control equivalent with OnPathTo (such as
-/// immediately before it) without introducing UB which didn't previously
-/// exist.  Note that a false result conveys no information.  
-static bool mustExecuteUBIfPoisonOnPathTo(Instruction *Root,
-                                          Instruction *OnPathTo, 
-                                          DominatorTree *DT) {
-  // Basic approach is to assume Root is poison, propagate poison forward
-  // through all users we can easily track, and then check whether any of those
-  // users are provable UB and must execute before out exiting block might
-  // exit.
-
-  // The set of all recursive users we've visited (which are assumed to all be
-  // poison because of said visit)
-  SmallSet<const Value *, 16> KnownPoison;
-  SmallVector<const Instruction*, 16> Worklist;
-  Worklist.push_back(Root);
-  while (!Worklist.empty()) {
-    const Instruction *I = Worklist.pop_back_val();
-
-    // If we know this must trigger UB on a path leading our target.
-    if (mustTriggerUB(I, KnownPoison) && DT->dominates(I, OnPathTo))
-      return true;
-    
-    // If we can't analyze propagation through this instruction, just skip it
-    // and transitive users.  Safe as false is a conservative result.
-    if (!propagatesFullPoison(I) && I != Root)
-      continue;
-
-    if (KnownPoison.insert(I).second)
-      for (const User *User : I->users())
-        Worklist.push_back(cast<Instruction>(User));
-  }
-
-  // Might be non-UB, or might have a path we couldn't prove must execute on
-  // way to exiting bb. 
-  return false;
+  return Phi != getLoopPhiForCounter(IncV, L, DT);
 }
 
 /// Recursive helper for hasConcreteDef(). Unfortunately, this currently boils
@@ -2016,43 +2012,25 @@ static bool AlmostDeadIV(PHINode *Phi, BasicBlock *LatchBlock, Value *Cond) {
   return true;
 }
 
-/// Return true if the given phi is a "counter" in L.  A counter is an
-/// add recurance (of integer or pointer type) with an arbitrary start, and a
-/// step of 1.  Note that L must have exactly one latch.
-static bool isLoopCounter(PHINode* Phi, Loop *L,
-                          ScalarEvolution *SE) {
-  assert(Phi->getParent() == L->getHeader());
-  assert(L->getLoopLatch());
-  
-  if (!SE->isSCEVable(Phi->getType()))
-    return false;
-
-  const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SE->getSCEV(Phi));
-  if (!AR || AR->getLoop() != L || !AR->isAffine())
-    return false;
-
-  const SCEV *Step = dyn_cast<SCEVConstant>(AR->getStepRecurrence(*SE));
-  if (!Step || !Step->isOne())
-    return false;
-
-  int LatchIdx = Phi->getBasicBlockIndex(L->getLoopLatch());
-  Value *IncV = Phi->getIncomingValue(LatchIdx);
-  return (getLoopPhiForCounter(IncV, L) == Phi);
-}
-
-/// Search the loop header for a loop counter (anadd rec w/step of one)
-/// suitable for use by LFTR.  If multiple counters are available, select the
-/// "best" one based profitable heuristics.
+/// Find an affine IV in canonical form.
 ///
 /// BECount may be an i8* pointer type. The pointer difference is already
 /// valid count without scaling the address stride, so it remains a pointer
 /// expression as far as SCEV is concerned.
-static PHINode *FindLoopCounter(Loop *L, BasicBlock *ExitingBB,
-                                const SCEV *BECount,
+///
+/// Currently only valid for LFTR. See the comments on hasConcreteDef below.
+///
+/// FIXME: Accept -1 stride and set IVLimit = IVInit - BECount
+///
+/// FIXME: Accept non-unit stride as long as SCEV can reduce BECount * Stride.
+/// This is difficult in general for SCEV because of potential overflow. But we
+/// could at least handle constant BECounts.
+static PHINode *FindLoopCounter(Loop *L, const SCEV *BECount,
                                 ScalarEvolution *SE, DominatorTree *DT) {
   uint64_t BCWidth = SE->getTypeSizeInBits(BECount->getType());
 
-  Value *Cond = cast<BranchInst>(ExitingBB->getTerminator())->getCondition();
+  Value *Cond =
+    cast<BranchInst>(L->getExitingBlock()->getTerminator())->getCondition();
 
   // Loop over all of the PHI nodes, looking for a simple counter.
   PHINode *BestPhi = nullptr;
@@ -2063,20 +2041,31 @@ static PHINode *FindLoopCounter(Loop *L, BasicBlock *ExitingBB,
 
   for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
     PHINode *Phi = cast<PHINode>(I);
-    if (!isLoopCounter(Phi, L, SE))
+    if (!SE->isSCEVable(Phi->getType()))
       continue;
 
     // Avoid comparing an integer IV against a pointer Limit.
     if (BECount->getType()->isPointerTy() && !Phi->getType()->isPointerTy())
       continue;
 
-    const auto *AR = dyn_cast<SCEVAddRecExpr>(SE->getSCEV(Phi));
-    
+    const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SE->getSCEV(Phi));
+    if (!AR || AR->getLoop() != L || !AR->isAffine())
+      continue;
+
     // AR may be a pointer type, while BECount is an integer type.
     // AR may be wider than BECount. With eq/ne tests overflow is immaterial.
     // AR may not be a narrower type, or we may never exit.
     uint64_t PhiWidth = SE->getTypeSizeInBits(AR->getType());
     if (PhiWidth < BCWidth || !DL.isLegalInteger(PhiWidth))
+      continue;
+
+    const SCEV *Step = dyn_cast<SCEVConstant>(AR->getStepRecurrence(*SE));
+    if (!Step || !Step->isOne())
+      continue;
+
+    int LatchIdx = Phi->getBasicBlockIndex(LatchBlock);
+    Value *IncV = Phi->getIncomingValue(LatchIdx);
+    if (getLoopPhiForCounter(IncV, L, DT) != Phi)
       continue;
 
     // Avoid reusing a potentially undef value to compute other values that may
@@ -2085,27 +2074,13 @@ static PHINode *FindLoopCounter(Loop *L, BasicBlock *ExitingBB,
       // We explicitly allow unknown phis as long as they are already used by
       // the loop test. In this case we assume that performing LFTR could not
       // increase the number of undef users.
-      // TODO: Generalize this to allow *any* loop exit which is known to
-      // execute on each iteration
-      if (L->getExitingBlock())
-        if (ICmpInst *Cond = getLoopTest(L, ExitingBB))
-          if (Phi != getLoopPhiForCounter(Cond->getOperand(0), L) &&
-              Phi != getLoopPhiForCounter(Cond->getOperand(1), L))
-            continue;
+      if (ICmpInst *Cond = getLoopTest(L)) {
+        if (Phi != getLoopPhiForCounter(Cond->getOperand(0), L, DT) &&
+            Phi != getLoopPhiForCounter(Cond->getOperand(1), L, DT)) {
+          continue;
+        }
+      }
     }
-
-    // Avoid introducing undefined behavior due to poison which didn't exist in
-    // the original program.  (Annoyingly, the rules for poison and undef
-    // propagation are distinct, so this does NOT cover the undef case above.)
-    // We have to ensure that we don't introduce UB by introducing a use on an
-    // iteration where said IV produces poison.  Our strategy here differs for
-    // pointers and integer IVs.  For integers, we strip and reinfer as needed,
-    // see code in linearFunctionTestReplace.  For pointers, we restrict
-    // transforms as there is no good way to reinfer inbounds once lost.
-    if (!Phi->getType()->isIntegerTy() &&
-        !mustExecuteUBIfPoisonOnPathTo(Phi, ExitingBB->getTerminator(), DT))
-      continue;
-    
     const SCEV *Init = AR->getStart();
 
     if (BestPhi && !AlmostDeadIV(BestPhi, LatchBlock, Cond)) {
@@ -2131,43 +2106,38 @@ static PHINode *FindLoopCounter(Loop *L, BasicBlock *ExitingBB,
   return BestPhi;
 }
 
-/// Insert an IR expression which computes the value held by the IV IndVar
-/// (which must be an loop counter w/unit stride) after the backedge of loop L
-/// is taken ExitCount times.
-static Value *genLoopLimit(PHINode *IndVar, BasicBlock *ExitingBB,
-                           const SCEV *ExitCount, bool UsePostInc, Loop *L,
+/// Help linearFunctionTestReplace by generating a value that holds the RHS of
+/// the new loop test.
+static Value *genLoopLimit(PHINode *IndVar, const SCEV *IVCount, Loop *L,
                            SCEVExpander &Rewriter, ScalarEvolution *SE) {
-  assert(isLoopCounter(IndVar, L, SE));
-  const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(SE->getSCEV(IndVar));
+  const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(SE->getSCEV(IndVar));
+  assert(AR && AR->getLoop() == L && AR->isAffine() && "bad loop counter");
   const SCEV *IVInit = AR->getStart();
 
-  // IVInit may be a pointer while ExitCount is an integer when FindLoopCounter
-  // finds a valid pointer IV. Sign extend ExitCount in order to materialize a
+  // IVInit may be a pointer while IVCount is an integer when FindLoopCounter
+  // finds a valid pointer IV. Sign extend BECount in order to materialize a
   // GEP. Avoid running SCEVExpander on a new pointer value, instead reusing
   // the existing GEPs whenever possible.
-  if (IndVar->getType()->isPointerTy() &&
-      !ExitCount->getType()->isPointerTy()) {
+  if (IndVar->getType()->isPointerTy() && !IVCount->getType()->isPointerTy()) {
     // IVOffset will be the new GEP offset that is interpreted by GEP as a
-    // signed value. ExitCount on the other hand represents the loop trip count,
+    // signed value. IVCount on the other hand represents the loop trip count,
     // which is an unsigned value. FindLoopCounter only allows induction
     // variables that have a positive unit stride of one. This means we don't
     // have to handle the case of negative offsets (yet) and just need to zero
-    // extend ExitCount.
+    // extend IVCount.
     Type *OfsTy = SE->getEffectiveSCEVType(IVInit->getType());
-    const SCEV *IVOffset = SE->getTruncateOrZeroExtend(ExitCount, OfsTy);
-    if (UsePostInc)
-      IVOffset = SE->getAddExpr(IVOffset, SE->getOne(OfsTy));
+    const SCEV *IVOffset = SE->getTruncateOrZeroExtend(IVCount, OfsTy);
 
     // Expand the code for the iteration count.
     assert(SE->isLoopInvariant(IVOffset, L) &&
            "Computed iteration count is not loop invariant!");
-    BranchInst *BI = cast<BranchInst>(ExitingBB->getTerminator());
+    BranchInst *BI = cast<BranchInst>(L->getExitingBlock()->getTerminator());
     Value *GEPOffset = Rewriter.expandCodeFor(IVOffset, OfsTy, BI);
 
     Value *GEPBase = IndVar->getIncomingValueForBlock(L->getLoopPreheader());
     assert(AR->getStart() == SE->getSCEV(GEPBase) && "bad loop counter");
     // We could handle pointer IVs other than i8*, but we need to compensate for
-    // gep index scaling.
+    // gep index scaling. See canExpandBackedgeTakenCount comments.
     assert(SE->getSizeOfExpr(IntegerType::getInt64Ty(IndVar->getContext()),
                              cast<PointerType>(GEPBase->getType())
                                  ->getElementType())->isOne() &&
@@ -2176,7 +2146,7 @@ static Value *genLoopLimit(PHINode *IndVar, BasicBlock *ExitingBB,
     IRBuilder<> Builder(L->getLoopPreheader()->getTerminator());
     return Builder.CreateGEP(nullptr, GEPBase, GEPOffset, "lftr.limit");
   } else {
-    // In any other case, convert both IVInit and ExitCount to integers before
+    // In any other case, convert both IVInit and IVCount to integers before
     // comparing. This may result in SCEV expansion of pointers, but in practice
     // SCEV will fold the pointer arithmetic away as such:
     // BECount = (IVEnd - IVInit - 1) => IVLimit = IVInit (postinc).
@@ -2184,34 +2154,35 @@ static Value *genLoopLimit(PHINode *IndVar, BasicBlock *ExitingBB,
     // Valid Cases: (1) both integers is most common; (2) both may be pointers
     // for simple memset-style loops.
     //
-    // IVInit integer and ExitCount pointer would only occur if a canonical IV
+    // IVInit integer and IVCount pointer would only occur if a canonical IV
     // were generated on top of case #2, which is not expected.
 
-    assert(AR->getStepRecurrence(*SE)->isOne() && "only handles unit stride");
-    // For unit stride, IVCount = Start + ExitCount with 2's complement
-    // overflow.
-    const SCEV *IVInit = AR->getStart();
+    const SCEV *IVLimit = nullptr;
+    // For unit stride, IVCount = Start + BECount with 2's complement overflow.
+    // For non-zero Start, compute IVCount here.
+    if (AR->getStart()->isZero())
+      IVLimit = IVCount;
+    else {
+      assert(AR->getStepRecurrence(*SE)->isOne() && "only handles unit stride");
+      const SCEV *IVInit = AR->getStart();
 
-    // For integer IVs, truncate the IV before computing IVInit + BECount.
-    if (SE->getTypeSizeInBits(IVInit->getType())
-        > SE->getTypeSizeInBits(ExitCount->getType()))
-      IVInit = SE->getTruncateExpr(IVInit, ExitCount->getType());
+      // For integer IVs, truncate the IV before computing IVInit + BECount.
+      if (SE->getTypeSizeInBits(IVInit->getType())
+          > SE->getTypeSizeInBits(IVCount->getType()))
+        IVInit = SE->getTruncateExpr(IVInit, IVCount->getType());
 
-    const SCEV *IVLimit = SE->getAddExpr(IVInit, ExitCount);
-
-    if (UsePostInc)
-      IVLimit = SE->getAddExpr(IVLimit, SE->getOne(IVLimit->getType()));
-
+      IVLimit = SE->getAddExpr(IVInit, IVCount);
+    }
     // Expand the code for the iteration count.
-    BranchInst *BI = cast<BranchInst>(ExitingBB->getTerminator());
+    BranchInst *BI = cast<BranchInst>(L->getExitingBlock()->getTerminator());
     IRBuilder<> Builder(BI);
     assert(SE->isLoopInvariant(IVLimit, L) &&
            "Computed iteration count is not loop invariant!");
     // Ensure that we generate the same type as IndVar, or a smaller integer
     // type. In the presence of null pointer values, we have an integer type
     // SCEV expression (IVInit) for a pointer type IV value (IndVar).
-    Type *LimitTy = ExitCount->getType()->isPointerTy() ?
-      IndVar->getType() : ExitCount->getType();
+    Type *LimitTy = IVCount->getType()->isPointerTy() ?
+      IndVar->getType() : IVCount->getType();
     return Rewriter.expandCodeFor(IVLimit, LimitTy, BI);
   }
 }
@@ -2222,75 +2193,50 @@ static Value *genLoopLimit(PHINode *IndVar, BasicBlock *ExitingBB,
 /// determine a loop-invariant trip count of the loop, which is actually a much
 /// broader range than just linear tests.
 bool IndVarSimplify::
-linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
-                          const SCEV *ExitCount,
+linearFunctionTestReplace(Loop *L, const SCEV *BackedgeTakenCount,
                           PHINode *IndVar, SCEVExpander &Rewriter) {
-  assert(L->getLoopLatch() && "Loop no longer in simplified form?");
-  assert(isLoopCounter(IndVar, L, SE));
-  Instruction * const IncVar =
-    cast<Instruction>(IndVar->getIncomingValueForBlock(L->getLoopLatch()));
+  assert(canExpandBackedgeTakenCount(L, SE, Rewriter) && "precondition");
 
-  // Initialize CmpIndVar to the preincremented IV.
+  // Initialize CmpIndVar and IVCount to their preincremented values.
   Value *CmpIndVar = IndVar;
-  bool UsePostInc = false;
+  const SCEV *IVCount = BackedgeTakenCount;
+
+  assert(L->getLoopLatch() && "Loop no longer in simplified form?");
 
   // If the exiting block is the same as the backedge block, we prefer to
   // compare against the post-incremented value, otherwise we must compare
   // against the preincremented value.
-  if (ExitingBB == L->getLoopLatch()) {
-    bool SafeToPostInc = IndVar->getType()->isIntegerTy();
-    if (!SafeToPostInc) {
-      // For pointer IVs, we chose to not strip inbounds which requires us not
-      // to add a potentially UB introducing use.  We need to either a) show
-      // the loop test we're modifying is already in post-inc form, or b) show
-      // that adding a use must not introduce UB.
-      if (ICmpInst *LoopTest = getLoopTest(L, ExitingBB))
-        SafeToPostInc = LoopTest->getOperand(0) == IncVar ||
-          LoopTest->getOperand(1) == IncVar;
-      if (!SafeToPostInc)
-        SafeToPostInc =
-          mustExecuteUBIfPoisonOnPathTo(IncVar, ExitingBB->getTerminator(), DT);
-    }
-
-    if (SafeToPostInc) {
-      UsePostInc = true;
-      CmpIndVar = IncVar;
-    }
+  if (L->getExitingBlock() == L->getLoopLatch()) {
+    // Add one to the "backedge-taken" count to get the trip count.
+    // This addition may overflow, which is valid as long as the comparison is
+    // truncated to BackedgeTakenCount->getType().
+    IVCount = SE->getAddExpr(BackedgeTakenCount,
+                             SE->getOne(BackedgeTakenCount->getType()));
+    // The BackedgeTaken expression contains the number of times that the
+    // backedge branches to the loop header.  This is one less than the
+    // number of times the loop executes, so use the incremented indvar.
+    CmpIndVar = IndVar->getIncomingValueForBlock(L->getExitingBlock());
   }
 
-  // It may be necessary to drop nowrap flags on the incrementing instruction
-  // if either LFTR moves from a pre-inc check to a post-inc check (in which
-  // case the increment might have previously been poison on the last iteration
-  // only) or if LFTR switches to a different IV that was previously dynamically
-  // dead (and as such may be arbitrarily poison). We remove any nowrap flags
-  // that SCEV didn't infer for the post-inc addrec (even if we use a pre-inc
-  // check), because the pre-inc addrec flags may be adopted from the original
-  // instruction, while SCEV has to explicitly prove the post-inc nowrap flags.
-  // TODO: This handling is inaccurate for one case: If we switch to a
-  // dynamically dead IV that wraps on the first loop iteration only, which is
-  // not covered by the post-inc addrec. (If the new IV was not dynamically
-  // dead, it could not be poison on the first iteration in the first place.)
-  if (auto *BO = dyn_cast<BinaryOperator>(IncVar)) {
-    const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(SE->getSCEV(IncVar));
-    if (BO->hasNoUnsignedWrap())
-      BO->setHasNoUnsignedWrap(AR->hasNoUnsignedWrap());
-    if (BO->hasNoSignedWrap())
-      BO->setHasNoSignedWrap(AR->hasNoSignedWrap());
-  }
-
-  Value *ExitCnt = genLoopLimit(
-      IndVar, ExitingBB, ExitCount, UsePostInc, L, Rewriter, SE);
+  Value *ExitCnt = genLoopLimit(IndVar, IVCount, L, Rewriter, SE);
   assert(ExitCnt->getType()->isPointerTy() ==
              IndVar->getType()->isPointerTy() &&
          "genLoopLimit missed a cast");
 
   // Insert a new icmp_ne or icmp_eq instruction before the branch.
-  BranchInst *BI = cast<BranchInst>(ExitingBB->getTerminator());
+  BranchInst *BI = cast<BranchInst>(L->getExitingBlock()->getTerminator());
   ICmpInst::Predicate P;
   if (L->contains(BI->getSuccessor(0)))
     P = ICmpInst::ICMP_NE;
   else
     P = ICmpInst::ICMP_EQ;
+
+  LLVM_DEBUG(dbgs() << "INDVARS: Rewriting loop exit condition to:\n"
+                    << "      LHS:" << *CmpIndVar << '\n'
+                    << "       op:\t" << (P == ICmpInst::ICMP_NE ? "!=" : "==")
+                    << "\n"
+                    << "      RHS:\t" << *ExitCnt << "\n"
+                    << "  IVCount:\t" << *IVCount << "\n");
 
   IRBuilder<> Builder(BI);
 
@@ -2300,20 +2246,25 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
     Builder.SetCurrentDebugLocation(Cond->getDebugLoc());
 
   // LFTR can ignore IV overflow and truncate to the width of
-  // ExitCount. This avoids materializing the add(zext(add)) expression.
+  // BECount. This avoids materializing the add(zext(add)) expression.
   unsigned CmpIndVarSize = SE->getTypeSizeInBits(CmpIndVar->getType());
   unsigned ExitCntSize = SE->getTypeSizeInBits(ExitCnt->getType());
   if (CmpIndVarSize > ExitCntSize) {
     const SCEVAddRecExpr *AR = cast<SCEVAddRecExpr>(SE->getSCEV(IndVar));
     const SCEV *ARStart = AR->getStart();
     const SCEV *ARStep = AR->getStepRecurrence(*SE);
-    // For constant ExitCount, avoid truncation.
-    if (isa<SCEVConstant>(ARStart) && isa<SCEVConstant>(ExitCount)) {
+    // For constant IVCount, avoid truncation.
+    if (isa<SCEVConstant>(ARStart) && isa<SCEVConstant>(IVCount)) {
       const APInt &Start = cast<SCEVConstant>(ARStart)->getAPInt();
-      APInt Count = cast<SCEVConstant>(ExitCount)->getAPInt();
-      Count = Count.zext(CmpIndVarSize);
-      if (UsePostInc)
+      APInt Count = cast<SCEVConstant>(IVCount)->getAPInt();
+      // Note that the post-inc value of BackedgeTakenCount may have overflowed
+      // above such that IVCount is now zero.
+      if (IVCount != BackedgeTakenCount && Count == 0) {
+        Count = APInt::getMaxValue(Count.getBitWidth()).zext(CmpIndVarSize);
         ++Count;
+      }
+      else
+        Count = Count.zext(CmpIndVarSize);
       APInt NewLimit;
       if (cast<SCEVConstant>(ARStep)->getValue()->isNegative())
         NewLimit = Start - Count;
@@ -2355,14 +2306,6 @@ linearFunctionTestReplace(Loop *L, BasicBlock *ExitingBB,
                                         "lftr.wideiv");
     }
   }
-  LLVM_DEBUG(dbgs() << "INDVARS: Rewriting loop exit condition to:\n"
-                    << "      LHS:" << *CmpIndVar << '\n'
-                    << "       op:\t" << (P == ICmpInst::ICMP_NE ? "!=" : "==")
-                    << "\n"
-                    << "      RHS:\t" << *ExitCnt << "\n"
-                    << "ExitCount:\t" << *ExitCount << "\n"
-                    << "  was: " << *BI->getCondition() << "\n");
-
   Value *Cond = Builder.CreateICmp(P, CmpIndVar, ExitCnt, "exitcond");
   Value *OrigCond = BI->getCondition();
   // It's tempting to use replaceAllUsesWith here to fully replace the old
@@ -2523,52 +2466,22 @@ bool IndVarSimplify::run(Loop *L) {
   NumElimIV += Rewriter.replaceCongruentIVs(L, DT, DeadInsts);
 
   // If we have a trip count expression, rewrite the loop's exit condition
-  // using it.  
-  if (!DisableLFTR) {
-    // For the moment, we only do LFTR for single exit loops.  The code is
-    // structured as it is in the expectation of generalization to multi-exit
-    // loops in the near future.  See D62625 for context.
-    SmallVector<BasicBlock*, 16> ExitingBlocks;
-    if (auto *ExitingBB = L->getExitingBlock())
-      ExitingBlocks.push_back(ExitingBB);
-    for (BasicBlock *ExitingBB : ExitingBlocks) {
-      // Can't rewrite non-branch yet.
-      if (!isa<BranchInst>(ExitingBB->getTerminator()))
-        continue;
-      
-      if (!needsLFTR(L, ExitingBB))
-        continue;
-
-      const SCEV *ExitCount = SE->getExitCount(L, ExitingBB);
-      if (isa<SCEVCouldNotCompute>(ExitCount))
-        continue;
-
-      // Better to fold to true (TODO: do so!)
-      if (ExitCount->isZero())
-        continue;
-      
-      PHINode *IndVar = FindLoopCounter(L, ExitingBB, ExitCount, SE, DT);
-      if (!IndVar)
-        continue;
-      
-      // Avoid high cost expansions.  Note: This heuristic is questionable in
-      // that our definition of "high cost" is not exactly principled.  
-      if (Rewriter.isHighCostExpansion(ExitCount, L))
-        continue;
-      
+  // using it.  We can currently only handle loops with a single exit.
+  if (!DisableLFTR && canExpandBackedgeTakenCount(L, SE, Rewriter) &&
+      needsLFTR(L, DT)) {
+    PHINode *IndVar = FindLoopCounter(L, BackedgeTakenCount, SE, DT);
+    if (IndVar) {
       // Check preconditions for proper SCEVExpander operation. SCEV does not
-      // express SCEVExpander's dependencies, such as LoopSimplify. Instead
-      // any pass that uses the SCEVExpander must do it. This does not work
-      // well for loop passes because SCEVExpander makes assumptions about
-      // all loops, while LoopPassManager only forces the current loop to be
-      // simplified. 
+      // express SCEVExpander's dependencies, such as LoopSimplify. Instead any
+      // pass that uses the SCEVExpander must do it. This does not work well for
+      // loop passes because SCEVExpander makes assumptions about all loops,
+      // while LoopPassManager only forces the current loop to be simplified.
       //
       // FIXME: SCEV expansion has no way to bail out, so the caller must
       // explicitly check any assumptions made by SCEV. Brittle.
-      const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(ExitCount);
+      const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(BackedgeTakenCount);
       if (!AR || AR->getLoop()->getLoopPreheader())
-        Changed |= linearFunctionTestReplace(L, ExitingBB,
-                                             ExitCount, IndVar,
+        Changed |= linearFunctionTestReplace(L, BackedgeTakenCount, IndVar,
                                              Rewriter);
     }
   }
