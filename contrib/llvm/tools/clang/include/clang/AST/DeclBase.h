@@ -1295,9 +1295,50 @@ class DeclContext {
   mutable StoredDeclsMap *LookupPtr = nullptr;
 
 protected:
-  friend class ASTDeclReader;
-  friend class ASTWriter;
-  friend class ExternalASTSource;
+  /// This anonymous union stores the bits belonging to DeclContext and classes
+  /// deriving from it. The goal is to use otherwise wasted
+  /// space in DeclContext to store data belonging to derived classes.
+  /// The space saved is especially significient when pointers are aligned
+  /// to 8 bytes. In this case due to alignment requirements we have a
+  /// little less than 8 bytes free in DeclContext which we can use.
+  /// We check that none of the classes in this union is larger than
+  /// 8 bytes with static_asserts in the ctor of DeclContext.
+  union {
+    DeclContextBitfields DeclContextBits;
+    TagDeclBitfields TagDeclBits;
+    EnumDeclBitfields EnumDeclBits;
+    RecordDeclBitfields RecordDeclBits;
+    OMPDeclareReductionDeclBitfields OMPDeclareReductionDeclBits;
+    FunctionDeclBitfields FunctionDeclBits;
+    CXXConstructorDeclBitfields CXXConstructorDeclBits;
+    ObjCMethodDeclBitfields ObjCMethodDeclBits;
+    ObjCContainerDeclBitfields ObjCContainerDeclBits;
+    LinkageSpecDeclBitfields LinkageSpecDeclBits;
+    BlockDeclBitfields BlockDeclBits;
+  };
+
+  static_assert(sizeof(DeclContextBitfields) <= 8,
+                "DeclContextBitfields is larger than 8 bytes!");
+  static_assert(sizeof(TagDeclBitfields) <= 8,
+                "TagDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(EnumDeclBitfields) <= 8,
+                "EnumDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(RecordDeclBitfields) <= 8,
+                "RecordDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(OMPDeclareReductionDeclBitfields) <= 8,
+                "OMPDeclareReductionDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(FunctionDeclBitfields) <= 8,
+                "FunctionDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(CXXConstructorDeclBitfields) <= 8,
+                "CXXConstructorDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(ObjCMethodDeclBitfields) <= 8,
+                "ObjCMethodDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(ObjCContainerDeclBitfields) <= 8,
+                "ObjCContainerDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(LinkageSpecDeclBitfields) <= 8,
+                "LinkageSpecDeclBitfields is larger than 8 bytes!");
+  static_assert(sizeof(BlockDeclBitfields) <= 8,
+                "BlockDeclBitfields is larger than 8 bytes!");
 
   /// FirstDecl - The first declaration stored within this declaration
   /// context.
