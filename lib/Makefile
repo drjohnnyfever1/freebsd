@@ -234,8 +234,7 @@ _libclang_rt=	libclang_rt
 
 .if ${MK_LIBCPLUSPLUS} != "no"
 _libcxxrt=	libcxxrt
-_libcplusplus=	libc++ libc++experimental
-_libcplusplus+=	libc++fs
+_libcplusplus=	libc++
 .endif
 
 .if ${MK_EFI} != "no"

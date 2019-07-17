@@ -26,7 +26,6 @@ SUBDIR+=	llvm-link
 SUBDIR+=	llvm-lto
 SUBDIR+=	llvm-lto2
 SUBDIR+=	llvm-mc
-SUBDIR+=	llvm-mca
 SUBDIR+=	llvm-modextract
 SUBDIR+=	llvm-nm
 SUBDIR+=	llvm-objcopy
