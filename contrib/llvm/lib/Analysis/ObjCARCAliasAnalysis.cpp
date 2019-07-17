@@ -106,12 +106,12 @@ FunctionModRefBehavior ObjCARCAAResult::getModRefBehavior(const Function *F) {
   return AAResultBase::getModRefBehavior(F);
 }
 
-ModRefInfo ObjCARCAAResult::getModRefInfo(const CallBase *Call,
+ModRefInfo ObjCARCAAResult::getModRefInfo(ImmutableCallSite CS,
                                           const MemoryLocation &Loc) {
   if (!EnableARCOpts)
-    return AAResultBase::getModRefInfo(Call, Loc);
+    return AAResultBase::getModRefInfo(CS, Loc);
 
-  switch (GetBasicARCInstKind(Call)) {
+  switch (GetBasicARCInstKind(CS.getInstruction())) {
   case ARCInstKind::Retain:
   case ARCInstKind::RetainRV:
   case ARCInstKind::Autorelease:
@@ -128,7 +128,7 @@ ModRefInfo ObjCARCAAResult::getModRefInfo(const CallBase *Call,
     break;
   }
 
-  return AAResultBase::getModRefInfo(Call, Loc);
+  return AAResultBase::getModRefInfo(CS, Loc);
 }
 
 ObjCARCAAResult ObjCARCAA::run(Function &F, FunctionAnalysisManager &AM) {

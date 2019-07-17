@@ -144,29 +144,26 @@ class OrcMCJITReplacement : public ExecutionEngine {
   public:
     LinkingORCResolver(OrcMCJITReplacement &M) : M(M) {}
 
-    SymbolNameSet getResponsibilitySet(const SymbolNameSet &Symbols) override {
-      SymbolNameSet Result;
+    SymbolFlagsMap lookupFlags(const SymbolNameSet &Symbols) override {
+      SymbolFlagsMap SymbolFlags;
 
       for (auto &S : Symbols) {
         if (auto Sym = M.findMangledSymbol(*S)) {
-          if (!Sym.getFlags().isStrong())
-            Result.insert(S);
+          SymbolFlags[S] = Sym.getFlags();
         } else if (auto Err = Sym.takeError()) {
           M.reportError(std::move(Err));
-          return SymbolNameSet();
+          return SymbolFlagsMap();
         } else {
           if (auto Sym2 = M.ClientResolver->findSymbolInLogicalDylib(*S)) {
-            if (!Sym2.getFlags().isStrong())
-              Result.insert(S);
+            SymbolFlags[S] = Sym2.getFlags();
           } else if (auto Err = Sym2.takeError()) {
             M.reportError(std::move(Err));
-            return SymbolNameSet();
-          } else
-            Result.insert(S);
+            return SymbolFlagsMap();
+          }
         }
       }
 
-      return Result;
+      return SymbolFlags;
     }
 
     SymbolNameSet lookup(std::shared_ptr<AsynchronousSymbolQuery> Query,
@@ -275,14 +272,14 @@ public:
     {
       unsigned CtorId = 0, DtorId = 0;
       for (auto Ctor : orc::getConstructors(*M)) {
-        std::string NewCtorName = ("__ORCstatic_ctor." + Twine(CtorId++)).str();
+        std::string NewCtorName = ("$static_ctor." + Twine(CtorId++)).str();
         Ctor.Func->setName(NewCtorName);
         Ctor.Func->setLinkage(GlobalValue::ExternalLinkage);
         Ctor.Func->setVisibility(GlobalValue::HiddenVisibility);
         CtorNames.push_back(mangle(NewCtorName));
       }
       for (auto Dtor : orc::getDestructors(*M)) {
-        std::string NewDtorName = ("__ORCstatic_dtor." + Twine(DtorId++)).str();
+        std::string NewDtorName = ("$static_dtor." + Twine(DtorId++)).str();
         dbgs() << "Found dtor: " << NewDtorName << "\n";
         Dtor.Func->setName(NewDtorName);
         Dtor.Func->setLinkage(GlobalValue::ExternalLinkage);
@@ -461,8 +458,8 @@ private:
     return MangledName;
   }
 
-  using ObjectLayerT = LegacyRTDyldObjectLinkingLayer;
-  using CompileLayerT = LegacyIRCompileLayer<ObjectLayerT, orc::SimpleCompiler>;
+  using ObjectLayerT = RTDyldObjectLinkingLayer;
+  using CompileLayerT = IRCompileLayer<ObjectLayerT, orc::SimpleCompiler>;
   using LazyEmitLayerT = LazyEmittingLayer<CompileLayerT>;
 
   ExecutionSession ES;

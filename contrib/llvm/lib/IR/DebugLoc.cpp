@@ -56,28 +56,15 @@ DebugLoc DebugLoc::getFnDebugLoc() const {
   return DebugLoc();
 }
 
-bool DebugLoc::isImplicitCode() const {
-  if (DILocation *Loc = get()) {
-    return Loc->isImplicitCode();
-  }
-  return true;
-}
-
-void DebugLoc::setImplicitCode(bool ImplicitCode) {
-  if (DILocation *Loc = get()) {
-    Loc->setImplicitCode(ImplicitCode);
-  }
-}
-
 DebugLoc DebugLoc::get(unsigned Line, unsigned Col, const MDNode *Scope,
-                       const MDNode *InlinedAt, bool ImplicitCode) {
+                       const MDNode *InlinedAt) {
   // If no scope is available, this is an unknown location.
   if (!Scope)
     return DebugLoc();
 
   return DILocation::get(Scope->getContext(), Line, Col,
                          const_cast<MDNode *>(Scope),
-                         const_cast<MDNode *>(InlinedAt), ImplicitCode);
+                         const_cast<MDNode *>(InlinedAt));
 }
 
 DebugLoc DebugLoc::appendInlinedAt(DebugLoc DL, DILocation *InlinedAt,

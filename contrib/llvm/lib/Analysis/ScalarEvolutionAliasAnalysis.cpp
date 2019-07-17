@@ -27,7 +27,7 @@ AliasResult SCEVAAResult::alias(const MemoryLocation &LocA,
   // If either of the memory references is empty, it doesn't matter what the
   // pointer values are. This allows the code below to ignore this special
   // case.
-  if (LocA.Size.isZero() || LocB.Size.isZero())
+  if (LocA.Size == 0 || LocB.Size == 0)
     return NoAlias;
 
   // This is SCEVAAResult. Get the SCEVs!
@@ -43,12 +43,8 @@ AliasResult SCEVAAResult::alias(const MemoryLocation &LocA,
   if (SE.getEffectiveSCEVType(AS->getType()) ==
       SE.getEffectiveSCEVType(BS->getType())) {
     unsigned BitWidth = SE.getTypeSizeInBits(AS->getType());
-    APInt ASizeInt(BitWidth, LocA.Size.hasValue()
-                                 ? LocA.Size.getValue()
-                                 : MemoryLocation::UnknownSize);
-    APInt BSizeInt(BitWidth, LocB.Size.hasValue()
-                                 ? LocB.Size.getValue()
-                                 : MemoryLocation::UnknownSize);
+    APInt ASizeInt(BitWidth, LocA.Size);
+    APInt BSizeInt(BitWidth, LocB.Size);
 
     // Compute the difference between the two pointers.
     const SCEV *BA = SE.getMinusSCEV(BS, AS);
@@ -82,10 +78,10 @@ AliasResult SCEVAAResult::alias(const MemoryLocation &LocA,
   Value *BO = GetBaseValue(BS);
   if ((AO && AO != LocA.Ptr) || (BO && BO != LocB.Ptr))
     if (alias(MemoryLocation(AO ? AO : LocA.Ptr,
-                             AO ? LocationSize::unknown() : LocA.Size,
+                             AO ? +MemoryLocation::UnknownSize : LocA.Size,
                              AO ? AAMDNodes() : LocA.AATags),
               MemoryLocation(BO ? BO : LocB.Ptr,
-                             BO ? LocationSize::unknown() : LocB.Size,
+                             BO ? +MemoryLocation::UnknownSize : LocB.Size,
                              BO ? AAMDNodes() : LocB.AATags)) == NoAlias)
       return NoAlias;
 

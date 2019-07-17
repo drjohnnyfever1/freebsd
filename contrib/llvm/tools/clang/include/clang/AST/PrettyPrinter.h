@@ -38,20 +38,21 @@ public:
 struct PrintingPolicy {
   /// Create a default printing policy for the specified language.
   PrintingPolicy(const LangOptions &LO)
-      : Indentation(2), SuppressSpecifiers(false),
-        SuppressTagKeyword(LO.CPlusPlus), IncludeTagDefinition(false),
-        SuppressScope(false), SuppressUnwrittenScope(false),
-        SuppressInitializers(false), ConstantArraySizeAsWritten(false),
-        AnonymousTagLocations(true), SuppressStrongLifetime(false),
-        SuppressLifetimeQualifiers(false),
-        SuppressTemplateArgsInCXXConstructors(false), Bool(LO.Bool),
-        Restrict(LO.C99), Alignof(LO.CPlusPlus11), UnderscoreAlignof(LO.C11),
-        UseVoidForZeroParams(!LO.CPlusPlus), TerseOutput(false),
-        PolishForDeclaration(false), Half(LO.Half),
-        MSWChar(LO.MicrosoftExt && !LO.WChar), IncludeNewlines(true),
-        MSVCFormatting(false), ConstantsAsWritten(false),
-        SuppressImplicitBase(false), FullyQualifiedName(false),
-        RemapFilePaths(false), PrintCanonicalTypes(false) {}
+    : Indentation(2), SuppressSpecifiers(false),
+      SuppressTagKeyword(LO.CPlusPlus),
+      IncludeTagDefinition(false), SuppressScope(false),
+      SuppressUnwrittenScope(false), SuppressInitializers(false),
+      ConstantArraySizeAsWritten(false), AnonymousTagLocations(true),
+      SuppressStrongLifetime(false), SuppressLifetimeQualifiers(false),
+      SuppressTemplateArgsInCXXConstructors(false),
+      Bool(LO.Bool), Restrict(LO.C99),
+      Alignof(LO.CPlusPlus11), UnderscoreAlignof(LO.C11),
+      UseVoidForZeroParams(!LO.CPlusPlus),
+      TerseOutput(false), PolishForDeclaration(false),
+      Half(LO.Half), MSWChar(LO.MicrosoftExt && !LO.WChar),
+      IncludeNewlines(true), MSVCFormatting(false),
+      ConstantsAsWritten(false), SuppressImplicitBase(false),
+      FullyQualifiedName(false) { }
 
   /// Adjust this printing policy for cases where it's known that we're
   /// printing C++ code (for instance, if AST dumping reaches a C++-only
@@ -80,7 +81,7 @@ struct PrintingPolicy {
   /// declaration for "x", so that we will print "int *x"; it will be
   /// \c true when we print "y", so that we suppress printing the
   /// "const int" type specifier and instead only print the "*y".
-  unsigned SuppressSpecifiers : 1;
+  bool SuppressSpecifiers : 1;
 
   /// Whether type printing should skip printing the tag keyword.
   ///
@@ -90,7 +91,7 @@ struct PrintingPolicy {
   /// \code
   /// struct Geometry::Point;
   /// \endcode
-  unsigned SuppressTagKeyword : 1;
+  bool SuppressTagKeyword : 1;
 
   /// When true, include the body of a tag definition.
   ///
@@ -100,14 +101,14 @@ struct PrintingPolicy {
   /// \code
   /// typedef struct { int x, y; } Point;
   /// \endcode
-  unsigned IncludeTagDefinition : 1;
+  bool IncludeTagDefinition : 1;
 
   /// Suppresses printing of scope specifiers.
-  unsigned SuppressScope : 1;
+  bool SuppressScope : 1;
 
   /// Suppress printing parts of scope specifiers that don't need
   /// to be written, e.g., for inline or anonymous namespaces.
-  unsigned SuppressUnwrittenScope : 1;
+  bool SuppressUnwrittenScope : 1;
 
   /// Suppress printing of variable initializers.
   ///
@@ -120,7 +121,7 @@ struct PrintingPolicy {
   ///
   /// SuppressInitializers will be true when printing "auto x", so that the
   /// internal initializer constructed for x will not be printed.
-  unsigned SuppressInitializers : 1;
+  bool SuppressInitializers : 1;
 
   /// Whether we should print the sizes of constant array expressions as written
   /// in the sources.
@@ -138,12 +139,12 @@ struct PrintingPolicy {
   /// int a[104];
   /// char a[9] = "A string";
   /// \endcode
-  unsigned ConstantArraySizeAsWritten : 1;
+  bool ConstantArraySizeAsWritten : 1;
 
   /// When printing an anonymous tag name, also print the location of that
   /// entity (e.g., "enum <anonymous at t.h:10:5>"). Otherwise, just prints
   /// "(anonymous)" for the name.
-  unsigned AnonymousTagLocations : 1;
+  bool AnonymousTagLocations : 1;
 
   /// When true, suppress printing of the __strong lifetime qualifier in ARC.
   unsigned SuppressStrongLifetime : 1;
@@ -198,7 +199,7 @@ struct PrintingPolicy {
   /// Use whitespace and punctuation like MSVC does. In particular, this prints
   /// anonymous namespaces as `anonymous namespace' and does not insert spaces
   /// after template arguments.
-  unsigned MSVCFormatting : 1;
+  bool MSVCFormatting : 1;
 
   /// Whether we should print the constant expressions as written in the
   /// sources.
@@ -216,23 +217,14 @@ struct PrintingPolicy {
   /// 0x10
   /// 2.5e3
   /// \endcode
-  unsigned ConstantsAsWritten : 1;
+  bool ConstantsAsWritten : 1;
 
   /// When true, don't print the implicit 'self' or 'this' expressions.
-  unsigned SuppressImplicitBase : 1;
+  bool SuppressImplicitBase : 1;
 
   /// When true, print the fully qualified name of function declarations.
   /// This is the opposite of SuppressScope and thus overrules it.
-  unsigned FullyQualifiedName : 1;
-
-  /// Whether to apply -fdebug-prefix-map to any file paths.
-  unsigned RemapFilePaths : 1;
-
-  /// Whether to print types as written or canonically.
-  unsigned PrintCanonicalTypes : 1;
-
-  /// When RemapFilePaths is true, this function performs the action.
-  std::function<std::string(StringRef)> remapPath;
+  bool FullyQualifiedName : 1;
 };
 
 } // end namespace clang

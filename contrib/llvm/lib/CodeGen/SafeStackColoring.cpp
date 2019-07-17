@@ -46,10 +46,11 @@ const StackColoring::LiveRange &StackColoring::getLiveRange(AllocaInst *AI) {
 }
 
 bool StackColoring::readMarker(Instruction *I, bool *IsStart) {
-  if (!I->isLifetimeStartOrEnd())
+  auto *II = dyn_cast<IntrinsicInst>(I);
+  if (!II || (II->getIntrinsicID() != Intrinsic::lifetime_start &&
+              II->getIntrinsicID() != Intrinsic::lifetime_end))
     return false;
 
-  auto *II = cast<IntrinsicInst>(I);
   *IsStart = II->getIntrinsicID() == Intrinsic::lifetime_start;
   return true;
 }
@@ -171,9 +172,7 @@ void StackColoring::calculateLocalLiveness() {
       BitVector LocalLiveIn;
       for (auto *PredBB : predecessors(BB)) {
         LivenessMap::const_iterator I = BlockLiveness.find(PredBB);
-        // If a predecessor is unreachable, ignore it.
-        if (I == BlockLiveness.end())
-          continue;
+        assert(I != BlockLiveness.end() && "Predecessor not found");
         LocalLiveIn |= I->second.LiveOut;
       }
 

@@ -99,6 +99,8 @@ private:
 
   const DataLayout *DL;
 
+  AMDGPUAS AS;
+
   const TargetLowering *TLI;
 
   void visit(const Function &F);
@@ -265,6 +267,7 @@ void AMDGPUPerfHint::runOnFunction(Function &F) {
 
   const Module &M = *F.getParent();
   DL = &M.getDataLayout();
+  AS = AMDGPU::getAMDGPUAS(M);
 
   visit(F);
   auto Loc = FIM.find(&F);
@@ -303,14 +306,14 @@ bool AMDGPUPerfHint::isGlobalAddr(const Value *V) const {
   if (auto PT = dyn_cast<PointerType>(V->getType())) {
     unsigned As = PT->getAddressSpace();
     // Flat likely points to global too.
-    return As == AMDGPUAS::GLOBAL_ADDRESS || As == AMDGPUAS::FLAT_ADDRESS;
+    return As == AS.GLOBAL_ADDRESS || As == AS.FLAT_ADDRESS;
   }
   return false;
 }
 
 bool AMDGPUPerfHint::isLocalAddr(const Value *V) const {
   if (auto PT = dyn_cast<PointerType>(V->getType()))
-    return PT->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
+    return PT->getAddressSpace() == AS.LOCAL_ADDRESS;
   return false;
 }
 
@@ -343,8 +346,7 @@ AMDGPUPerfHint::makeMemAccessInfo(Instruction *Inst) const {
 bool AMDGPUPerfHint::isConstantAddr(const Value *V) const {
   if (auto PT = dyn_cast<PointerType>(V->getType())) {
     unsigned As = PT->getAddressSpace();
-    return As == AMDGPUAS::CONSTANT_ADDRESS ||
-           As == AMDGPUAS::CONSTANT_ADDRESS_32BIT;
+    return As == AS.CONSTANT_ADDRESS || As == AS.CONSTANT_ADDRESS_32BIT;
   }
   return false;
 }

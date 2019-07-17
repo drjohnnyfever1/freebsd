@@ -93,7 +93,6 @@ public:
              LiveVariables::Observer *obs = nullptr);
 
   void dumpBlockLiveness(const SourceManager& M);
-  void dumpStmtLiveness(const SourceManager& M);
 
   LiveVariablesImpl(AnalysisDeclContext &ac, bool KillAtAssign)
     : analysisContext(ac),
@@ -238,8 +237,8 @@ static const Stmt *LookThroughStmt(const Stmt *S) {
   while (S) {
     if (const Expr *Ex = dyn_cast<Expr>(S))
       S = Ex->IgnoreParens();
-    if (const FullExpr *FE = dyn_cast<FullExpr>(S)) {
-      S = FE->getSubExpr();
+    if (const ExprWithCleanups *EWC = dyn_cast<ExprWithCleanups>(S)) {
+      S = EWC->getSubExpr();
       continue;
     }
     if (const OpaqueValueExpr *OVE = dyn_cast<OpaqueValueExpr>(S)) {
@@ -328,35 +327,6 @@ void TransferFunctions::Visit(Stmt *S) {
       // No need to unconditionally visit subexpressions.
       return;
     }
-    case Stmt::IfStmtClass: {
-      // If one of the branches is an expression rather than a compound
-      // statement, it will be bad if we mark it as live at the terminator
-      // of the if-statement (i.e., immediately after the condition expression).
-      AddLiveStmt(val.liveStmts, LV.SSetFact, cast<IfStmt>(S)->getCond());
-      return;
-    }
-    case Stmt::WhileStmtClass: {
-      // If the loop body is an expression rather than a compound statement,
-      // it will be bad if we mark it as live at the terminator of the loop
-      // (i.e., immediately after the condition expression).
-      AddLiveStmt(val.liveStmts, LV.SSetFact, cast<WhileStmt>(S)->getCond());
-      return;
-    }
-    case Stmt::DoStmtClass: {
-      // If the loop body is an expression rather than a compound statement,
-      // it will be bad if we mark it as live at the terminator of the loop
-      // (i.e., immediately after the condition expression).
-      AddLiveStmt(val.liveStmts, LV.SSetFact, cast<DoStmt>(S)->getCond());
-      return;
-    }
-    case Stmt::ForStmtClass: {
-      // If the loop body is an expression rather than a compound statement,
-      // it will be bad if we mark it as live at the terminator of the loop
-      // (i.e., immediately after the condition expression).
-      AddLiveStmt(val.liveStmts, LV.SSetFact, cast<ForStmt>(S)->getCond());
-      return;
-    }
-
   }
 
   for (Stmt *Child : S->children()) {
@@ -627,7 +597,7 @@ void LiveVariablesImpl::dumpBlockLiveness(const SourceManager &M) {
        it != ei; ++it) {
     vec.push_back(it->first);
   }
-  llvm::sort(vec, [](const CFGBlock *A, const CFGBlock *B) {
+  llvm::sort(vec.begin(), vec.end(), [](const CFGBlock *A, const CFGBlock *B) {
     return A->getBlockID() < B->getBlockID();
   });
 
@@ -647,37 +617,20 @@ void LiveVariablesImpl::dumpBlockLiveness(const SourceManager &M) {
       declVec.push_back(*si);
     }
 
-    llvm::sort(declVec, [](const Decl *A, const Decl *B) {
-      return A->getBeginLoc() < B->getBeginLoc();
+    llvm::sort(declVec.begin(), declVec.end(),
+               [](const Decl *A, const Decl *B) {
+      return A->getLocStart() < B->getLocStart();
     });
 
     for (std::vector<const VarDecl*>::iterator di = declVec.begin(),
          de = declVec.end(); di != de; ++di) {
       llvm::errs() << " " << (*di)->getDeclName().getAsString()
                    << " <";
-      (*di)->getLocation().print(llvm::errs(), M);
+      (*di)->getLocation().dump(M);
       llvm::errs() << ">\n";
     }
   }
   llvm::errs() << "\n";
-}
-
-void LiveVariables::dumpStmtLiveness(const SourceManager &M) {
-  getImpl(impl).dumpStmtLiveness(M);
-}
-
-void LiveVariablesImpl::dumpStmtLiveness(const SourceManager &M) {
-  // Don't iterate over blockEndsToLiveness directly because it's not sorted.
-  for (auto I : *analysisContext.getCFG()) {
-
-    llvm::errs() << "\n[ B" << I->getBlockID()
-                 << " (live statements at block exit) ]\n";
-    for (auto S : blocksEndToLiveness[I].liveStmts) {
-      llvm::errs() << "\n";
-      S->dump();
-    }
-    llvm::errs() << "\n";
-  }
 }
 
 const void *LiveVariables::getTag() { static int x; return &x; }

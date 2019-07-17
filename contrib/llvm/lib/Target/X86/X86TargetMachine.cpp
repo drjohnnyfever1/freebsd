@@ -54,10 +54,23 @@ static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
                                cl::desc("Enable the machine combiner pass"),
                                cl::init(true), cl::Hidden);
 
-static cl::opt<bool> EnableCondBrFoldingPass("x86-condbr-folding",
-                               cl::desc("Enable the conditional branch "
-                                        "folding pass"),
-                               cl::init(false), cl::Hidden);
+static cl::opt<bool> EnableSpeculativeLoadHardening(
+    "x86-speculative-load-hardening",
+    cl::desc("Enable speculative load hardening"), cl::init(false), cl::Hidden);
+
+namespace llvm {
+
+void initializeWinEHStatePassPass(PassRegistry &);
+void initializeFixupLEAPassPass(PassRegistry &);
+void initializeShadowCallStackPass(PassRegistry &);
+void initializeX86CallFrameOptimizationPass(PassRegistry &);
+void initializeX86CmovConverterPassPass(PassRegistry &);
+void initializeX86ExecutionDomainFixPass(PassRegistry &);
+void initializeX86DomainReassignmentPass(PassRegistry &);
+void initializeX86AvoidSFBPassPass(PassRegistry &);
+void initializeX86FlagsCopyLoweringPassPass(PassRegistry &);
+
+} // end namespace llvm
 
 extern "C" void LLVMInitializeX86Target() {
   // Register the target.
@@ -76,9 +89,7 @@ extern "C" void LLVMInitializeX86Target() {
   initializeX86ExecutionDomainFixPass(PR);
   initializeX86DomainReassignmentPass(PR);
   initializeX86AvoidSFBPassPass(PR);
-  initializeX86SpeculativeLoadHardeningPassPass(PR);
   initializeX86FlagsCopyLoweringPassPass(PR);
-  initializeX86CondBrFoldingPassPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -190,13 +201,10 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
   return *RM;
 }
 
-static CodeModel::Model getEffectiveX86CodeModel(Optional<CodeModel::Model> CM,
-                                                 bool JIT, bool Is64Bit) {
-  if (CM) {
-    if (*CM == CodeModel::Tiny)
-      report_fatal_error("Target does not support the tiny CodeModel");
+static CodeModel::Model getEffectiveCodeModel(Optional<CodeModel::Model> CM,
+                                              bool JIT, bool Is64Bit) {
+  if (CM)
     return *CM;
-  }
   if (JIT)
     return Is64Bit ? CodeModel::Large : CodeModel::Small;
   return CodeModel::Small;
@@ -213,8 +221,7 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(
           T, computeDataLayout(TT), TT, CPU, FS, Options,
           getEffectiveRelocModel(TT, JIT, RM),
-          getEffectiveX86CodeModel(CM, JIT, TT.getArch() == Triple::x86_64),
-          OL),
+          getEffectiveCodeModel(CM, JIT, TT.getArch() == Triple::x86_64), OL),
       TLOF(createTLOF(getTargetTriple())) {
   // Windows stack unwinder gets confused when execution flow "falls through"
   // after a call to 'noreturn' function.
@@ -285,14 +292,13 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
     }
   }
 
-  // Extract min-legal-vector-width attribute.
+  // Extract required-vector-width attribute.
   unsigned RequiredVectorWidth = UINT32_MAX;
-  if (F.hasFnAttribute("min-legal-vector-width")) {
-    StringRef Val =
-        F.getFnAttribute("min-legal-vector-width").getValueAsString();
+  if (F.hasFnAttribute("required-vector-width")) {
+    StringRef Val = F.getFnAttribute("required-vector-width").getValueAsString();
     unsigned Width;
     if (!Val.getAsInteger(0, Width)) {
-      Key += ",min-legal-vector-width=";
+      Key += ",required-vector-width=";
       Key += Val;
       RequiredVectorWidth = Width;
     }
@@ -443,8 +449,6 @@ bool X86PassConfig::addGlobalInstructionSelect() {
 }
 
 bool X86PassConfig::addILPOpts() {
-  if (EnableCondBrFoldingPass)
-    addPass(createX86CondBrFolding());
   addPass(&EarlyIfConverterID);
   if (EnableMachineCombinerPass)
     addPass(&MachineCombinerID);
@@ -469,7 +473,9 @@ void X86PassConfig::addPreRegAlloc() {
     addPass(createX86AvoidStoreForwardingBlocks());
   }
 
-  addPass(createX86SpeculativeLoadHardeningPass());
+  if (EnableSpeculativeLoadHardening)
+    addPass(createX86SpeculativeLoadHardeningPass());
+
   addPass(createX86FlagsCopyLoweringPass());
   addPass(createX86WinAllocaExpander());
 }
@@ -502,8 +508,6 @@ void X86PassConfig::addPreEmitPass() {
     addPass(createX86FixupLEAs());
     addPass(createX86EvexToVexInsts());
   }
-  addPass(createX86DiscriminateMemOpsPass());
-  addPass(createX86InsertPrefetchPass());
 }
 
 void X86PassConfig::addPreEmitPass2() {

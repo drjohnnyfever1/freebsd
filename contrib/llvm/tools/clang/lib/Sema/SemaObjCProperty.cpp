@@ -609,12 +609,12 @@ ObjCPropertyDecl *Sema::CreatePropertyDecl(Scope *S,
   }
 
   if (T->isObjCObjectType()) {
-    SourceLocation StarLoc = TInfo->getTypeLoc().getEndLoc();
+    SourceLocation StarLoc = TInfo->getTypeLoc().getLocEnd();
     StarLoc = getLocForEndOfToken(StarLoc);
     Diag(FD.D.getIdentifierLoc(), diag::err_statically_allocated_object)
       << FixItHint::CreateInsertion(StarLoc, "*");
     T = Context.getObjCObjectPointerType(T);
-    SourceLocation TLoc = TInfo->getTypeLoc().getBeginLoc();
+    SourceLocation TLoc = TInfo->getTypeLoc().getLocStart();
     TInfo = Context.getTrivialTypeSourceInfo(T, TLoc);
   }
 
@@ -1061,7 +1061,7 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
     PropertyIvarLoc = PropertyLoc;
   SourceLocation PropertyDiagLoc = PropertyLoc;
   if (PropertyDiagLoc.isInvalid())
-    PropertyDiagLoc = ClassImpDecl->getBeginLoc();
+    PropertyDiagLoc = ClassImpDecl->getLocStart();
   ObjCPropertyDecl *property = nullptr;
   ObjCInterfaceDecl *IDecl = nullptr;
   // Find the class or category class where this property must have
@@ -1412,9 +1412,9 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
       // FIXME. Eventually we want to do this for Objective-C as well.
       SynthesizedFunctionScope Scope(*this, getterMethod);
       ImplicitParamDecl *SelfDecl = getterMethod->getSelfDecl();
-      DeclRefExpr *SelfExpr = new (Context)
-          DeclRefExpr(Context, SelfDecl, false, SelfDecl->getType(), VK_LValue,
-                      PropertyDiagLoc);
+      DeclRefExpr *SelfExpr =
+        new (Context) DeclRefExpr(SelfDecl, false, SelfDecl->getType(),
+                                  VK_LValue, PropertyDiagLoc);
       MarkDeclRefReferenced(SelfExpr);
       Expr *LoadSelfExpr =
         ImplicitCastExpr::Create(Context, SelfDecl->getType(),
@@ -1464,9 +1464,9 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
       // FIXME. Eventually we want to do this for Objective-C as well.
       SynthesizedFunctionScope Scope(*this, setterMethod);
       ImplicitParamDecl *SelfDecl = setterMethod->getSelfDecl();
-      DeclRefExpr *SelfExpr = new (Context)
-          DeclRefExpr(Context, SelfDecl, false, SelfDecl->getType(), VK_LValue,
-                      PropertyDiagLoc);
+      DeclRefExpr *SelfExpr =
+        new (Context) DeclRefExpr(SelfDecl, false, SelfDecl->getType(),
+                                  VK_LValue, PropertyDiagLoc);
       MarkDeclRefReferenced(SelfExpr);
       Expr *LoadSelfExpr =
         ImplicitCastExpr::Create(Context, SelfDecl->getType(),
@@ -1481,8 +1481,8 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
       ObjCMethodDecl::param_iterator P = setterMethod->param_begin();
       ParmVarDecl *Param = (*P);
       QualType T = Param->getType().getNonReferenceType();
-      DeclRefExpr *rhs = new (Context)
-          DeclRefExpr(Context, Param, false, T, VK_LValue, PropertyDiagLoc);
+      DeclRefExpr *rhs = new (Context) DeclRefExpr(Param, false, T,
+                                                   VK_LValue, PropertyDiagLoc);
       MarkDeclRefReferenced(rhs);
       ExprResult Res = BuildBinOp(S, PropertyDiagLoc,
                                   BO_Assign, lhs, rhs);
@@ -1497,8 +1497,8 @@ Decl *Sema::ActOnPropertyImplDecl(Scope *S,
                 Diag(PropertyDiagLoc,
                      diag::err_atomic_property_nontrivial_assign_op)
                     << property->getType();
-                Diag(FuncDecl->getBeginLoc(), diag::note_callee_decl)
-                    << FuncDecl;
+                Diag(FuncDecl->getLocStart(),
+                     diag::note_callee_decl) << FuncDecl;
               }
       }
       PIDecl->setSetterCXXAssignment(Res.getAs<Expr>());
@@ -2100,7 +2100,7 @@ void Sema::diagnoseNullResettableSynthesizedSetters(const ObjCImplDecl *impDecl)
           !impDecl->getInstanceMethod(getterMethod->getSelector())) {
         SourceLocation loc = propertyImpl->getLocation();
         if (loc.isInvalid())
-          loc = impDecl->getBeginLoc();
+          loc = impDecl->getLocStart();
 
         Diag(loc, diag::warn_null_resettable_setter)
           << setterMethod->getSelector() << property->getDeclName();
@@ -2235,7 +2235,7 @@ void Sema::DiagnoseOwningPropertyGetterSynthesis(const ObjCImplementationDecl *D
           if (getterRedecl->getDeclContext() != PD->getDeclContext())
             continue;
           noteLoc = getterRedecl->getLocation();
-          fixItLoc = getterRedecl->getEndLoc();
+          fixItLoc = getterRedecl->getLocEnd();
         }
 
         Preprocessor &PP = getPreprocessor();
@@ -2384,7 +2384,7 @@ void Sema::ProcessPropertyDecl(ObjCPropertyDecl *property) {
       QualType modifiedTy = resultTy;
       if (auto nullability = AttributedType::stripOuterNullability(modifiedTy)) {
         if (*nullability == NullabilityKind::Unspecified)
-          resultTy = Context.getAttributedType(attr::TypeNonNull,
+          resultTy = Context.getAttributedType(AttributedType::attr_nonnull,
                                                modifiedTy, modifiedTy);
       }
     }
@@ -2458,7 +2458,7 @@ void Sema::ProcessPropertyDecl(ObjCPropertyDecl *property) {
         QualType modifiedTy = paramTy;
         if (auto nullability = AttributedType::stripOuterNullability(modifiedTy)){
           if (*nullability == NullabilityKind::Unspecified)
-            paramTy = Context.getAttributedType(attr::TypeNullable,
+            paramTy = Context.getAttributedType(AttributedType::attr_nullable,
                                                 modifiedTy, modifiedTy);
         }
       }
@@ -2555,14 +2555,6 @@ void Sema::CheckObjCPropertyAttributes(Decl *PDecl,
     Attributes &= ~(ObjCDeclSpec::DQ_PR_weak   | ObjCDeclSpec::DQ_PR_copy |
                     ObjCDeclSpec::DQ_PR_retain | ObjCDeclSpec::DQ_PR_strong);
     PropertyDecl->setInvalidDecl();
-  }
-
-  // Check for assign on object types.
-  if ((Attributes & ObjCDeclSpec::DQ_PR_assign) &&
-      !(Attributes & ObjCDeclSpec::DQ_PR_unsafe_unretained) &&
-      PropertyTy->isObjCRetainableType() &&
-      !PropertyTy->isObjCARCImplicitlyUnretainedType()) {
-    Diag(Loc, diag::warn_objc_property_assign_on_object);
   }
 
   // Check for more than one of { assign, copy, retain }.

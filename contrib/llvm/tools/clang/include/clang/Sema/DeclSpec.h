@@ -505,7 +505,9 @@ public:
   const CXXScopeSpec &getTypeSpecScope() const { return TypeScope; }
 
   SourceRange getSourceRange() const LLVM_READONLY { return Range; }
+  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const LLVM_READONLY { return Range.getBegin(); }
+  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
   SourceLocation getEndLoc() const LLVM_READONLY { return Range.getEnd(); }
 
   SourceLocation getTypeSpecWidthLoc() const { return TSWRange.getBegin(); }
@@ -592,18 +594,6 @@ public:
     FS_noreturn_specified = false;
     FS_noreturnLoc = SourceLocation();
   }
-
-  /// This method calls the passed in handler on each CVRU qual being
-  /// set.
-  /// Handle - a handler to be invoked.
-  void forEachCVRUQualifier(
-      llvm::function_ref<void(TQ, StringRef, SourceLocation)> Handle);
-
-  /// This method calls the passed in handler on each qual being
-  /// set.
-  /// Handle - a handler to be invoked.
-  void forEachQualifier(
-      llvm::function_ref<void(TQ, StringRef, SourceLocation)> Handle);
 
   /// Return true if any type-specifier has been found.
   bool hasTypeSpecifier() const {
@@ -694,8 +684,6 @@ public:
     assert(isExprRep((TST) TypeSpecType));
     ExprRep = Rep;
   }
-
-  bool SetTypeQual(TQ T, SourceLocation Loc);
 
   bool SetTypeQual(TQ T, SourceLocation Loc, const char *&PrevSpec,
                    unsigned &DiagID, const LangOptions &Lang);
@@ -1134,7 +1122,9 @@ public:
   SourceRange getSourceRange() const LLVM_READONLY {
     return SourceRange(StartLocation, EndLocation);
   }
+  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const LLVM_READONLY { return StartLocation; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
   SourceLocation getEndLoc() const LLVM_READONLY { return EndLocation; }
 };
 
@@ -1264,6 +1254,10 @@ struct DeclaratorChunk {
     /// Otherwise, it's an rvalue reference.
     unsigned RefQualifierIsLValueRef : 1;
 
+    /// The type qualifiers: const/volatile/restrict/__unaligned
+    /// The qualifier bitmask values are the same as in QualType.
+    unsigned TypeQuals : 4;
+
     /// ExceptionSpecType - An ExceptionSpecificationType value.
     unsigned ExceptionSpecType : 4;
 
@@ -1297,6 +1291,21 @@ struct DeclaratorChunk {
     /// If this is an invalid location, there is no ref-qualifier.
     unsigned RefQualifierLoc;
 
+    /// The location of the const-qualifier, if any.
+    ///
+    /// If this is an invalid location, there is no const-qualifier.
+    unsigned ConstQualifierLoc;
+
+    /// The location of the volatile-qualifier, if any.
+    ///
+    /// If this is an invalid location, there is no volatile-qualifier.
+    unsigned VolatileQualifierLoc;
+
+    /// The location of the restrict-qualifier, if any.
+    ///
+    /// If this is an invalid location, there is no restrict-qualifier.
+    unsigned RestrictQualifierLoc;
+
     /// The location of the 'mutable' qualifer in a lambda-declarator, if
     /// any.
     unsigned MutableLoc;
@@ -1311,12 +1320,6 @@ struct DeclaratorChunk {
     /// describe the parameters specified by this function declarator.  null if
     /// there are no parameters specified.
     ParamInfo *Params;
-
-    /// DeclSpec for the function with the qualifier related info.
-    DeclSpec *MethodQualifiers;
-
-    /// AtttibuteFactory for the MethodQualifiers.
-    AttributeFactory *QualAttrFactory;
 
     union {
       /// Pointer to a new[]'d array of TypeAndRange objects that
@@ -1357,8 +1360,6 @@ struct DeclaratorChunk {
 
     void destroy() {
       freeParams();
-      delete QualAttrFactory;
-      delete MethodQualifiers;
       switch (getExceptionSpecType()) {
       default:
         break;
@@ -1373,14 +1374,6 @@ struct DeclaratorChunk {
           delete[] DeclsInPrototype;
         break;
       }
-    }
-
-    DeclSpec &getOrCreateMethodQualifiers() {
-      if (!MethodQualifiers) {
-        QualAttrFactory = new AttributeFactory();
-        MethodQualifiers = new DeclSpec(*QualAttrFactory);
-      }
-      return *MethodQualifiers;
     }
 
     /// isKNRPrototype - Return true if this is a K&R style identifier list,
@@ -1417,22 +1410,19 @@ struct DeclaratorChunk {
       return SourceLocation::getFromRawEncoding(RefQualifierLoc);
     }
 
-    /// Retrieve the location of the 'const' qualifier.
+    /// Retrieve the location of the 'const' qualifier, if any.
     SourceLocation getConstQualifierLoc() const {
-      assert(MethodQualifiers);
-      return MethodQualifiers->getConstSpecLoc();
+      return SourceLocation::getFromRawEncoding(ConstQualifierLoc);
     }
 
-    /// Retrieve the location of the 'volatile' qualifier.
+    /// Retrieve the location of the 'volatile' qualifier, if any.
     SourceLocation getVolatileQualifierLoc() const {
-      assert(MethodQualifiers);
-      return MethodQualifiers->getVolatileSpecLoc();
+      return SourceLocation::getFromRawEncoding(VolatileQualifierLoc);
     }
 
-    /// Retrieve the location of the 'restrict' qualifier.
+    /// Retrieve the location of the 'restrict' qualifier, if any.
     SourceLocation getRestrictQualifierLoc() const {
-      assert(MethodQualifiers);
-      return MethodQualifiers->getRestrictSpecLoc();
+      return SourceLocation::getFromRawEncoding(RestrictQualifierLoc);
     }
 
     /// Retrieve the location of the 'mutable' qualifier, if any.
@@ -1447,12 +1437,6 @@ struct DeclaratorChunk {
     /// Determine whether this lambda-declarator contains a 'mutable'
     /// qualifier.
     bool hasMutableQualifier() const { return getMutableLoc().isValid(); }
-
-    /// Determine whether this method has qualifiers.
-    bool hasMethodTypeQualifiers() const {
-      return MethodQualifiers && (MethodQualifiers->getTypeQualifiers() ||
-                                  MethodQualifiers->getAttributes().size());
-    }
 
     /// Get the type of exception specification this function has.
     ExceptionSpecificationType getExceptionSpecType() const {
@@ -1594,8 +1578,12 @@ struct DeclaratorChunk {
                                      ParamInfo *Params, unsigned NumParams,
                                      SourceLocation EllipsisLoc,
                                      SourceLocation RParenLoc,
+                                     unsigned TypeQuals,
                                      bool RefQualifierIsLvalueRef,
                                      SourceLocation RefQualifierLoc,
+                                     SourceLocation ConstQualifierLoc,
+                                     SourceLocation VolatileQualifierLoc,
+                                     SourceLocation RestrictQualifierLoc,
                                      SourceLocation MutableLoc,
                                      ExceptionSpecificationType ESpecType,
                                      SourceRange ESpecRange,
@@ -1609,8 +1597,7 @@ struct DeclaratorChunk {
                                      SourceLocation LocalRangeEnd,
                                      Declarator &TheDeclarator,
                                      TypeResult TrailingReturnType =
-                                                    TypeResult(),
-                                     DeclSpec *MethodQualifiers = nullptr);
+                                                    TypeResult());
 
   /// Return a DeclaratorChunk for a block.
   static DeclaratorChunk getBlockPointer(unsigned TypeQuals,
@@ -1887,7 +1874,9 @@ public:
 
   /// Get the source range that spans this declarator.
   SourceRange getSourceRange() const LLVM_READONLY { return Range; }
+  SourceLocation getLocStart() const LLVM_READONLY { return getBeginLoc(); }
   SourceLocation getBeginLoc() const LLVM_READONLY { return Range.getBegin(); }
+  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
   SourceLocation getEndLoc() const LLVM_READONLY { return Range.getEnd(); }
 
   void SetSourceRange(SourceRange R) { Range = R; }

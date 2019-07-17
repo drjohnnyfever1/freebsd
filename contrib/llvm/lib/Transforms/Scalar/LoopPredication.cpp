@@ -178,9 +178,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar/LoopPredication.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
-#include "llvm/Analysis/GuardUtils.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -197,9 +195,6 @@
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
 #define DEBUG_TYPE "loop-predication"
-
-STATISTIC(TotalConsidered, "Number of guards considered");
-STATISTIC(TotalWidened, "Number of checks widened");
 
 using namespace llvm;
 
@@ -579,8 +574,6 @@ bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
   LLVM_DEBUG(dbgs() << "Processing guard:\n");
   LLVM_DEBUG(Guard->dump());
 
-  TotalConsidered++;
-
   IRBuilder<> Builder(cast<Instruction>(Preheader->getTerminator()));
 
   // The guard condition is expected to be in form of:
@@ -621,8 +614,6 @@ bool LoopPredication::widenGuardConditions(IntrinsicInst *Guard,
 
   if (NumWidened == 0)
     return false;
-
-  TotalWidened += NumWidened;
 
   // Emit the new guard condition
   Builder.SetInsertPoint(Guard);
@@ -821,8 +812,9 @@ bool LoopPredication::runOnLoop(Loop *Loop) {
   SmallVector<IntrinsicInst *, 4> Guards;
   for (const auto BB : L->blocks())
     for (auto &I : *BB)
-      if (isGuard(&I))
-        Guards.push_back(cast<IntrinsicInst>(&I));
+      if (auto *II = dyn_cast<IntrinsicInst>(&I))
+        if (II->getIntrinsicID() == Intrinsic::experimental_guard)
+          Guards.push_back(II);
 
   if (Guards.empty())
     return false;

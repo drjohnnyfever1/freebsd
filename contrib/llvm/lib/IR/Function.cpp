@@ -24,6 +24,7 @@
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -194,17 +195,12 @@ LLVMContext &Function::getContext() const {
   return getType()->getContext();
 }
 
-unsigned Function::getInstructionCount() const {
+unsigned Function::getInstructionCount() {
   unsigned NumInstrs = 0;
-  for (const BasicBlock &BB : BasicBlocks)
+  for (BasicBlock &BB : BasicBlocks)
     NumInstrs += std::distance(BB.instructionsWithoutDebug().begin(),
                                BB.instructionsWithoutDebug().end());
   return NumInstrs;
-}
-
-Function *Function::Create(FunctionType *Ty, LinkageTypes Linkage,
-                           const Twine &N, Module &M) {
-  return Create(Ty, Linkage, M.getDataLayout().getProgramAddressSpace(), N, &M);
 }
 
 void Function::removeFromParent() {
@@ -219,19 +215,10 @@ void Function::eraseFromParent() {
 // Function Implementation
 //===----------------------------------------------------------------------===//
 
-static unsigned computeAddrSpace(unsigned AddrSpace, Module *M) {
-  // If AS == -1 and we are passed a valid module pointer we place the function
-  // in the program address space. Otherwise we default to AS0.
-  if (AddrSpace == static_cast<unsigned>(-1))
-    return M ? M->getDataLayout().getProgramAddressSpace() : 0;
-  return AddrSpace;
-}
-
-Function::Function(FunctionType *Ty, LinkageTypes Linkage, unsigned AddrSpace,
-                   const Twine &name, Module *ParentModule)
+Function::Function(FunctionType *Ty, LinkageTypes Linkage, const Twine &name,
+                   Module *ParentModule)
     : GlobalObject(Ty, Value::FunctionVal,
-                   OperandTraits<Function>::op_begin(this), 0, Linkage, name,
-                   computeAddrSpace(AddrSpace, ParentModule)),
+                   OperandTraits<Function>::op_begin(this), 0, Linkage, name),
       NumArgs(Ty->getNumParams()) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
          "invalid return type");
@@ -1256,13 +1243,13 @@ bool Function::hasAddressTaken(const User* *PutOffender) const {
     const User *FU = U.getUser();
     if (isa<BlockAddress>(FU))
       continue;
-    const auto *Call = dyn_cast<CallBase>(FU);
-    if (!Call) {
+    if (!isa<CallInst>(FU) && !isa<InvokeInst>(FU)) {
       if (PutOffender)
         *PutOffender = FU;
       return true;
     }
-    if (!Call->isCallee(&U)) {
+    ImmutableCallSite CS(cast<Instruction>(FU));
+    if (!CS.isCallee(&U)) {
       if (PutOffender)
         *PutOffender = FU;
       return true;
@@ -1288,10 +1275,12 @@ bool Function::isDefTriviallyDead() const {
 /// callsFunctionThatReturnsTwice - Return true if the function has a call to
 /// setjmp or other function that gcc recognizes as "returning twice".
 bool Function::callsFunctionThatReturnsTwice() const {
-  for (const Instruction &I : instructions(this))
-    if (const auto *Call = dyn_cast<CallBase>(&I))
-      if (Call->hasFnAttr(Attribute::ReturnsTwice))
-        return true;
+  for (const_inst_iterator
+         I = inst_begin(this), E = inst_end(this); I != E; ++I) {
+    ImmutableCallSite CS(&*I);
+    if (CS && CS.hasFnAttr(Attribute::ReturnsTwice))
+      return true;
+  }
 
   return false;
 }

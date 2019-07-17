@@ -350,7 +350,7 @@ void TransformActionsImpl::replaceText(SourceLocation loc, StringRef text,
 void TransformActionsImpl::replaceStmt(Stmt *S, StringRef text) {
   assert(IsInTransaction && "Actions only allowed during a transaction");
   text = getUniqueText(text);
-  insert(S->getBeginLoc(), text);
+  insert(S->getLocStart(), text);
   removeStmt(S);
 }
 

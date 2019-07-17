@@ -31,6 +31,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -181,8 +182,8 @@ static ModRefInfo GetLocation(const Instruction *Inst, MemoryLocation &Loc,
 }
 
 /// Private helper for finding the local dependencies of a call site.
-MemDepResult MemoryDependenceResults::getCallDependencyFrom(
-    CallBase *Call, bool isReadOnlyCall, BasicBlock::iterator ScanIt,
+MemDepResult MemoryDependenceResults::getCallSiteDependencyFrom(
+    CallSite CS, bool isReadOnlyCall, BasicBlock::iterator ScanIt,
     BasicBlock *BB) {
   unsigned Limit = BlockScanLimit;
 
@@ -204,21 +205,21 @@ MemDepResult MemoryDependenceResults::getCallDependencyFrom(
     ModRefInfo MR = GetLocation(Inst, Loc, TLI);
     if (Loc.Ptr) {
       // A simple instruction.
-      if (isModOrRefSet(AA.getModRefInfo(Call, Loc)))
+      if (isModOrRefSet(AA.getModRefInfo(CS, Loc)))
         return MemDepResult::getClobber(Inst);
       continue;
     }
 
-    if (auto *CallB = dyn_cast<CallBase>(Inst)) {
+    if (auto InstCS = CallSite(Inst)) {
       // If these two calls do not interfere, look past it.
-      if (isNoModRef(AA.getModRefInfo(Call, CallB))) {
-        // If the two calls are the same, return Inst as a Def, so that
-        // Call can be found redundant and eliminated.
+      if (isNoModRef(AA.getModRefInfo(CS, InstCS))) {
+        // If the two calls are the same, return InstCS as a Def, so that
+        // CS can be found redundant and eliminated.
         if (isReadOnlyCall && !isModSet(MR) &&
-            Call->isIdenticalToWhenDefined(CallB))
+            CS.getInstruction()->isIdenticalToWhenDefined(Inst))
           return MemDepResult::getDef(Inst);
 
-        // Otherwise if the two calls don't interact (e.g. CallB is readnone)
+        // Otherwise if the two calls don't interact (e.g. InstCS is readnone)
         // keep scanning.
         continue;
       } else
@@ -749,10 +750,11 @@ MemDepResult MemoryDependenceResults::getDependency(Instruction *QueryInst) {
 
       LocalCache = getPointerDependencyFrom(
           MemLoc, isLoad, ScanPos->getIterator(), QueryParent, QueryInst);
-    } else if (auto *QueryCall = dyn_cast<CallBase>(QueryInst)) {
-      bool isReadOnly = AA.onlyReadsMemory(QueryCall);
-      LocalCache = getCallDependencyFrom(QueryCall, isReadOnly,
-                                         ScanPos->getIterator(), QueryParent);
+    } else if (isa<CallInst>(QueryInst) || isa<InvokeInst>(QueryInst)) {
+      CallSite QueryCS(QueryInst);
+      bool isReadOnly = AA.onlyReadsMemory(QueryCS);
+      LocalCache = getCallSiteDependencyFrom(
+          QueryCS, isReadOnly, ScanPos->getIterator(), QueryParent);
     } else
       // Non-memory instruction.
       LocalCache = MemDepResult::getUnknown();
@@ -778,11 +780,11 @@ static void AssertSorted(MemoryDependenceResults::NonLocalDepInfo &Cache,
 #endif
 
 const MemoryDependenceResults::NonLocalDepInfo &
-MemoryDependenceResults::getNonLocalCallDependency(CallBase *QueryCall) {
-  assert(getDependency(QueryCall).isNonLocal() &&
+MemoryDependenceResults::getNonLocalCallDependency(CallSite QueryCS) {
+  assert(getDependency(QueryCS.getInstruction()).isNonLocal() &&
          "getNonLocalCallDependency should only be used on calls with "
          "non-local deps!");
-  PerInstNLInfo &CacheP = NonLocalDeps[QueryCall];
+  PerInstNLInfo &CacheP = NonLocalDeps[QueryCS.getInstruction()];
   NonLocalDepInfo &Cache = CacheP.first;
 
   // This is the set of blocks that need to be recomputed.  In the cached case,
@@ -805,21 +807,21 @@ MemoryDependenceResults::getNonLocalCallDependency(CallBase *QueryCall) {
         DirtyBlocks.push_back(Entry.getBB());
 
     // Sort the cache so that we can do fast binary search lookups below.
-    llvm::sort(Cache);
+    llvm::sort(Cache.begin(), Cache.end());
 
     ++NumCacheDirtyNonLocal;
     // cerr << "CACHED CASE: " << DirtyBlocks.size() << " dirty: "
     //     << Cache.size() << " cached: " << *QueryInst;
   } else {
     // Seed DirtyBlocks with each of the preds of QueryInst's block.
-    BasicBlock *QueryBB = QueryCall->getParent();
+    BasicBlock *QueryBB = QueryCS.getInstruction()->getParent();
     for (BasicBlock *Pred : PredCache.get(QueryBB))
       DirtyBlocks.push_back(Pred);
     ++NumUncacheNonLocal;
   }
 
   // isReadonlyCall - If this is a read-only call, we can be more aggressive.
-  bool isReadonlyCall = AA.onlyReadsMemory(QueryCall);
+  bool isReadonlyCall = AA.onlyReadsMemory(QueryCS);
 
   SmallPtrSet<BasicBlock *, 32> Visited;
 
@@ -863,8 +865,8 @@ MemoryDependenceResults::getNonLocalCallDependency(CallBase *QueryCall) {
       if (Instruction *Inst = ExistingResult->getResult().getInst()) {
         ScanPos = Inst->getIterator();
         // We're removing QueryInst's use of Inst.
-        RemoveFromReverseMap<Instruction *>(ReverseNonLocalDeps, Inst,
-                                            QueryCall);
+        RemoveFromReverseMap(ReverseNonLocalDeps, Inst,
+                             QueryCS.getInstruction());
       }
     }
 
@@ -872,7 +874,8 @@ MemoryDependenceResults::getNonLocalCallDependency(CallBase *QueryCall) {
     MemDepResult Dep;
 
     if (ScanPos != DirtyBB->begin()) {
-      Dep = getCallDependencyFrom(QueryCall, isReadonlyCall, ScanPos, DirtyBB);
+      Dep =
+          getCallSiteDependencyFrom(QueryCS, isReadonlyCall, ScanPos, DirtyBB);
     } else if (DirtyBB != &DirtyBB->getParent()->getEntryBlock()) {
       // No dependence found.  If this is the entry block of the function, it is
       // a clobber, otherwise it is unknown.
@@ -894,7 +897,7 @@ MemoryDependenceResults::getNonLocalCallDependency(CallBase *QueryCall) {
       // Keep the ReverseNonLocalDeps map up to date so we can efficiently
       // update this when we remove instructions.
       if (Instruction *Inst = Dep.getInst())
-        ReverseNonLocalDeps[Inst].insert(QueryCall);
+        ReverseNonLocalDeps[Inst].insert(QueryCS.getInstruction());
     } else {
 
       // If the block *is* completely transparent to the load, we need to check
@@ -1067,7 +1070,7 @@ SortNonLocalDepInfoCache(MemoryDependenceResults::NonLocalDepInfo &Cache,
     break;
   default:
     // Added many values, do a full scale sort.
-    llvm::sort(Cache);
+    llvm::sort(Cache.begin(), Cache.end());
     break;
   }
 }
@@ -1110,36 +1113,21 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
   // If we already have a cache entry for this CacheKey, we may need to do some
   // work to reconcile the cache entry and the current query.
   if (!Pair.second) {
-    if (CacheInfo->Size != Loc.Size) {
-      bool ThrowOutEverything;
-      if (CacheInfo->Size.hasValue() && Loc.Size.hasValue()) {
-        // FIXME: We may be able to do better in the face of results with mixed
-        // precision. We don't appear to get them in practice, though, so just
-        // be conservative.
-        ThrowOutEverything =
-            CacheInfo->Size.isPrecise() != Loc.Size.isPrecise() ||
-            CacheInfo->Size.getValue() < Loc.Size.getValue();
-      } else {
-        // For our purposes, unknown size > all others.
-        ThrowOutEverything = !Loc.Size.hasValue();
-      }
-
-      if (ThrowOutEverything) {
-        // The query's Size is greater than the cached one. Throw out the
-        // cached data and proceed with the query at the greater size.
-        CacheInfo->Pair = BBSkipFirstBlockPair();
-        CacheInfo->Size = Loc.Size;
-        for (auto &Entry : CacheInfo->NonLocalDeps)
-          if (Instruction *Inst = Entry.getResult().getInst())
-            RemoveFromReverseMap(ReverseNonLocalPtrDeps, Inst, CacheKey);
-        CacheInfo->NonLocalDeps.clear();
-      } else {
-        // This query's Size is less than the cached one. Conservatively restart
-        // the query using the greater size.
-        return getNonLocalPointerDepFromBB(
-            QueryInst, Pointer, Loc.getWithNewSize(CacheInfo->Size), isLoad,
-            StartBB, Result, Visited, SkipFirstBlock);
-      }
+    if (CacheInfo->Size < Loc.Size) {
+      // The query's Size is greater than the cached one. Throw out the
+      // cached data and proceed with the query at the greater size.
+      CacheInfo->Pair = BBSkipFirstBlockPair();
+      CacheInfo->Size = Loc.Size;
+      for (auto &Entry : CacheInfo->NonLocalDeps)
+        if (Instruction *Inst = Entry.getResult().getInst())
+          RemoveFromReverseMap(ReverseNonLocalPtrDeps, Inst, CacheKey);
+      CacheInfo->NonLocalDeps.clear();
+    } else if (CacheInfo->Size > Loc.Size) {
+      // This query's Size is less than the cached one. Conservatively restart
+      // the query using the greater size.
+      return getNonLocalPointerDepFromBB(
+          QueryInst, Pointer, Loc.getWithNewSize(CacheInfo->Size), isLoad,
+          StartBB, Result, Visited, SkipFirstBlock);
     }
 
     // If the query's AATags are inconsistent with the cached one,
@@ -1584,7 +1572,7 @@ void MemoryDependenceResults::removeInstruction(Instruction *RemInst) {
   ReverseDepMapType::iterator ReverseDepIt = ReverseLocalDeps.find(RemInst);
   if (ReverseDepIt != ReverseLocalDeps.end()) {
     // RemInst can't be the terminator if it has local stuff depending on it.
-    assert(!ReverseDepIt->second.empty() && !RemInst->isTerminator() &&
+    assert(!ReverseDepIt->second.empty() && !isa<TerminatorInst>(RemInst) &&
            "Nothing can locally depend on a terminator");
 
     for (Instruction *InstDependingOnRemInst : ReverseDepIt->second) {
@@ -1674,7 +1662,7 @@ void MemoryDependenceResults::removeInstruction(Instruction *RemInst) {
 
       // Re-sort the NonLocalDepInfo.  Changing the dirty entry to its
       // subsequent value may invalidate the sortedness.
-      llvm::sort(NLPDI);
+      llvm::sort(NLPDI.begin(), NLPDI.end());
     }
 
     ReverseNonLocalPtrDeps.erase(ReversePtrDepIt);

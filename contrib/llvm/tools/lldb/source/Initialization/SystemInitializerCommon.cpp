@@ -17,11 +17,9 @@
 #include "Plugins/ObjectContainer/Universal-Mach-O/ObjectContainerUniversalMachO.h"
 #endif // LLDB_ENABLE_ALL
 #include "Plugins/Process/gdb-remote/ProcessGDBRemoteLog.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/Timer.h"
 
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__)
@@ -38,14 +36,12 @@
 #include <string>
 
 using namespace lldb_private;
-using namespace lldb_private::repro;
 
 SystemInitializerCommon::SystemInitializerCommon() {}
 
 SystemInitializerCommon::~SystemInitializerCommon() {}
 
-llvm::Error
-SystemInitializerCommon::Initialize(const InitializerOptions &options) {
+void SystemInitializerCommon::Initialize() {
 #if defined(_MSC_VER)
   const char *disable_crash_dialog_var = getenv("LLDB_DISABLE_CRASH_DIALOG");
   if (disable_crash_dialog_var &&
@@ -68,16 +64,6 @@ SystemInitializerCommon::Initialize(const InitializerOptions &options) {
   }
 #endif
 
-  ReproducerMode mode = ReproducerMode::Off;
-  if (options.reproducer_capture)
-    mode = ReproducerMode::Capture;
-  if (options.reproducer_replay)
-    mode = ReproducerMode::Replay;
-
-  if (auto e = Reproducer::Initialize(mode, FileSpec(options.reproducer_path)))
-    return e;
-
-  FileSystem::Initialize();
   Log::Initialize();
   HostInfo::Initialize();
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
@@ -105,8 +91,6 @@ SystemInitializerCommon::Initialize(const InitializerOptions &options) {
 #if defined(_MSC_VER)
   ProcessWindowsLog::Initialize();
 #endif
-
-  return llvm::Error::success();
 }
 
 void SystemInitializerCommon::Terminate() {
@@ -128,6 +112,4 @@ void SystemInitializerCommon::Terminate() {
 
   HostInfo::Terminate();
   Log::DisableAllLogChannels();
-  FileSystem::Terminate();
-  Reproducer::Terminate();
 }

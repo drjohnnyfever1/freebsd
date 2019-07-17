@@ -14,10 +14,15 @@
 #include "GDBRemoteCommunicationServerLLGS.h"
 #include "lldb/Utility/StreamGDBRemote.h"
 
+// C Includes
+// C++ Includes
 #include <chrono>
 #include <cstring>
 #include <thread>
 
+// Other libraries and framework includes
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/State.h"
 #include "lldb/Host/ConnectionFileDescriptor.h"
 #include "lldb/Host/Debug.h"
 #include "lldb/Host/File.h"
@@ -36,13 +41,12 @@
 #include "lldb/Utility/JSON.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/UriParser.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/ScopedPrinter.h"
 
+// Project includes
 #include "ProcessGDBRemote.h"
 #include "ProcessGDBRemoteLog.h"
 #include "lldb/Utility/StringExtractorGDBRemote.h"
@@ -218,10 +222,8 @@ Status GDBRemoteCommunicationServerLLGS::LaunchProcess() {
   m_process_launch_info.SetLaunchInSeparateProcessGroup(true);
   m_process_launch_info.GetFlags().Set(eLaunchFlagDebug);
 
-  if (should_forward_stdio) {
-    if (llvm::Error Err = m_process_launch_info.SetUpPtyRedirection())
-      return Status(std::move(Err));
-  }
+  const bool default_to_use_pty = true;
+  m_process_launch_info.FinalizeFileActions(nullptr, default_to_use_pty);
 
   {
     std::lock_guard<std::recursive_mutex> guard(m_debugged_process_mutex);
@@ -1331,7 +1333,7 @@ GDBRemoteCommunicationServerLLGS::Handle_QSetWorkingDir(
   packet.SetFilePos(::strlen("QSetWorkingDir:"));
   std::string path;
   packet.GetHexByteString(path);
-  m_process_launch_info.SetWorkingDirectory(FileSpec(path));
+  m_process_launch_info.SetWorkingDirectory(FileSpec{path, true});
   return SendOKResponse();
 }
 
@@ -3218,7 +3220,7 @@ GDBRemoteCommunicationServerLLGS::FindModuleFile(const std::string &module_path,
     if (m_debugged_process_up
             ->GetLoadedModuleFileSpec(module_path.c_str(), file_spec)
             .Success()) {
-      if (FileSystem::Instance().Exists(file_spec))
+      if (file_spec.Exists())
         return file_spec;
     }
   }

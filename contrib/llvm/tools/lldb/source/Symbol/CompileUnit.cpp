@@ -21,8 +21,8 @@ CompileUnit::CompileUnit(const lldb::ModuleSP &module_sp, void *user_data,
                          const char *pathname, const lldb::user_id_t cu_sym_id,
                          lldb::LanguageType language,
                          lldb_private::LazyBool is_optimized)
-    : ModuleChild(module_sp), FileSpec(pathname), UserID(cu_sym_id),
-      m_user_data(user_data), m_language(language), m_flags(0),
+    : ModuleChild(module_sp), FileSpec(pathname, false), UserID(cu_sym_id),
+      m_user_data(user_data), m_language(language), m_flags(0), m_functions(),
       m_support_files(), m_line_table_ap(), m_variables(),
       m_is_optimized(is_optimized) {
   if (language != eLanguageTypeUnknown)
@@ -35,7 +35,7 @@ CompileUnit::CompileUnit(const lldb::ModuleSP &module_sp, void *user_data,
                          lldb::LanguageType language,
                          lldb_private::LazyBool is_optimized)
     : ModuleChild(module_sp), FileSpec(fspec), UserID(cu_sym_id),
-      m_user_data(user_data), m_language(language), m_flags(0),
+      m_user_data(user_data), m_language(language), m_flags(0), m_functions(),
       m_support_files(), m_line_table_ap(), m_variables(),
       m_is_optimized(is_optimized) {
   if (language != eLanguageTypeUnknown)
@@ -66,22 +66,6 @@ void CompileUnit::GetDescription(Stream *s,
      << (const FileSpec &)*this << "\", language = \"" << language << '"';
 }
 
-void CompileUnit::ForeachFunction(
-    llvm::function_ref<bool(const FunctionSP &)> lambda) const {
-  std::vector<lldb::FunctionSP> sorted_functions;
-  sorted_functions.reserve(m_functions_by_uid.size());
-  for (auto &p : m_functions_by_uid)
-    sorted_functions.push_back(p.second);
-  llvm::sort(sorted_functions.begin(), sorted_functions.end(),
-             [](const lldb::FunctionSP &a, const lldb::FunctionSP &b) {
-               return a->GetID() < b->GetID();
-             });
-
-  for (auto &f : sorted_functions)
-    if (lambda(f))
-      return;
-}
-
 //----------------------------------------------------------------------
 // Dump the current contents of this object. No functions that cause on demand
 // parsing of functions, globals, statics are called, so this is a good
@@ -105,12 +89,13 @@ void CompileUnit::Dump(Stream *s, bool show_context) const {
     s->IndentLess();
   }
 
-  if (!m_functions_by_uid.empty()) {
+  if (!m_functions.empty()) {
     s->IndentMore();
-    ForeachFunction([&s, show_context](const FunctionSP &f) {
-      f->Dump(s, show_context);
-      return false;
-    });
+    std::vector<FunctionSP>::const_iterator pos;
+    std::vector<FunctionSP>::const_iterator end = m_functions.end();
+    for (pos = m_functions.begin(); pos != end; ++pos) {
+      (*pos)->Dump(s, show_context);
+    }
 
     s->IndentLess();
     s->EOL();
@@ -121,7 +106,15 @@ void CompileUnit::Dump(Stream *s, bool show_context) const {
 // Add a function to this compile unit
 //----------------------------------------------------------------------
 void CompileUnit::AddFunction(FunctionSP &funcSP) {
-  m_functions_by_uid[funcSP->GetID()] = funcSP;
+  // TODO: order these by address
+  m_functions.push_back(funcSP);
+}
+
+FunctionSP CompileUnit::GetFunctionAtIndex(size_t idx) {
+  FunctionSP funcSP;
+  if (idx < m_functions.size())
+    funcSP = m_functions[idx];
+  return funcSP;
 }
 
 //----------------------------------------------------------------------
@@ -170,10 +163,18 @@ void CompileUnit::AddFunction(FunctionSP &funcSP) {
 //}
 
 FunctionSP CompileUnit::FindFunctionByUID(lldb::user_id_t func_uid) {
-  auto it = m_functions_by_uid.find(func_uid);
-  if (it == m_functions_by_uid.end())
-    return FunctionSP();
-  return it->second;
+  FunctionSP funcSP;
+  if (!m_functions.empty()) {
+    std::vector<FunctionSP>::const_iterator pos;
+    std::vector<FunctionSP>::const_iterator end = m_functions.end();
+    for (pos = m_functions.begin(); pos != end; ++pos) {
+      if ((*pos)->GetID() == func_uid) {
+        funcSP = *pos;
+        break;
+      }
+    }
+  }
+  return funcSP;
 }
 
 lldb::LanguageType CompileUnit::GetLanguage() {
@@ -182,7 +183,9 @@ lldb::LanguageType CompileUnit::GetLanguage() {
       m_flags.Set(flagsParsedLanguage);
       SymbolVendor *symbol_vendor = GetModule()->GetSymbolVendor();
       if (symbol_vendor) {
-        m_language = symbol_vendor->ParseLanguage(*this);
+        SymbolContext sc;
+        CalculateSymbolContext(&sc);
+        m_language = symbol_vendor->ParseCompileUnitLanguage(sc);
       }
     }
   }
@@ -194,8 +197,11 @@ LineTable *CompileUnit::GetLineTable() {
     if (m_flags.IsClear(flagsParsedLineTable)) {
       m_flags.Set(flagsParsedLineTable);
       SymbolVendor *symbol_vendor = GetModule()->GetSymbolVendor();
-      if (symbol_vendor)
-        symbol_vendor->ParseLineTable(*this);
+      if (symbol_vendor) {
+        SymbolContext sc;
+        CalculateSymbolContext(&sc);
+        symbol_vendor->ParseCompileUnitLineTable(sc);
+      }
     }
   }
   return m_line_table_ap.get();
@@ -215,7 +221,9 @@ DebugMacros *CompileUnit::GetDebugMacros() {
       m_flags.Set(flagsParsedDebugMacros);
       SymbolVendor *symbol_vendor = GetModule()->GetSymbolVendor();
       if (symbol_vendor) {
-        symbol_vendor->ParseDebugMacros(*this);
+        SymbolContext sc;
+        CalculateSymbolContext(&sc);
+        symbol_vendor->ParseCompileUnitDebugMacros(sc);
       }
     }
   }
@@ -271,8 +279,7 @@ uint32_t CompileUnit::FindLineEntry(uint32_t start_idx, uint32_t line,
 
 uint32_t CompileUnit::ResolveSymbolContext(const FileSpec &file_spec,
                                            uint32_t line, bool check_inlines,
-                                           bool exact,
-                                           SymbolContextItem resolve_scope,
+                                           bool exact, uint32_t resolve_scope,
                                            SymbolContextList &sc_list) {
   // First find all of the file indexes that match our "file_spec". If
   // "file_spec" has an empty directory, then only compare the basenames when
@@ -284,7 +291,7 @@ uint32_t CompileUnit::ResolveSymbolContext(const FileSpec &file_spec,
 
   // If we are not looking for inlined functions and our file spec doesn't
   // match then we are done...
-  if (!file_spec_matches_cu_file_spec && !check_inlines)
+  if (file_spec_matches_cu_file_spec == false && check_inlines == false)
     return 0;
 
   uint32_t file_idx =
@@ -380,7 +387,9 @@ bool CompileUnit::GetIsOptimized() {
   if (m_is_optimized == eLazyBoolCalculate) {
     m_is_optimized = eLazyBoolNo;
     if (SymbolVendor *symbol_vendor = GetModule()->GetSymbolVendor()) {
-      if (symbol_vendor->ParseIsOptimized(*this))
+      SymbolContext sc;
+      CalculateSymbolContext(&sc);
+      if (symbol_vendor->ParseCompileUnitIsOptimized(sc))
         m_is_optimized = eLazyBoolYes;
     }
   }
@@ -410,7 +419,9 @@ FileSpecList &CompileUnit::GetSupportFiles() {
       m_flags.Set(flagsParsedSupportFiles);
       SymbolVendor *symbol_vendor = GetModule()->GetSymbolVendor();
       if (symbol_vendor) {
-        symbol_vendor->ParseSupportFiles(*this, m_support_files);
+        SymbolContext sc;
+        CalculateSymbolContext(&sc);
+        symbol_vendor->ParseCompileUnitSupportFiles(sc, m_support_files);
       }
     }
   }

@@ -189,12 +189,12 @@ private:
 
   /// getFeasibleSuccessors - Return a vector of booleans to indicate which
   /// successors are reachable from a given terminator instruction.
-  void getFeasibleSuccessors(Instruction &TI, SmallVectorImpl<bool> &Succs,
+  void getFeasibleSuccessors(TerminatorInst &TI, SmallVectorImpl<bool> &Succs,
                              bool AggressiveUndef);
 
   void visitInst(Instruction &I);
   void visitPHINode(PHINode &I);
-  void visitTerminator(Instruction &TI);
+  void visitTerminatorInst(TerminatorInst &TI);
 };
 
 //===----------------------------------------------------------------------===//
@@ -286,7 +286,7 @@ void SparseSolver<LatticeKey, LatticeVal, KeyInfo>::markEdgeExecutable(
 
 template <class LatticeKey, class LatticeVal, class KeyInfo>
 void SparseSolver<LatticeKey, LatticeVal, KeyInfo>::getFeasibleSuccessors(
-    Instruction &TI, SmallVectorImpl<bool> &Succs, bool AggressiveUndef) {
+    TerminatorInst &TI, SmallVectorImpl<bool> &Succs, bool AggressiveUndef) {
   Succs.resize(TI.getNumSuccessors());
   if (TI.getNumSuccessors() == 0)
     return;
@@ -330,7 +330,7 @@ void SparseSolver<LatticeKey, LatticeVal, KeyInfo>::getFeasibleSuccessors(
     return;
   }
 
-  if (TI.isExceptionalTerminator()) {
+  if (TI.isExceptional()) {
     Succs.assign(Succs.size(), true);
     return;
   }
@@ -374,7 +374,7 @@ template <class LatticeKey, class LatticeVal, class KeyInfo>
 bool SparseSolver<LatticeKey, LatticeVal, KeyInfo>::isEdgeFeasible(
     BasicBlock *From, BasicBlock *To, bool AggressiveUndef) {
   SmallVector<bool, 16> SuccFeasible;
-  Instruction *TI = From->getTerminator();
+  TerminatorInst *TI = From->getTerminator();
   getFeasibleSuccessors(*TI, SuccFeasible, AggressiveUndef);
 
   for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
@@ -385,8 +385,8 @@ bool SparseSolver<LatticeKey, LatticeVal, KeyInfo>::isEdgeFeasible(
 }
 
 template <class LatticeKey, class LatticeVal, class KeyInfo>
-void SparseSolver<LatticeKey, LatticeVal, KeyInfo>::visitTerminator(
-    Instruction &TI) {
+void SparseSolver<LatticeKey, LatticeVal, KeyInfo>::visitTerminatorInst(
+    TerminatorInst &TI) {
   SmallVector<bool, 16> SuccFeasible;
   getFeasibleSuccessors(TI, SuccFeasible, true);
 
@@ -465,8 +465,8 @@ void SparseSolver<LatticeKey, LatticeVal, KeyInfo>::visitInst(Instruction &I) {
     if (ChangedValue.second != LatticeFunc->getUntrackedVal())
       UpdateState(ChangedValue.first, ChangedValue.second);
 
-  if (I.isTerminator())
-    visitTerminator(I);
+  if (TerminatorInst *TI = dyn_cast<TerminatorInst>(&I))
+    visitTerminatorInst(*TI);
 }
 
 template <class LatticeKey, class LatticeVal, class KeyInfo>

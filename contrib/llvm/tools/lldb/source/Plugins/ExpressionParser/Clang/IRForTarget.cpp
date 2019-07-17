@@ -25,6 +25,7 @@
 
 #include "clang/AST/ASTContext.h"
 
+#include "lldb/Core/Scalar.h"
 #include "lldb/Core/dwarf.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Expression/IRInterpreter.h"
@@ -35,7 +36,6 @@
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/StreamString.h"
 
 #include <map>
@@ -310,14 +310,12 @@ bool IRForTarget::CreateResultVariable(llvm::Function &llvm_function) {
 
   lldb::TargetSP target_sp(m_execution_unit.GetTarget());
   lldb_private::ExecutionContext exe_ctx(target_sp, true);
-  llvm::Optional<uint64_t> bit_size =
-      m_result_type.GetBitSize(exe_ctx.GetBestExecutionContextScope());
-  if (!bit_size) {
+  if (m_result_type.GetBitSize(exe_ctx.GetBestExecutionContextScope()) == 0) {
     lldb_private::StreamString type_desc_stream;
     m_result_type.DumpTypeDescription(&type_desc_stream);
 
     if (log)
-      log->Printf("Result type has unknown size");
+      log->Printf("Result type has size 0");
 
     m_error_stream.Printf("Error [IRForTarget]: Size of result type '%s' "
                           "couldn't be determined\n",
@@ -336,8 +334,7 @@ bool IRForTarget::CreateResultVariable(llvm::Function &llvm_function) {
 
   if (log)
     log->Printf("Creating a new result global: \"%s\" with size 0x%" PRIx64,
-                m_result_name.GetCString(),
-                m_result_type.GetByteSize(nullptr).getValueOr(0));
+                m_result_name.GetCString(), m_result_type.GetByteSize(nullptr));
 
   // Construct a new result global and set up its metadata
 
@@ -781,8 +778,11 @@ bool IRForTarget::RewriteObjCConstStrings() {
 static bool IsObjCSelectorRef(Value *value) {
   GlobalVariable *global_variable = dyn_cast<GlobalVariable>(value);
 
-  return !(!global_variable || !global_variable->hasName() ||
-           !global_variable->getName().startswith("OBJC_SELECTOR_REFERENCES_"));
+  if (!global_variable || !global_variable->hasName() ||
+      !global_variable->getName().startswith("OBJC_SELECTOR_REFERENCES_"))
+    return false;
+
+  return true;
 }
 
 // This function does not report errors; its callers are responsible.
@@ -953,8 +953,11 @@ bool IRForTarget::RewriteObjCSelectors(BasicBlock &basic_block) {
 static bool IsObjCClassReference(Value *value) {
   GlobalVariable *global_variable = dyn_cast<GlobalVariable>(value);
 
-  return !(!global_variable || !global_variable->hasName() ||
-           !global_variable->getName().startswith("OBJC_CLASS_REFERENCES_"));
+  if (!global_variable || !global_variable->hasName() ||
+      !global_variable->getName().startswith("OBJC_CLASS_REFERENCES_"))
+    return false;
+
+  return true;
 }
 
 // This function does not report errors; its callers are responsible.
@@ -1256,9 +1259,12 @@ bool IRForTarget::MaterializeInitializer(uint8_t *data, Constant *initializer) {
         llvm::NextPowerOf2(constant_size) * 8);
 
     lldb_private::Status get_data_error;
-    return scalar.GetAsMemoryData(data, constant_size,
-                                  lldb_private::endian::InlHostByteOrder(),
-                                  get_data_error) != 0;
+    if (!scalar.GetAsMemoryData(data, constant_size,
+                                lldb_private::endian::InlHostByteOrder(),
+                                get_data_error))
+      return false;
+
+    return true;
   } else if (ConstantDataArray *array_initializer =
                  dyn_cast<ConstantDataArray>(initializer)) {
     if (array_initializer->isString()) {
@@ -1370,9 +1376,7 @@ bool IRForTarget::MaybeHandleVariable(Value *llvm_value_ptr) {
       value_type = global_variable->getType();
     }
 
-    llvm::Optional<uint64_t> value_size = compiler_type.GetByteSize(nullptr);
-    if (!value_size)
-      return false;
+    const uint64_t value_size = compiler_type.GetByteSize(nullptr);
     lldb::offset_t value_alignment =
         (compiler_type.GetTypeBitAlign() + 7ull) / 8ull;
 
@@ -1383,13 +1387,13 @@ bool IRForTarget::MaybeHandleVariable(Value *llvm_value_ptr) {
                   lldb_private::ClangUtil::GetQualType(compiler_type)
                       .getAsString()
                       .c_str(),
-                  PrintType(value_type).c_str(), *value_size, value_alignment);
+                  PrintType(value_type).c_str(), value_size, value_alignment);
     }
 
     if (named_decl &&
         !m_decl_map->AddValueToStruct(
             named_decl, lldb_private::ConstString(name.c_str()), llvm_value_ptr,
-            *value_size, value_alignment)) {
+            value_size, value_alignment)) {
       if (!global_variable->hasExternalLinkage())
         return true;
       else

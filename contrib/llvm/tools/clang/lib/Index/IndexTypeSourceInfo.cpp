@@ -100,8 +100,7 @@ public:
 
   bool VisitTagTypeLoc(TagTypeLoc TL) {
     TagDecl *D = TL.getDecl();
-    if (!IndexCtx.shouldIndexFunctionLocalSymbols() &&
-        D->getParentFunctionOrMethod())
+    if (D->getParentFunctionOrMethod())
       return true;
 
     if (TL.isDefinition()) {
@@ -131,15 +130,14 @@ public:
   bool HandleTemplateSpecializationTypeLoc(TypeLocType TL) {
     if (const auto *T = TL.getTypePtr()) {
       if (IndexCtx.shouldIndexImplicitInstantiation()) {
-        if (CXXRecordDecl *RD = T->getAsCXXRecordDecl()) {
+        if (CXXRecordDecl *RD = T->getAsCXXRecordDecl())
           IndexCtx.handleReference(RD, TL.getTemplateNameLoc(),
                                    Parent, ParentDC, SymbolRoleSet(), Relations);
-          return true;
-        }
+      } else {
+        if (const TemplateDecl *D = T->getTemplateName().getAsTemplateDecl())
+          IndexCtx.handleReference(D, TL.getTemplateNameLoc(),
+                                   Parent, ParentDC, SymbolRoleSet(), Relations);
       }
-      if (const TemplateDecl *D = T->getTemplateName().getAsTemplateDecl())
-        IndexCtx.handleReference(D, TL.getTemplateNameLoc(), Parent, ParentDC,
-                                 SymbolRoleSet(), Relations);
     }
     return true;
   }

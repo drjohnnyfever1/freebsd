@@ -24,6 +24,7 @@
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/SemaDiagnostic.h"
 #include "llvm/ADT/SmallString.h"
 
 using namespace clang;
@@ -32,25 +33,24 @@ using namespace clang;
 /// may either be a top level namespace or a block-level namespace alias. If
 /// there was an inline keyword, it has already been parsed.
 ///
-///       namespace-definition: [C++: namespace.def]
+///       namespace-definition: [C++ 7.3: basic.namespace]
 ///         named-namespace-definition
 ///         unnamed-namespace-definition
-///         nested-namespace-definition
-///
-///       named-namespace-definition:
-///         'inline'[opt] 'namespace' attributes[opt] identifier '{'
-///         namespace-body '}'
 ///
 ///       unnamed-namespace-definition:
 ///         'inline'[opt] 'namespace' attributes[opt] '{' namespace-body '}'
 ///
-///       nested-namespace-definition:
-///         'namespace' enclosing-namespace-specifier '::' 'inline'[opt]
-///         identifier '{' namespace-body '}'
+///       named-namespace-definition:
+///         original-namespace-definition
+///         extension-namespace-definition
 ///
-///       enclosing-namespace-specifier:
-///         identifier
-///         enclosing-namespace-specifier '::' 'inline'[opt] identifier
+///       original-namespace-definition:
+///         'inline'[opt] 'namespace' identifier attributes[opt]
+///             '{' namespace-body '}'
+///
+///       extension-namespace-definition:
+///         'inline'[opt] 'namespace' original-namespace-name
+///             '{' namespace-body '}'
 ///
 ///       namespace-alias-definition:  [C++ 7.3.2: namespace.alias]
 ///         'namespace' identifier '=' qualified-namespace-specifier ';'
@@ -70,8 +70,9 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
 
   SourceLocation IdentLoc;
   IdentifierInfo *Ident = nullptr;
-  InnerNamespaceInfoList ExtraNSs;
-  SourceLocation FirstNestedInlineLoc;
+  std::vector<SourceLocation> ExtraIdentLoc;
+  std::vector<IdentifierInfo*> ExtraIdent;
+  std::vector<SourceLocation> ExtraNamespaceLoc;
 
   ParsedAttributesWithRange attrs(AttrFactory);
   SourceLocation attrLoc;
@@ -87,29 +88,15 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
   if (Tok.is(tok::identifier)) {
     Ident = Tok.getIdentifierInfo();
     IdentLoc = ConsumeToken();  // eat the identifier.
-    while (Tok.is(tok::coloncolon) &&
-           (NextToken().is(tok::identifier) ||
-            (NextToken().is(tok::kw_inline) &&
-             GetLookAheadToken(2).is(tok::identifier)))) {
-
-      InnerNamespaceInfo Info;
-      Info.NamespaceLoc = ConsumeToken();
-
-      if (Tok.is(tok::kw_inline)) {
-        Info.InlineLoc = ConsumeToken();
-        if (FirstNestedInlineLoc.isInvalid())
-          FirstNestedInlineLoc = Info.InlineLoc;
-      }
-
-      Info.Ident = Tok.getIdentifierInfo();
-      Info.IdentLoc = ConsumeToken();
-
-      ExtraNSs.push_back(Info);
+    while (Tok.is(tok::coloncolon) && NextToken().is(tok::identifier)) {
+      ExtraNamespaceLoc.push_back(ConsumeToken());
+      ExtraIdent.push_back(Tok.getIdentifierInfo());
+      ExtraIdentLoc.push_back(ConsumeToken());
     }
   }
 
   // A nested namespace definition cannot have attributes.
-  if (!ExtraNSs.empty() && attrLoc.isValid())
+  if (!ExtraNamespaceLoc.empty() && attrLoc.isValid())
     Diag(attrLoc, diag::err_unexpected_nested_namespace_attribute);
 
   // Read label attributes, if present.
@@ -151,21 +138,13 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
     return nullptr;
   }
 
-  if (ExtraNSs.empty()) {
+  if (ExtraIdent.empty()) {
     // Normal namespace definition, not a nested-namespace-definition.
   } else if (InlineLoc.isValid()) {
     Diag(InlineLoc, diag::err_inline_nested_namespace_definition);
-  } else if (getLangOpts().CPlusPlus2a) {
-    Diag(ExtraNSs[0].NamespaceLoc,
-         diag::warn_cxx14_compat_nested_namespace_definition);
-    if (FirstNestedInlineLoc.isValid())
-      Diag(FirstNestedInlineLoc,
-           diag::warn_cxx17_compat_inline_nested_namespace_definition);
   } else if (getLangOpts().CPlusPlus17) {
-    Diag(ExtraNSs[0].NamespaceLoc,
+    Diag(ExtraNamespaceLoc[0],
          diag::warn_cxx14_compat_nested_namespace_definition);
-    if (FirstNestedInlineLoc.isValid())
-      Diag(FirstNestedInlineLoc, diag::ext_inline_nested_namespace_definition);
   } else {
     TentativeParsingAction TPA(*this);
     SkipUntil(tok::r_brace, StopBeforeMatch);
@@ -173,34 +152,26 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
     TPA.Revert();
 
     if (!rBraceToken.is(tok::r_brace)) {
-      Diag(ExtraNSs[0].NamespaceLoc, diag::ext_nested_namespace_definition)
-          << SourceRange(ExtraNSs.front().NamespaceLoc,
-                         ExtraNSs.back().IdentLoc);
+      Diag(ExtraNamespaceLoc[0], diag::ext_nested_namespace_definition)
+          << SourceRange(ExtraNamespaceLoc.front(), ExtraIdentLoc.back());
     } else {
       std::string NamespaceFix;
-      for (const auto &ExtraNS : ExtraNSs) {
-        NamespaceFix += " { ";
-        if (ExtraNS.InlineLoc.isValid())
-          NamespaceFix += "inline ";
-        NamespaceFix += "namespace ";
-        NamespaceFix += ExtraNS.Ident->getName();
+      for (std::vector<IdentifierInfo*>::iterator I = ExtraIdent.begin(),
+           E = ExtraIdent.end(); I != E; ++I) {
+        NamespaceFix += " { namespace ";
+        NamespaceFix += (*I)->getName();
       }
 
       std::string RBraces;
-      for (unsigned i = 0, e = ExtraNSs.size(); i != e; ++i)
+      for (unsigned i = 0, e = ExtraIdent.size(); i != e; ++i)
         RBraces +=  "} ";
 
-      Diag(ExtraNSs[0].NamespaceLoc, diag::ext_nested_namespace_definition)
-          << FixItHint::CreateReplacement(
-                 SourceRange(ExtraNSs.front().NamespaceLoc,
-                             ExtraNSs.back().IdentLoc),
-                 NamespaceFix)
+      Diag(ExtraNamespaceLoc[0], diag::ext_nested_namespace_definition)
+          << FixItHint::CreateReplacement(SourceRange(ExtraNamespaceLoc.front(),
+                                                      ExtraIdentLoc.back()),
+                                          NamespaceFix)
           << FixItHint::CreateInsertion(rBraceToken.getLocation(), RBraces);
     }
-
-    // Warn about nested inline namespaces.
-    if (FirstNestedInlineLoc.isValid())
-      Diag(FirstNestedInlineLoc, diag::ext_inline_nested_namespace_definition);
   }
 
   // If we're still good, complain about inline namespaces in non-C++0x now.
@@ -221,7 +192,8 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
 
   // Parse the contents of the namespace.  This includes parsing recovery on
   // any improperly nested namespaces.
-  ParseInnerNamespace(ExtraNSs, 0, InlineLoc, attrs, T);
+  ParseInnerNamespace(ExtraIdentLoc, ExtraIdent, ExtraNamespaceLoc, 0,
+                      InlineLoc, attrs, T);
 
   // Leave the namespace scope.
   NamespaceScope.Exit();
@@ -234,11 +206,13 @@ Parser::DeclGroupPtrTy Parser::ParseNamespace(DeclaratorContext Context,
 }
 
 /// ParseInnerNamespace - Parse the contents of a namespace.
-void Parser::ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
+void Parser::ParseInnerNamespace(std::vector<SourceLocation> &IdentLoc,
+                                 std::vector<IdentifierInfo *> &Ident,
+                                 std::vector<SourceLocation> &NamespaceLoc,
                                  unsigned int index, SourceLocation &InlineLoc,
                                  ParsedAttributes &attrs,
                                  BalancedDelimiterTracker &Tracker) {
-  if (index == InnerNSs.size()) {
+  if (index == Ident.size()) {
     while (!tryParseMisplacedModuleImport() && Tok.isNot(tok::r_brace) &&
            Tok.isNot(tok::eof)) {
       ParsedAttributesWithRange attrs(AttrFactory);
@@ -259,13 +233,14 @@ void Parser::ParseInnerNamespace(const InnerNamespaceInfoList &InnerNSs,
   ParseScope NamespaceScope(this, Scope::DeclScope);
   UsingDirectiveDecl *ImplicitUsingDirectiveDecl = nullptr;
   Decl *NamespcDecl = Actions.ActOnStartNamespaceDef(
-      getCurScope(), InnerNSs[index].InlineLoc, InnerNSs[index].NamespaceLoc,
-      InnerNSs[index].IdentLoc, InnerNSs[index].Ident,
-      Tracker.getOpenLocation(), attrs, ImplicitUsingDirectiveDecl);
+      getCurScope(), SourceLocation(), NamespaceLoc[index], IdentLoc[index],
+      Ident[index], Tracker.getOpenLocation(), attrs,
+      ImplicitUsingDirectiveDecl);
   assert(!ImplicitUsingDirectiveDecl &&
          "nested namespace definition cannot define anonymous namespace");
 
-  ParseInnerNamespace(InnerNSs, ++index, InlineLoc, attrs, Tracker);
+  ParseInnerNamespace(IdentLoc, Ident, NamespaceLoc, ++index, InlineLoc,
+                      attrs, Tracker);
 
   NamespaceScope.Exit();
   Actions.ActOnFinishNamespaceDef(NamespcDecl, Tracker.getCloseLocation());
@@ -390,7 +365,7 @@ Decl *Parser::ParseLinkage(ParsingDeclSpec &DS, DeclaratorContext Context) {
     case tok::r_brace:
       if (!NestedModules)
         break;
-      LLVM_FALLTHROUGH;
+      // Fall through.
     default:
       ParsedAttributesWithRange attrs(AttrFactory);
       MaybeParseCXX11Attributes(attrs);
@@ -2346,22 +2321,32 @@ void Parser::MaybeParseAndDiagnoseDeclSpecAfterCXX11VirtSpecifierSeq(
   if (D.isFunctionDeclarator()) {
     auto &Function = D.getFunctionTypeInfo();
     if (DS.getTypeQualifiers() != DeclSpec::TQ_unspecified) {
-      auto DeclSpecCheck = [&](DeclSpec::TQ TypeQual, StringRef FixItName,
-                               SourceLocation SpecLoc) {
+      auto DeclSpecCheck = [&] (DeclSpec::TQ TypeQual,
+                                const char *FixItName,
+                                SourceLocation SpecLoc,
+                                unsigned* QualifierLoc) {
         FixItHint Insertion;
-        auto &MQ = Function.getOrCreateMethodQualifiers();
-        if (!(MQ.getTypeQualifiers() & TypeQual)) {
-          std::string Name(FixItName.data());
-          Name += " ";
-          Insertion = FixItHint::CreateInsertion(VS.getFirstLocation(), Name);
-          MQ.SetTypeQual(TypeQual, SpecLoc);
-        }
-        Diag(SpecLoc, diag::err_declspec_after_virtspec)
+        if (DS.getTypeQualifiers() & TypeQual) {
+          if (!(Function.TypeQuals & TypeQual)) {
+            std::string Name(FixItName);
+            Name += " ";
+            Insertion = FixItHint::CreateInsertion(VS.getFirstLocation(), Name);
+            Function.TypeQuals |= TypeQual;
+            *QualifierLoc = SpecLoc.getRawEncoding();
+          }
+          Diag(SpecLoc, diag::err_declspec_after_virtspec)
             << FixItName
             << VirtSpecifiers::getSpecifierName(VS.getLastSpecifier())
-            << FixItHint::CreateRemoval(SpecLoc) << Insertion;
+            << FixItHint::CreateRemoval(SpecLoc)
+            << Insertion;
+        }
       };
-      DS.forEachQualifier(DeclSpecCheck);
+      DeclSpecCheck(DeclSpec::TQ_const, "const", DS.getConstSpecLoc(),
+                    &Function.ConstQualifierLoc);
+      DeclSpecCheck(DeclSpec::TQ_volatile, "volatile", DS.getVolatileSpecLoc(),
+                    &Function.VolatileQualifierLoc);
+      DeclSpecCheck(DeclSpec::TQ_restrict, "restrict", DS.getRestrictSpecLoc(),
+                    &Function.RestrictQualifierLoc);
     }
 
     // Parse ref-qualifiers.
@@ -2425,7 +2410,7 @@ Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
                                        const ParsedTemplateInfo &TemplateInfo,
                                        ParsingDeclRAIIObject *TemplateDiags) {
   if (Tok.is(tok::at)) {
-    if (getLangOpts().ObjC && NextToken().isObjCAtKeyword(tok::objc_defs))
+    if (getLangOpts().ObjC1 && NextToken().isObjCAtKeyword(tok::objc_defs))
       Diag(Tok, diag::err_at_defs_cxx);
     else
       Diag(Tok, diag::err_at_in_class);
@@ -3464,7 +3449,6 @@ MemInitResult Parser::ParseMemInitializer(Decl *ConstructorDecl) {
   if (getLangOpts().CPlusPlus11 && Tok.is(tok::l_brace)) {
     Diag(Tok, diag::warn_cxx98_compat_generalized_initializer_lists);
 
-    // FIXME: Add support for signature help inside initializer lists.
     ExprResult InitList = ParseBraceInitializer();
     if (InitList.isInvalid())
       return true;
@@ -3482,20 +3466,7 @@ MemInitResult Parser::ParseMemInitializer(Decl *ConstructorDecl) {
     // Parse the optional expression-list.
     ExprVector ArgExprs;
     CommaLocsTy CommaLocs;
-    if (Tok.isNot(tok::r_paren) &&
-        ParseExpressionList(ArgExprs, CommaLocs, [&] {
-          QualType PreferredType = Actions.ProduceCtorInitMemberSignatureHelp(
-              getCurScope(), ConstructorDecl, SS, TemplateTypeTy, ArgExprs, II,
-              T.getOpenLocation());
-          CalledSignatureHelp = true;
-          Actions.CodeCompleteExpression(getCurScope(), PreferredType);
-        })) {
-      if (PP.isCodeCompletionReached() && !CalledSignatureHelp) {
-        Actions.ProduceCtorInitMemberSignatureHelp(
-            getCurScope(), ConstructorDecl, SS, TemplateTypeTy, ArgExprs, II,
-            T.getOpenLocation());
-        CalledSignatureHelp = true;
-      }
+    if (Tok.isNot(tok::r_paren) && ParseExpressionList(ArgExprs, CommaLocs)) {
       SkipUntil(tok::r_paren, StopAtSemi);
       return true;
     }
@@ -3805,28 +3776,6 @@ IdentifierInfo *Parser::TryParseCXX11AttributeIdentifier(SourceLocation &Loc) {
     }
     return nullptr;
 
-  case tok::numeric_constant: {
-    // If we got a numeric constant, check to see if it comes from a macro that
-    // corresponds to the predefined __clang__ macro. If it does, warn the user
-    // and recover by pretending they said _Clang instead.
-    if (Tok.getLocation().isMacroID()) {
-      SmallString<8> ExpansionBuf;
-      SourceLocation ExpansionLoc =
-          PP.getSourceManager().getExpansionLoc(Tok.getLocation());
-      StringRef Spelling = PP.getSpelling(ExpansionLoc, ExpansionBuf);
-      if (Spelling == "__clang__") {
-        SourceRange TokRange(
-            ExpansionLoc,
-            PP.getSourceManager().getExpansionLoc(Tok.getEndLoc()));
-        Diag(Tok, diag::warn_wrong_clang_attr_namespace)
-            << FixItHint::CreateReplacement(TokRange, "_Clang");
-        Loc = ConsumeToken();
-        return &PP.getIdentifierTable().get("_Clang");
-      }
-    }
-    return nullptr;
-  }
-
   case tok::ampamp:       // 'and'
   case tok::pipe:         // 'bitor'
   case tok::pipepipe:     // 'or'
@@ -3905,7 +3854,7 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
     return false;
   }
 
-  if (ScopeName && (ScopeName->isStr("gnu") || ScopeName->isStr("__gnu__"))) {
+  if (ScopeName && ScopeName->getName() == "gnu") {
     // GNU-scoped attributes have some special cases to handle GNU-specific
     // behaviors.
     ParseGNUAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc, ScopeName,
@@ -3915,9 +3864,10 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
 
   unsigned NumArgs;
   // Some Clang-scoped attributes have some special parsing behavior.
-  if (ScopeName && (ScopeName->isStr("clang") || ScopeName->isStr("_Clang")))
-    NumArgs = ParseClangAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc,
-                                      ScopeName, ScopeLoc, Syntax);
+  if (ScopeName && ScopeName->getName() == "clang")
+    NumArgs =
+        ParseClangAttributeArgs(AttrName, AttrNameLoc, Attrs, EndLoc, ScopeName,
+                                ScopeLoc, Syntax);
   else
     NumArgs =
         ParseAttributeArgsCommon(AttrName, AttrNameLoc, Attrs, EndLoc,
@@ -3925,7 +3875,7 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
 
   if (!Attrs.empty() &&
       IsBuiltInOrStandardCXX11Attribute(AttrName, ScopeName)) {
-    ParsedAttr &Attr = Attrs.back();
+    ParsedAttr &Attr = *Attrs.begin();
     // If the attribute is a standard or built-in attribute and we are
     // parsing an argument list, we need to determine whether this attribute
     // was allowed to have an argument list (such as [[deprecated]]), and how

@@ -212,7 +212,7 @@ void CallGraph::viewGraph() const {
 
 void CallGraphNode::print(raw_ostream &os) const {
   if (const NamedDecl *ND = dyn_cast_or_null<NamedDecl>(FD))
-      return ND->printQualifiedName(os);
+      return ND->printName(os);
   os << "< >";
 }
 

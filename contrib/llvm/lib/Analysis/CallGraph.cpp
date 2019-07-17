@@ -97,7 +97,8 @@ void CallGraph::print(raw_ostream &OS) const {
   for (const auto &I : *this)
     Nodes.push_back(I.second.get());
 
-  llvm::sort(Nodes, [](CallGraphNode *LHS, CallGraphNode *RHS) {
+  llvm::sort(Nodes.begin(), Nodes.end(),
+             [](CallGraphNode *LHS, CallGraphNode *RHS) {
     if (Function *LF = LHS->getFunction())
       if (Function *RF = RHS->getFunction())
         return LF->getName() < RF->getName();

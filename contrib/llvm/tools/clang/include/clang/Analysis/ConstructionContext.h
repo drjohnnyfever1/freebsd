@@ -19,7 +19,6 @@
 
 #include "clang/Analysis/Support/BumpVector.h"
 #include "clang/AST/ExprCXX.h"
-#include "clang/AST/ExprObjC.h"
 
 namespace clang {
 
@@ -624,16 +623,9 @@ public:
 };
 
 class ArgumentConstructionContext : public ConstructionContext {
-  // The call of which the context is an argument.
-  const Expr *CE;
-
-  // Which argument we're constructing. Note that when numbering between
-  // arguments and parameters is inconsistent (eg., operator calls),
-  // this is the index of the argument, not of the parameter.
-  unsigned Index;
-
-  // Whether the object needs to be destroyed.
-  const CXXBindTemporaryExpr *BTE;
+  const Expr *CE; // The call of which the context is an argument.
+  unsigned Index; // Which argument we're constructing.
+  const CXXBindTemporaryExpr *BTE; // Whether the object needs to be destroyed.
 
   friend class ConstructionContext; // Allows to create<>() itself.
 

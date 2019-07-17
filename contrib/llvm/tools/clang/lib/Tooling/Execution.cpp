@@ -16,7 +16,7 @@ LLVM_INSTANTIATE_REGISTRY(clang::tooling::ToolExecutorPluginRegistry)
 namespace clang {
 namespace tooling {
 
-llvm::cl::opt<std::string>
+static llvm::cl::opt<std::string>
     ExecutorName("executor", llvm::cl::desc("The name of the executor to use."),
                  llvm::cl::init("standalone"));
 

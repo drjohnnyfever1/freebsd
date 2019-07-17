@@ -7,6 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
@@ -176,7 +179,7 @@ ModuleSP DynamicLoaderHexagonDYLD::GetTargetExecutable() {
     return executable;
 
   // The target executable file does not exits
-  if (!FileSystem::Instance().Exists(executable->GetFileSpec()))
+  if (!executable->GetFileSpec().Exists())
     return executable;
 
   // Prep module for loading
@@ -202,7 +205,8 @@ ModuleSP DynamicLoaderHexagonDYLD::GetTargetExecutable() {
   if (executable.get() != target.GetExecutableModulePointer()) {
     // Don't load dependent images since we are in dyld where we will know and
     // find out about all images that are loaded
-    target.SetExecutableModule(executable, eLoadDependentsNo);
+    const bool get_dependent_images = false;
+    target.SetExecutableModule(executable, get_dependent_images);
   }
 
   return executable;
@@ -364,8 +368,7 @@ void DynamicLoaderHexagonDYLD::RefreshModules() {
 
     E = m_rendezvous.loaded_end();
     for (I = m_rendezvous.loaded_begin(); I != E; ++I) {
-      FileSpec file(I->path);
-      FileSystem::Instance().Resolve(file);
+      FileSpec file(I->path, true);
       ModuleSP module_sp =
           LoadModuleAtAddress(file, I->link_addr, I->base_addr, true);
       if (module_sp.get()) {
@@ -389,8 +392,7 @@ void DynamicLoaderHexagonDYLD::RefreshModules() {
 
     E = m_rendezvous.unloaded_end();
     for (I = m_rendezvous.unloaded_begin(); I != E; ++I) {
-      FileSpec file(I->path);
-      FileSystem::Instance().Resolve(file);
+      FileSpec file(I->path, true);
       ModuleSpec module_spec(file);
       ModuleSP module_sp = loaded_modules.FindFirstModule(module_spec);
 
@@ -453,7 +455,7 @@ DynamicLoaderHexagonDYLD::GetStepThroughTrampolinePlan(Thread &thread,
     AddressVector::iterator start = addrs.begin();
     AddressVector::iterator end = addrs.end();
 
-    llvm::sort(start, end);
+    std::sort(start, end);
     addrs.erase(std::unique(start, end), end);
     thread_plan_sp.reset(new ThreadPlanRunToAddress(thread, addrs, stop));
   }
@@ -484,7 +486,7 @@ void DynamicLoaderHexagonDYLD::LoadAllCurrentModules() {
 
   for (I = m_rendezvous.begin(), E = m_rendezvous.end(); I != E; ++I) {
     const char *module_path = I->path.c_str();
-    FileSpec file(module_path);
+    FileSpec file(module_path, false);
     ModuleSP module_sp =
         LoadModuleAtAddress(file, I->link_addr, I->base_addr, true);
     if (module_sp.get()) {

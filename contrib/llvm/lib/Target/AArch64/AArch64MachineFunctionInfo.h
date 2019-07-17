@@ -18,7 +18,6 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/MC/MCLinkerOptimizationHint.h"
 #include <cassert>
@@ -98,9 +97,6 @@ class AArch64FunctionInfo final : public MachineFunctionInfo {
   /// attribute, in which case it is set to false at construction.
   Optional<bool> HasRedZone;
 
-  /// ForwardedMustTailRegParms - A list of virtual and physical registers
-  /// that must be forwarded to every musttail call.
-  SmallVector<ForwardedRegister, 1> ForwardedMustTailRegParms;
 public:
   AArch64FunctionInfo() = default;
 
@@ -166,19 +162,6 @@ public:
   unsigned getVarArgsFPRSize() const { return VarArgsFPRSize; }
   void setVarArgsFPRSize(unsigned Size) { VarArgsFPRSize = Size; }
 
-  unsigned getJumpTableEntrySize(int Idx) const {
-    auto It = JumpTableEntryInfo.find(Idx);
-    if (It != JumpTableEntryInfo.end())
-      return It->second.first;
-    return 4;
-  }
-  MCSymbol *getJumpTableEntryPCRelSymbol(int Idx) const {
-    return JumpTableEntryInfo.find(Idx)->second.second;
-  }
-  void setJumpTableEntryInfo(int Idx, unsigned Size, MCSymbol *PCRelSym) {
-    JumpTableEntryInfo[Idx] = std::make_pair(Size, PCRelSym);
-  }
-
   using SetOfInstructions = SmallPtrSet<const MachineInstr *, 16>;
 
   const SetOfInstructions &getLOHRelated() const { return LOHRelated; }
@@ -213,16 +196,10 @@ public:
     LOHRelated.insert(Args.begin(), Args.end());
   }
 
-  SmallVectorImpl<ForwardedRegister> &getForwardedMustTailRegParms() {
-    return ForwardedMustTailRegParms;
-  }
-
 private:
   // Hold the lists of LOHs.
   MILOHContainer LOHContainerSet;
   SetOfInstructions LOHRelated;
-
-  DenseMap<int, std::pair<unsigned, MCSymbol *>> JumpTableEntryInfo;
 };
 
 } // end namespace llvm

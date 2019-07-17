@@ -158,23 +158,37 @@ template <class ELFT> void printProgramHeaders(const ELFFile<ELFT> *o) {
 }
 
 void llvm::printELFFileHeader(const object::ObjectFile *Obj) {
-  if (const auto *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
+  // Little-endian 32-bit
+  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     printProgramHeaders(ELFObj->getELFFile());
-  else if (const auto *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
+
+  // Big-endian 32-bit
+  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
     printProgramHeaders(ELFObj->getELFFile());
-  else if (const auto *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
+
+  // Little-endian 64-bit
+  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
     printProgramHeaders(ELFObj->getELFFile());
-  else if (const auto *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
+
+  // Big-endian 64-bit
+  if (const ELF64BEObjectFile *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
     printProgramHeaders(ELFObj->getELFFile());
 }
 
 void llvm::printELFDynamicSection(const object::ObjectFile *Obj) {
-  if (const auto *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
+  // Little-endian 32-bit
+  if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
     printDynamicSection(ELFObj->getELFFile(), Obj->getFileName());
-  else if (const auto *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
+
+  // Big-endian 32-bit
+  if (const ELF32BEObjectFile *ELFObj = dyn_cast<ELF32BEObjectFile>(Obj))
     printDynamicSection(ELFObj->getELFFile(), Obj->getFileName());
-  else if (const auto *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
+
+  // Little-endian 64-bit
+  if (const ELF64LEObjectFile *ELFObj = dyn_cast<ELF64LEObjectFile>(Obj))
     printDynamicSection(ELFObj->getELFFile(), Obj->getFileName());
-  else if (const auto *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
+
+  // Big-endian 64-bit
+  if (const ELF64BEObjectFile *ELFObj = dyn_cast<ELF64BEObjectFile>(Obj))
     printDynamicSection(ELFObj->getELFFile(), Obj->getFileName());
 }

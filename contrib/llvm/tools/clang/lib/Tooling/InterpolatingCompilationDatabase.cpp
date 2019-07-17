@@ -48,7 +48,6 @@
 #include "clang/Frontend/LangStandard.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Option/ArgList.h"
@@ -124,79 +123,55 @@ static types::ID foldType(types::ID Lang) {
 struct TransferableCommand {
   // Flags that should not apply to all files are stripped from CommandLine.
   CompileCommand Cmd;
-  // Language detected from -x or the filename. Never TY_INVALID.
-  Optional<types::ID> Type;
+  // Language detected from -x or the filename.
+  types::ID Type = types::TY_INVALID;
   // Standard specified by -std.
   LangStandard::Kind Std = LangStandard::lang_unspecified;
-  // Whether the command line is for the cl-compatible driver.
-  bool ClangCLMode;
 
   TransferableCommand(CompileCommand C)
-      : Cmd(std::move(C)), Type(guessType(Cmd.Filename)),
-        ClangCLMode(checkIsCLMode(Cmd.CommandLine)) {
-    std::vector<std::string> OldArgs = std::move(Cmd.CommandLine);
-    Cmd.CommandLine.clear();
-
-    // Wrap the old arguments in an InputArgList.
-    llvm::opt::InputArgList ArgList;
-    {
-      SmallVector<const char *, 16> TmpArgv;
-      for (const std::string &S : OldArgs)
-        TmpArgv.push_back(S.c_str());
-      ArgList = {TmpArgv.begin(), TmpArgv.end()};
-    }
-
+      : Cmd(std::move(C)), Type(guessType(Cmd.Filename)) {
+    std::vector<std::string> NewArgs = {Cmd.CommandLine.front()};
     // Parse the old args in order to strip out and record unwanted flags.
-    // We parse each argument individually so that we can retain the exact
-    // spelling of each argument; re-rendering is lossy for aliased flags.
-    // E.g. in CL mode, /W4 maps to -Wall.
     auto OptTable = clang::driver::createDriverOptTable();
-    Cmd.CommandLine.emplace_back(OldArgs.front());
-    for (unsigned Pos = 1; Pos < OldArgs.size();) {
-      using namespace driver::options;
-
-      const unsigned OldPos = Pos;
-      std::unique_ptr<llvm::opt::Arg> Arg(OptTable->ParseOneArg(
-          ArgList, Pos,
-          /* Include */ClangCLMode ? CoreOption | CLOption : 0,
-          /* Exclude */ClangCLMode ? 0 : CLOption));
-
-      if (!Arg)
-        continue;
-
-      const llvm::opt::Option &Opt = Arg->getOption();
-
+    std::vector<const char *> Argv;
+    for (unsigned I = 1; I < Cmd.CommandLine.size(); ++I)
+      Argv.push_back(Cmd.CommandLine[I].c_str());
+    unsigned MissingI, MissingC;
+    auto ArgList = OptTable->ParseArgs(Argv, MissingI, MissingC);
+    for (const auto *Arg : ArgList) {
+      const auto &option = Arg->getOption();
       // Strip input and output files.
-      if (Opt.matches(OPT_INPUT) || Opt.matches(OPT_o) ||
-          (ClangCLMode && (Opt.matches(OPT__SLASH_Fa) ||
-                           Opt.matches(OPT__SLASH_Fe) ||
-                           Opt.matches(OPT__SLASH_Fi) ||
-                           Opt.matches(OPT__SLASH_Fo))))
+      if (option.matches(clang::driver::options::OPT_INPUT) ||
+          option.matches(clang::driver::options::OPT_o)) {
         continue;
-
+      }
       // Strip -x, but record the overridden language.
-      if (const auto GivenType = tryParseTypeArg(*Arg)) {
-        Type = *GivenType;
+      if (option.matches(clang::driver::options::OPT_x)) {
+        for (const char *Value : Arg->getValues())
+          Type = types::lookupTypeForTypeSpecifier(Value);
         continue;
       }
-
-      // Strip -std, but record the value.
-      if (const auto GivenStd = tryParseStdArg(*Arg)) {
-        if (*GivenStd != LangStandard::lang_unspecified)
-          Std = *GivenStd;
+      // Strip --std, but record the value.
+      if (option.matches(clang::driver::options::OPT_std_EQ)) {
+        for (const char *Value : Arg->getValues()) {
+          Std = llvm::StringSwitch<LangStandard::Kind>(Value)
+#define LANGSTANDARD(id, name, lang, desc, features)                           \
+  .Case(name, LangStandard::lang_##id)
+#define LANGSTANDARD_ALIAS(id, alias) .Case(alias, LangStandard::lang_##id)
+#include "clang/Frontend/LangStandards.def"
+                    .Default(Std);
+        }
         continue;
       }
-
-      Cmd.CommandLine.insert(Cmd.CommandLine.end(),
-                             OldArgs.data() + OldPos, OldArgs.data() + Pos);
+      llvm::opt::ArgStringList ArgStrs;
+      Arg->render(ArgList, ArgStrs);
+      NewArgs.insert(NewArgs.end(), ArgStrs.begin(), ArgStrs.end());
     }
+    Cmd.CommandLine = std::move(NewArgs);
 
     if (Std != LangStandard::lang_unspecified) // -std take precedence over -x
       Type = toType(LangStandard::getLangStandardForKind(Std).getLanguage());
-    Type = foldType(*Type);
-    // The contract is to store None instead of TY_INVALID.
-    if (Type == types::TY_INVALID)
-      Type = llvm::None;
+    Type = foldType(Type);
   }
 
   // Produce a CompileCommand for \p filename, based on this one.
@@ -206,43 +181,25 @@ struct TransferableCommand {
     bool TypeCertain;
     auto TargetType = guessType(Filename, &TypeCertain);
     // If the filename doesn't determine the language (.h), transfer with -x.
-    if (TargetType != types::TY_INVALID && !TypeCertain && Type) {
+    if (!TypeCertain) {
       TargetType = types::onlyPrecompileType(TargetType) // header?
-                       ? types::lookupHeaderTypeForSourceType(*Type)
-                       : *Type;
-      if (ClangCLMode) {
-        const StringRef Flag = toCLFlag(TargetType);
-        if (!Flag.empty())
-          Result.CommandLine.push_back(Flag);
-      } else {
-        Result.CommandLine.push_back("-x");
-        Result.CommandLine.push_back(types::getTypeName(TargetType));
-      }
+                       ? types::lookupHeaderTypeForSourceType(Type)
+                       : Type;
+      Result.CommandLine.push_back("-x");
+      Result.CommandLine.push_back(types::getTypeName(TargetType));
     }
     // --std flag may only be transferred if the language is the same.
     // We may consider "translating" these, e.g. c++11 -> c11.
     if (Std != LangStandard::lang_unspecified && foldType(TargetType) == Type) {
-      Result.CommandLine.emplace_back((
-          llvm::Twine(ClangCLMode ? "/std:" : "-std=") +
-          LangStandard::getLangStandardForKind(Std).getName()).str());
+      Result.CommandLine.push_back(
+          "-std=" +
+          std::string(LangStandard::getLangStandardForKind(Std).getName()));
     }
     Result.CommandLine.push_back(Filename);
     return Result;
   }
 
 private:
-  // Determine whether the given command line is intended for the CL driver.
-  static bool checkIsCLMode(ArrayRef<std::string> CmdLine) {
-    // First look for --driver-mode.
-    for (StringRef S : llvm::reverse(CmdLine)) {
-      if (S.consume_front("--driver-mode="))
-        return S == "cl";
-    }
-
-    // Otherwise just check the clang executable file name.
-    return llvm::sys::path::stem(CmdLine.front()).endswith_lower("cl");
-  }
-
   // Map the language from the --std flag to that of the -x flag.
   static types::ID toType(InputKind::Language Lang) {
     switch (Lang) {
@@ -258,111 +215,64 @@ private:
       return types::TY_INVALID;
     }
   }
-
-  // Convert a file type to the matching CL-style type flag.
-  static StringRef toCLFlag(types::ID Type) {
-    switch (Type) {
-    case types::TY_C:
-    case types::TY_CHeader:
-      return "/TC";
-    case types::TY_CXX:
-    case types::TY_CXXHeader:
-      return "/TP";
-    default:
-      return StringRef();
-    }
-  }
-
-  // Try to interpret the argument as a type specifier, e.g. '-x'.
-  Optional<types::ID> tryParseTypeArg(const llvm::opt::Arg &Arg) {
-    const llvm::opt::Option &Opt = Arg.getOption();
-    using namespace driver::options;
-    if (ClangCLMode) {
-      if (Opt.matches(OPT__SLASH_TC) || Opt.matches(OPT__SLASH_Tc))
-        return types::TY_C;
-      if (Opt.matches(OPT__SLASH_TP) || Opt.matches(OPT__SLASH_Tp))
-        return types::TY_CXX;
-    } else {
-      if (Opt.matches(driver::options::OPT_x))
-        return types::lookupTypeForTypeSpecifier(Arg.getValue());
-    }
-    return None;
-  }
-
-  // Try to interpret the argument as '-std='.
-  Optional<LangStandard::Kind> tryParseStdArg(const llvm::opt::Arg &Arg) {
-    using namespace driver::options;
-    if (Arg.getOption().matches(ClangCLMode ? OPT__SLASH_std : OPT_std_EQ)) {
-      return llvm::StringSwitch<LangStandard::Kind>(Arg.getValue())
-#define LANGSTANDARD(id, name, lang, ...) .Case(name, LangStandard::lang_##id)
-#define LANGSTANDARD_ALIAS(id, alias) .Case(alias, LangStandard::lang_##id)
-#include "clang/Frontend/LangStandards.def"
-#undef LANGSTANDARD_ALIAS
-#undef LANGSTANDARD
-                 .Default(LangStandard::lang_unspecified);
-    }
-    return None;
-  }
 };
 
-// Given a filename, FileIndex picks the best matching file from the underlying
-// DB. This is the proxy file whose CompileCommand will be reused. The
-// heuristics incorporate file name, extension, and directory structure.
-// Strategy:
+// CommandIndex does the real work: given a filename, it produces the best
+// matching TransferableCommand by matching filenames. Basic strategy:
 // - Build indexes of each of the substrings we want to look up by.
 //   These indexes are just sorted lists of the substrings.
+// - Forward requests to the inner CDB. If it fails, we must pick a proxy.
 // - Each criterion corresponds to a range lookup into the index, so we only
 //   need O(log N) string comparisons to determine scores.
-//
-// Apart from path proximity signals, also takes file extensions into account
-// when scoring the candidates.
-class FileIndex {
+// - We then break ties among the candidates with the highest score.
+class CommandIndex {
 public:
-  FileIndex(std::vector<std::string> Files)
-      : OriginalPaths(std::move(Files)), Strings(Arena) {
+  CommandIndex(std::vector<TransferableCommand> AllCommands)
+      : Commands(std::move(AllCommands)), Strings(Arena) {
     // Sort commands by filename for determinism (index is a tiebreaker later).
-    llvm::sort(OriginalPaths);
-    Paths.reserve(OriginalPaths.size());
-    Types.reserve(OriginalPaths.size());
-    Stems.reserve(OriginalPaths.size());
-    for (size_t I = 0; I < OriginalPaths.size(); ++I) {
-      StringRef Path = Strings.save(StringRef(OriginalPaths[I]).lower());
-
-      Paths.emplace_back(Path, I);
-      Types.push_back(foldType(guessType(Path)));
+    llvm::sort(
+        Commands.begin(), Commands.end(),
+        [](const TransferableCommand &Left, const TransferableCommand &Right) {
+          return Left.Cmd.Filename < Right.Cmd.Filename;
+        });
+    for (size_t I = 0; I < Commands.size(); ++I) {
+      StringRef Path =
+          Strings.save(StringRef(Commands[I].Cmd.Filename).lower());
+      Paths.push_back({Path, I});
       Stems.emplace_back(sys::path::stem(Path), I);
       auto Dir = ++sys::path::rbegin(Path), DirEnd = sys::path::rend(Path);
       for (int J = 0; J < DirectorySegmentsIndexed && Dir != DirEnd; ++J, ++Dir)
         if (Dir->size() > ShortDirectorySegment) // not trivial ones
           Components.emplace_back(*Dir, I);
     }
-    llvm::sort(Paths);
-    llvm::sort(Stems);
-    llvm::sort(Components);
+    llvm::sort(Paths.begin(), Paths.end());
+    llvm::sort(Stems.begin(), Stems.end());
+    llvm::sort(Components.begin(), Components.end());
   }
 
-  bool empty() const { return Paths.empty(); }
+  bool empty() const { return Commands.empty(); }
 
-  // Returns the path for the file that best fits OriginalFilename.
-  // Candidates with extensions matching PreferLanguage will be chosen over
-  // others (unless it's TY_INVALID, or all candidates are bad).
-  StringRef chooseProxy(StringRef OriginalFilename,
-                        types::ID PreferLanguage) const {
+  // Returns the command that best fits OriginalFilename.
+  // Candidates with PreferLanguage will be chosen over others (unless it's
+  // TY_INVALID, or all candidates are bad).
+  const TransferableCommand &chooseProxy(StringRef OriginalFilename,
+                                         types::ID PreferLanguage) const {
     assert(!empty() && "need at least one candidate!");
     std::string Filename = OriginalFilename.lower();
     auto Candidates = scoreCandidates(Filename);
     std::pair<size_t, int> Best =
         pickWinner(Candidates, Filename, PreferLanguage);
 
-    DEBUG_WITH_TYPE(
-        "interpolate",
-        llvm::dbgs() << "interpolate: chose " << OriginalPaths[Best.first]
-                     << " as proxy for " << OriginalFilename << " preferring "
-                     << (PreferLanguage == types::TY_INVALID
-                             ? "none"
-                             : types::getTypeName(PreferLanguage))
-                     << " score=" << Best.second << "\n");
-    return OriginalPaths[Best.first];
+    DEBUG_WITH_TYPE("interpolate",
+                    llvm::dbgs()
+                        << "interpolate: chose "
+                        << Commands[Best.first].Cmd.Filename << " as proxy for "
+                        << OriginalFilename << " preferring "
+                        << (PreferLanguage == types::TY_INVALID
+                                ? "none"
+                                : types::getTypeName(PreferLanguage))
+                        << " score=" << Best.second << "\n");
+    return Commands[Best.first];
   }
 
 private:
@@ -428,7 +338,7 @@ private:
       ScoredCandidate S;
       S.Index = Candidate.first;
       S.Preferred = PreferredLanguage == types::TY_INVALID ||
-                    PreferredLanguage == Types[S.Index];
+                    PreferredLanguage == Commands[S.Index].Type;
       S.Points = Candidate.second;
       if (!S.Preferred && Best.Preferred)
         continue;
@@ -461,7 +371,7 @@ private:
   // If Prefix is true, it's instead the range starting with Key.
   template <bool Prefix>
   ArrayRef<SubstringAndIndex>
-  indexLookup(StringRef Key, ArrayRef<SubstringAndIndex> Idx) const {
+  indexLookup(StringRef Key, const std::vector<SubstringAndIndex> &Idx) const {
     // Use pointers as iteratiors to ease conversion of result to ArrayRef.
     auto Range = std::equal_range(Idx.data(), Idx.data() + Idx.size(), Key,
                                   Less<Prefix>());
@@ -469,8 +379,8 @@ private:
   }
 
   // Performs a point lookup into a nonempty index, returning a longest match.
-  SubstringAndIndex longestMatch(StringRef Key,
-                                 ArrayRef<SubstringAndIndex> Idx) const {
+  SubstringAndIndex
+  longestMatch(StringRef Key, const std::vector<SubstringAndIndex> &Idx) const {
     assert(!Idx.empty());
     // Longest substring match will be adjacent to a direct lookup.
     auto It =
@@ -485,27 +395,22 @@ private:
     return Prefix > PrevPrefix ? *It : *--It;
   }
 
-  // Original paths, everything else is in lowercase.
-  std::vector<std::string> OriginalPaths;
+  std::vector<TransferableCommand> Commands; // Indexes point into this.
   BumpPtrAllocator Arena;
   StringSaver Strings;
   // Indexes of candidates by certain substrings.
   // String is lowercase and sorted, index points into OriginalPaths.
   std::vector<SubstringAndIndex> Paths;      // Full path.
-  // Lang types obtained by guessing on the corresponding path. I-th element is
-  // a type for the I-th path.
-  std::vector<types::ID> Types;
   std::vector<SubstringAndIndex> Stems;      // Basename, without extension.
   std::vector<SubstringAndIndex> Components; // Last path components.
 };
 
 // The actual CompilationDatabase wrapper delegates to its inner database.
-// If no match, looks up a proxy file in FileIndex and transfers its
-// command to the requested file.
+// If no match, looks up a command in CommandIndex and transfers it to the file.
 class InterpolatingCompilationDatabase : public CompilationDatabase {
 public:
   InterpolatingCompilationDatabase(std::unique_ptr<CompilationDatabase> Inner)
-      : Inner(std::move(Inner)), Index(this->Inner->getAllFiles()) {}
+      : Inner(std::move(Inner)), Index(allCommands()) {}
 
   std::vector<CompileCommand>
   getCompileCommands(StringRef Filename) const override {
@@ -516,11 +421,7 @@ public:
     auto Lang = guessType(Filename, &TypeCertain);
     if (!TypeCertain)
       Lang = types::TY_INVALID;
-    auto ProxyCommands =
-        Inner->getCompileCommands(Index.chooseProxy(Filename, foldType(Lang)));
-    if (ProxyCommands.empty())
-      return {};
-    return {TransferableCommand(ProxyCommands[0]).transferTo(Filename)};
+    return {Index.chooseProxy(Filename, foldType(Lang)).transferTo(Filename)};
   }
 
   std::vector<std::string> getAllFiles() const override {
@@ -532,8 +433,18 @@ public:
   }
 
 private:
+  std::vector<TransferableCommand> allCommands() {
+    std::vector<TransferableCommand> Result;
+    for (auto Command : Inner->getAllCompileCommands()) {
+      Result.emplace_back(std::move(Command));
+      if (Result.back().Type == types::TY_INVALID)
+        Result.pop_back();
+    }
+    return Result;
+  }
+
   std::unique_ptr<CompilationDatabase> Inner;
-  FileIndex Index;
+  CommandIndex Index;
 };
 
 } // namespace

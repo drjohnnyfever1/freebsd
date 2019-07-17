@@ -299,7 +299,7 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
     auto *CS = cast<ObjCForCollectionStmt>(S);
     unsigned Diag = diag::note_protected_by_objc_fast_enumeration;
     unsigned NewParentScope = Scopes.size();
-    Scopes.push_back(GotoScope(ParentScope, Diag, 0, S->getBeginLoc()));
+    Scopes.push_back(GotoScope(ParentScope, Diag, 0, S->getLocStart()));
     BuildScopeInformation(CS->getBody(), NewParentScope);
     return;
   }
@@ -353,16 +353,16 @@ void JumpScopeChecker::BuildScopeInformation(Stmt *S,
 
     // Cannot jump into the middle of the condition.
     unsigned NewParentScope = Scopes.size();
-    Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getBeginLoc()));
+    Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getLocStart()));
     BuildScopeInformation(IS->getCond(), NewParentScope);
 
     // Jumps into either arm of an 'if constexpr' are not allowed.
     NewParentScope = Scopes.size();
-    Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getBeginLoc()));
+    Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getLocStart()));
     BuildScopeInformation(IS->getThen(), NewParentScope);
     if (Stmt *Else = IS->getElse()) {
       NewParentScope = Scopes.size();
-      Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getBeginLoc()));
+      Scopes.push_back(GotoScope(ParentScope, Diag, 0, IS->getLocStart()));
       BuildScopeInformation(Else, NewParentScope);
     }
     return;
@@ -619,11 +619,11 @@ void JumpScopeChecker::VerifyJumps() {
         continue;
       SourceLocation Loc;
       if (CaseStmt *CS = dyn_cast<CaseStmt>(SC))
-        Loc = CS->getBeginLoc();
+        Loc = CS->getLocStart();
       else if (DefaultStmt *DS = dyn_cast<DefaultStmt>(SC))
-        Loc = DS->getBeginLoc();
+        Loc = DS->getLocStart();
       else
-        Loc = SC->getBeginLoc();
+        Loc = SC->getLocStart();
       CheckJump(SS, SC, Loc, diag::err_switch_into_protected_scope, 0,
                 diag::warn_cxx98_compat_switch_into_protected_scope);
     }
@@ -863,7 +863,7 @@ void JumpScopeChecker::CheckJump(Stmt *From, Stmt *To, SourceLocation DiagLoc,
     // less nested scope.  Check if it crosses a __finally along the way.
     for (unsigned I = FromScope; I > ToScope; I = Scopes[I].ParentScope) {
       if (Scopes[I].InDiag == diag::note_protected_by_seh_finally) {
-        S.Diag(From->getBeginLoc(), diag::warn_jump_out_of_seh_finally);
+        S.Diag(From->getLocStart(), diag::warn_jump_out_of_seh_finally);
         break;
       }
     }

@@ -137,7 +137,7 @@ CGNVCUDARuntime::addUnderscoredPrefixToName(StringRef FuncName) const {
 CGNVCUDARuntime::CGNVCUDARuntime(CodeGenModule &CGM)
     : CGCUDARuntime(CGM), Context(CGM.getLLVMContext()),
       TheModule(CGM.getModule()),
-      RelocatableDeviceCode(CGM.getLangOpts().GPURelocatableDeviceCode) {
+      RelocatableDeviceCode(CGM.getLangOpts().CUDARelocatableDeviceCode) {
   CodeGen::CodeGenTypes &Types = CGM.getTypes();
   ASTContext &Ctx = CGM.getContext();
 
@@ -353,8 +353,8 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
   // global variable and save a reference in GpuBinaryHandle to be cleaned up
   // in destructor on exit. Then associate all known kernels with the GPU binary
   // handle so CUDA runtime can figure out what to call on the GPU side.
-  std::unique_ptr<llvm::MemoryBuffer> CudaGpuBinary = nullptr;
-  if (!CudaGpuBinaryFileName.empty()) {
+  std::unique_ptr<llvm::MemoryBuffer> CudaGpuBinary;
+  if (!IsHIP) {
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> CudaGpuBinaryOrErr =
         llvm::MemoryBuffer::getFileOrSTDIN(CudaGpuBinaryFileName);
     if (std::error_code EC = CudaGpuBinaryOrErr.getError()) {
@@ -388,23 +388,15 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
     ModuleIDSectionName = "__hip_module_id";
     ModuleIDPrefix = "__hip_";
 
-    if (CudaGpuBinary) {
-      // If fatbin is available from early finalization, create a string
-      // literal containing the fat binary loaded from the given file.
-      FatBinStr = makeConstantString(CudaGpuBinary->getBuffer(), "",
-                                     FatbinConstantName, 8);
-    } else {
-      // If fatbin is not available, create an external symbol
-      // __hip_fatbin in section .hip_fatbin. The external symbol is supposed
-      // to contain the fat binary but will be populated somewhere else,
-      // e.g. by lld through link script.
-      FatBinStr = new llvm::GlobalVariable(
+    // For HIP, create an external symbol __hip_fatbin in section .hip_fatbin.
+    // The external symbol is supposed to contain the fat binary but will be
+    // populated somewhere else, e.g. by lld through link script.
+    FatBinStr = new llvm::GlobalVariable(
         CGM.getModule(), CGM.Int8Ty,
         /*isConstant=*/true, llvm::GlobalValue::ExternalLinkage, nullptr,
         "__hip_fatbin", nullptr,
         llvm::GlobalVariable::NotThreadLocal);
-      cast<llvm::GlobalVariable>(FatBinStr)->setSection(FatbinConstantName);
-    }
+    cast<llvm::GlobalVariable>(FatBinStr)->setSection(FatbinConstantName);
 
     FatMagic = HIPFatMagic;
   } else {
@@ -455,8 +447,6 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
   // thread safety of the loaded program. Therefore we can assume sequential
   // execution of constructor functions here.
   if (IsHIP) {
-    auto Linkage = CudaGpuBinary ? llvm::GlobalValue::InternalLinkage :
-        llvm::GlobalValue::LinkOnceAnyLinkage;
     llvm::BasicBlock *IfBlock =
         llvm::BasicBlock::Create(Context, "if", ModuleCtorFunc);
     llvm::BasicBlock *ExitBlock =
@@ -465,13 +455,10 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
     // of HIP ABI.
     GpuBinaryHandle = new llvm::GlobalVariable(
         TheModule, VoidPtrPtrTy, /*isConstant=*/false,
-        Linkage,
+        llvm::GlobalValue::LinkOnceAnyLinkage,
         /*Initializer=*/llvm::ConstantPointerNull::get(VoidPtrPtrTy),
         "__hip_gpubin_handle");
     GpuBinaryHandle->setAlignment(CGM.getPointerAlign().getQuantity());
-    // Prevent the weak symbol in different shared libraries being merged.
-    if (Linkage != llvm::GlobalValue::InternalLinkage)
-      GpuBinaryHandle->setVisibility(llvm::GlobalValue::HiddenVisibility);
     Address GpuBinaryAddr(
         GpuBinaryHandle,
         CharUnits::fromQuantity(GpuBinaryHandle->getAlignment()));
@@ -520,7 +507,7 @@ llvm::Function *CGNVCUDARuntime::makeModuleCtorFunction() {
     // Generate a unique module ID.
     SmallString<64> ModuleID;
     llvm::raw_svector_ostream OS(ModuleID);
-    OS << ModuleIDPrefix << llvm::format("%" PRIx64, FatbinWrapper->getGUID());
+    OS << ModuleIDPrefix << llvm::format("%x", FatbinWrapper->getGUID());
     llvm::Constant *ModuleIDConstant =
         makeConstantString(ModuleID.str(), "", ModuleIDSectionName, 32);
 

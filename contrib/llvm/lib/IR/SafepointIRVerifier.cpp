@@ -92,7 +92,6 @@ public:
         Listed = true;
       }
     }
-    (void)Listed;
     assert(Listed && "basic block is not found among incoming blocks");
     return false;
   }
@@ -134,7 +133,7 @@ public:
     // Top-down walk of the dominator tree
     ReversePostOrderTraversal<const Function *> RPOT(&F);
     for (const BasicBlock *BB : RPOT) {
-      const Instruction *TI = BB->getTerminator();
+      const TerminatorInst *TI = BB->getTerminator();
       assert(TI && "blocks must be well formed");
 
       // For conditional branches, we can perform simple conditional propagation on
@@ -257,7 +256,8 @@ static bool containsGCPtrType(Type *Ty) {
   if (ArrayType *AT = dyn_cast<ArrayType>(Ty))
     return containsGCPtrType(AT->getElementType());
   if (StructType *ST = dyn_cast<StructType>(Ty))
-    return llvm::any_of(ST->elements(), containsGCPtrType);
+    return std::any_of(ST->subtypes().begin(), ST->subtypes().end(),
+                       containsGCPtrType);
   return false;
 }
 

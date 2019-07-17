@@ -103,6 +103,16 @@ void Printer::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<GCModuleInfo>();
 }
 
+static const char *DescKind(GC::PointKind Kind) {
+  switch (Kind) {
+  case GC::PreCall:
+    return "pre-call";
+  case GC::PostCall:
+    return "post-call";
+  }
+  llvm_unreachable("Invalid point kind");
+}
+
 bool Printer::runOnFunction(Function &F) {
   if (F.hasGC())
     return false;
@@ -119,7 +129,7 @@ bool Printer::runOnFunction(Function &F) {
   for (GCFunctionInfo::iterator PI = FD->begin(), PE = FD->end(); PI != PE;
        ++PI) {
 
-    OS << "\t" << PI->Label->getName() << ": " << "post-call"
+    OS << "\t" << PI->Label->getName() << ": " << DescKind(PI->Kind)
        << ", live = {";
 
     for (GCFunctionInfo::live_iterator RI = FD->live_begin(PI),

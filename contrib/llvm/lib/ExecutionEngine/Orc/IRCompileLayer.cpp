@@ -12,28 +12,28 @@
 namespace llvm {
 namespace orc {
 
-IRCompileLayer::IRCompileLayer(ExecutionSession &ES, ObjectLayer &BaseLayer,
+IRCompileLayer2::IRCompileLayer2(ExecutionSession &ES, ObjectLayer &BaseLayer,
                                  CompileFunction Compile)
     : IRLayer(ES), BaseLayer(BaseLayer), Compile(std::move(Compile)) {}
 
-void IRCompileLayer::setNotifyCompiled(NotifyCompiledFunction NotifyCompiled) {
+void IRCompileLayer2::setNotifyCompiled(NotifyCompiledFunction NotifyCompiled) {
   std::lock_guard<std::mutex> Lock(IRLayerMutex);
   this->NotifyCompiled = std::move(NotifyCompiled);
 }
 
-void IRCompileLayer::emit(MaterializationResponsibility R,
-                          ThreadSafeModule TSM) {
-  assert(TSM.getModule() && "Module must not be null");
+void IRCompileLayer2::emit(MaterializationResponsibility R, VModuleKey K,
+                           std::unique_ptr<Module> M) {
+  assert(M && "Module must not be null");
 
-  if (auto Obj = Compile(*TSM.getModule())) {
+  if (auto Obj = Compile(*M)) {
     {
       std::lock_guard<std::mutex> Lock(IRLayerMutex);
       if (NotifyCompiled)
-        NotifyCompiled(R.getVModuleKey(), std::move(TSM));
+        NotifyCompiled(K, std::move(M));
       else
-        TSM = ThreadSafeModule();
+        M = nullptr;
     }
-    BaseLayer.emit(std::move(R), std::move(*Obj));
+    BaseLayer.emit(std::move(R), std::move(K), std::move(*Obj));
   } else {
     R.failMaterialization();
     getExecutionSession().reportError(Obj.takeError());

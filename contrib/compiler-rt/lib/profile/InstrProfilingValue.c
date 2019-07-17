@@ -105,7 +105,8 @@ static int allocateValueProfileCounters(__llvm_profile_data *Data) {
   return 1;
 }
 
-static ValueProfNode *allocateOneNode(void) {
+static ValueProfNode *allocateOneNode(__llvm_profile_data *Data, uint32_t Index,
+                                      uint64_t Value) {
   ValueProfNode *Node;
 
   if (!hasStaticCounters)
@@ -204,7 +205,7 @@ instrumentTargetValueImpl(uint64_t TargetValue, void *Data,
     return;
   }
 
-  CurVNode = allocateOneNode();
+  CurVNode = allocateOneNode(PData, CounterIndex, TargetValue);
   if (!CurVNode)
     return;
   CurVNode->Value = TargetValue;

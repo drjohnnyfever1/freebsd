@@ -309,7 +309,6 @@ public:
   lldb::SBFileSpec GetSymbolFileSpec() const;
 
   lldb::SBAddress GetObjectFileHeaderAddress() const;
-  lldb::SBAddress GetObjectFileEntryPointAddress() const;
 
 private:
   friend class SBAddress;

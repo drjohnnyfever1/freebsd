@@ -29,7 +29,6 @@
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCFragment.h"
-#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionELF.h"
@@ -669,20 +668,6 @@ void ELFWriter::computeSymbolTable(
     } else {
       const MCSectionELF &Section =
           static_cast<const MCSectionELF &>(Symbol.getSection());
-
-      // We may end up with a situation when section symbol is technically
-      // defined, but should not be. That happens because we explicitly
-      // pre-create few .debug_* sections to have accessors.
-      // And if these sections were not really defined in the code, but were
-      // referenced, we simply error out.
-      if (!Section.isRegistered()) {
-        assert(static_cast<const MCSymbolELF &>(Symbol).getType() ==
-               ELF::STT_SECTION);
-        Ctx.reportError(SMLoc(),
-                        "Undefined section reference: " + Symbol.getName());
-        continue;
-      }
-
       if (Mode == NonDwoOnly && isDwoSection(Section))
         continue;
       MSD.SectionIndex = SectionIndexMap.lookup(&Section);
@@ -1122,8 +1107,6 @@ uint64_t ELFWriter::writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) {
       SectionIndexMap[RelSection] = addToSectionTable(RelSection);
       Relocations.push_back(RelSection);
     }
-
-    OWriter.TargetObjectWriter->addTargetSectionFlags(Ctx, Section);
   }
 
   MCSectionELF *CGProfileSection = nullptr;
@@ -1296,8 +1279,6 @@ void ELFObjectWriter::executePostLayoutBinding(MCAssembler &Asm,
   for (const MCSymbol *&Sym : AddrsigSyms) {
     if (const MCSymbol *R = Renames.lookup(cast<MCSymbolELF>(Sym)))
       Sym = R;
-    if (Sym->isInSection() && Sym->getName().startswith(".L"))
-      Sym = Sym->getSection().getBeginSymbol();
     Sym->setUsedInReloc();
   }
 }

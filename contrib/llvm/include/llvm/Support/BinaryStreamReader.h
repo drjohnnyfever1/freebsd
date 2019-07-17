@@ -203,12 +203,11 @@ public:
   /// \returns a success error code if the data was successfully read, otherwise
   /// returns an appropriate error code.
   template <typename T, typename U>
-  Error readArray(VarStreamArray<T, U> &Array, uint32_t Size,
-                  uint32_t Skew = 0) {
+  Error readArray(VarStreamArray<T, U> &Array, uint32_t Size) {
     BinaryStreamRef S;
     if (auto EC = readStreamRef(S, Size))
       return EC;
-    Array.setUnderlyingStream(S, Skew);
+    Array.setUnderlyingStream(S);
     return Error::success();
   }
 

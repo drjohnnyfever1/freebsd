@@ -15,10 +15,10 @@
 #include "clang/Basic/PragmaKinds.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/Preprocessor.h"
-#include "clang/Parse/LoopHint.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
+#include "clang/Sema/LoopHint.h"
 #include "clang/Sema/Scope.h"
 #include "llvm/ADT/StringSwitch.h"
 using namespace clang;
@@ -106,19 +106,8 @@ struct PragmaSTDC_FENV_ACCESSHandler : public PragmaHandler {
     tok::OnOffSwitch OOS;
     if (PP.LexOnOffSwitch(OOS))
      return;
-    if (OOS == tok::OOS_ON) {
+    if (OOS == tok::OOS_ON)
       PP.Diag(Tok, diag::warn_stdc_fenv_access_not_supported);
-    }
-
-    MutableArrayRef<Token> Toks(PP.getPreprocessorAllocator().Allocate<Token>(1),
-                                1);
-    Toks[0].startToken();
-    Toks[0].setKind(tok::annot_pragma_fenv_access);
-    Toks[0].setLocation(Tok.getLocation());
-    Toks[0].setAnnotationEndLoc(Tok.getLocation());
-    Toks[0].setAnnotationValue(reinterpret_cast<void*>(
-                               static_cast<uintptr_t>(OOS)));
-    PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true);
   }
 };
 
@@ -261,122 +250,112 @@ struct PragmaAttributeHandler : public PragmaHandler {
 }  // end namespace
 
 void Parser::initializePragmaHandlers() {
-  AlignHandler = llvm::make_unique<PragmaAlignHandler>();
+  AlignHandler.reset(new PragmaAlignHandler());
   PP.AddPragmaHandler(AlignHandler.get());
 
-  GCCVisibilityHandler = llvm::make_unique<PragmaGCCVisibilityHandler>();
+  GCCVisibilityHandler.reset(new PragmaGCCVisibilityHandler());
   PP.AddPragmaHandler("GCC", GCCVisibilityHandler.get());
 
-  OptionsHandler = llvm::make_unique<PragmaOptionsHandler>();
+  OptionsHandler.reset(new PragmaOptionsHandler());
   PP.AddPragmaHandler(OptionsHandler.get());
 
-  PackHandler = llvm::make_unique<PragmaPackHandler>();
+  PackHandler.reset(new PragmaPackHandler());
   PP.AddPragmaHandler(PackHandler.get());
 
-  MSStructHandler = llvm::make_unique<PragmaMSStructHandler>();
+  MSStructHandler.reset(new PragmaMSStructHandler());
   PP.AddPragmaHandler(MSStructHandler.get());
 
-  UnusedHandler = llvm::make_unique<PragmaUnusedHandler>();
+  UnusedHandler.reset(new PragmaUnusedHandler());
   PP.AddPragmaHandler(UnusedHandler.get());
 
-  WeakHandler = llvm::make_unique<PragmaWeakHandler>();
+  WeakHandler.reset(new PragmaWeakHandler());
   PP.AddPragmaHandler(WeakHandler.get());
 
-  RedefineExtnameHandler = llvm::make_unique<PragmaRedefineExtnameHandler>();
+  RedefineExtnameHandler.reset(new PragmaRedefineExtnameHandler());
   PP.AddPragmaHandler(RedefineExtnameHandler.get());
 
-  FPContractHandler = llvm::make_unique<PragmaFPContractHandler>();
+  FPContractHandler.reset(new PragmaFPContractHandler());
   PP.AddPragmaHandler("STDC", FPContractHandler.get());
 
-  STDCFENVHandler = llvm::make_unique<PragmaSTDC_FENV_ACCESSHandler>();
+  STDCFENVHandler.reset(new PragmaSTDC_FENV_ACCESSHandler());
   PP.AddPragmaHandler("STDC", STDCFENVHandler.get());
 
-  STDCCXLIMITHandler = llvm::make_unique<PragmaSTDC_CX_LIMITED_RANGEHandler>();
+  STDCCXLIMITHandler.reset(new PragmaSTDC_CX_LIMITED_RANGEHandler());
   PP.AddPragmaHandler("STDC", STDCCXLIMITHandler.get());
 
-  STDCUnknownHandler = llvm::make_unique<PragmaSTDC_UnknownHandler>();
+  STDCUnknownHandler.reset(new PragmaSTDC_UnknownHandler());
   PP.AddPragmaHandler("STDC", STDCUnknownHandler.get());
 
-  PCSectionHandler = llvm::make_unique<PragmaClangSectionHandler>(Actions);
+  PCSectionHandler.reset(new PragmaClangSectionHandler(Actions));
   PP.AddPragmaHandler("clang", PCSectionHandler.get());
 
   if (getLangOpts().OpenCL) {
-    OpenCLExtensionHandler = llvm::make_unique<PragmaOpenCLExtensionHandler>();
+    OpenCLExtensionHandler.reset(new PragmaOpenCLExtensionHandler());
     PP.AddPragmaHandler("OPENCL", OpenCLExtensionHandler.get());
 
     PP.AddPragmaHandler("OPENCL", FPContractHandler.get());
   }
   if (getLangOpts().OpenMP)
-    OpenMPHandler = llvm::make_unique<PragmaOpenMPHandler>();
+    OpenMPHandler.reset(new PragmaOpenMPHandler());
   else
-    OpenMPHandler = llvm::make_unique<PragmaNoOpenMPHandler>();
+    OpenMPHandler.reset(new PragmaNoOpenMPHandler());
   PP.AddPragmaHandler(OpenMPHandler.get());
 
   if (getLangOpts().MicrosoftExt ||
       getTargetInfo().getTriple().isOSBinFormatELF()) {
-    MSCommentHandler = llvm::make_unique<PragmaCommentHandler>(Actions);
+    MSCommentHandler.reset(new PragmaCommentHandler(Actions));
     PP.AddPragmaHandler(MSCommentHandler.get());
   }
 
   if (getLangOpts().MicrosoftExt) {
-    MSDetectMismatchHandler =
-        llvm::make_unique<PragmaDetectMismatchHandler>(Actions);
+    MSDetectMismatchHandler.reset(new PragmaDetectMismatchHandler(Actions));
     PP.AddPragmaHandler(MSDetectMismatchHandler.get());
-    MSPointersToMembers = llvm::make_unique<PragmaMSPointersToMembers>();
+    MSPointersToMembers.reset(new PragmaMSPointersToMembers());
     PP.AddPragmaHandler(MSPointersToMembers.get());
-    MSVtorDisp = llvm::make_unique<PragmaMSVtorDisp>();
+    MSVtorDisp.reset(new PragmaMSVtorDisp());
     PP.AddPragmaHandler(MSVtorDisp.get());
-    MSInitSeg = llvm::make_unique<PragmaMSPragma>("init_seg");
+    MSInitSeg.reset(new PragmaMSPragma("init_seg"));
     PP.AddPragmaHandler(MSInitSeg.get());
-    MSDataSeg = llvm::make_unique<PragmaMSPragma>("data_seg");
+    MSDataSeg.reset(new PragmaMSPragma("data_seg"));
     PP.AddPragmaHandler(MSDataSeg.get());
-    MSBSSSeg = llvm::make_unique<PragmaMSPragma>("bss_seg");
+    MSBSSSeg.reset(new PragmaMSPragma("bss_seg"));
     PP.AddPragmaHandler(MSBSSSeg.get());
-    MSConstSeg = llvm::make_unique<PragmaMSPragma>("const_seg");
+    MSConstSeg.reset(new PragmaMSPragma("const_seg"));
     PP.AddPragmaHandler(MSConstSeg.get());
-    MSCodeSeg = llvm::make_unique<PragmaMSPragma>("code_seg");
+    MSCodeSeg.reset(new PragmaMSPragma("code_seg"));
     PP.AddPragmaHandler(MSCodeSeg.get());
-    MSSection = llvm::make_unique<PragmaMSPragma>("section");
+    MSSection.reset(new PragmaMSPragma("section"));
     PP.AddPragmaHandler(MSSection.get());
-    MSRuntimeChecks = llvm::make_unique<PragmaMSRuntimeChecksHandler>();
+    MSRuntimeChecks.reset(new PragmaMSRuntimeChecksHandler());
     PP.AddPragmaHandler(MSRuntimeChecks.get());
-    MSIntrinsic = llvm::make_unique<PragmaMSIntrinsicHandler>();
+    MSIntrinsic.reset(new PragmaMSIntrinsicHandler());
     PP.AddPragmaHandler(MSIntrinsic.get());
-    MSOptimize = llvm::make_unique<PragmaMSOptimizeHandler>();
+    MSOptimize.reset(new PragmaMSOptimizeHandler());
     PP.AddPragmaHandler(MSOptimize.get());
   }
 
   if (getLangOpts().CUDA) {
-    CUDAForceHostDeviceHandler =
-        llvm::make_unique<PragmaForceCUDAHostDeviceHandler>(Actions);
+    CUDAForceHostDeviceHandler.reset(
+        new PragmaForceCUDAHostDeviceHandler(Actions));
     PP.AddPragmaHandler("clang", CUDAForceHostDeviceHandler.get());
   }
 
-  OptimizeHandler = llvm::make_unique<PragmaOptimizeHandler>(Actions);
+  OptimizeHandler.reset(new PragmaOptimizeHandler(Actions));
   PP.AddPragmaHandler("clang", OptimizeHandler.get());
 
-  LoopHintHandler = llvm::make_unique<PragmaLoopHintHandler>();
+  LoopHintHandler.reset(new PragmaLoopHintHandler());
   PP.AddPragmaHandler("clang", LoopHintHandler.get());
 
-  UnrollHintHandler = llvm::make_unique<PragmaUnrollHintHandler>("unroll");
+  UnrollHintHandler.reset(new PragmaUnrollHintHandler("unroll"));
   PP.AddPragmaHandler(UnrollHintHandler.get());
 
-  NoUnrollHintHandler = llvm::make_unique<PragmaUnrollHintHandler>("nounroll");
+  NoUnrollHintHandler.reset(new PragmaUnrollHintHandler("nounroll"));
   PP.AddPragmaHandler(NoUnrollHintHandler.get());
 
-  UnrollAndJamHintHandler =
-      llvm::make_unique<PragmaUnrollHintHandler>("unroll_and_jam");
-  PP.AddPragmaHandler(UnrollAndJamHintHandler.get());
-
-  NoUnrollAndJamHintHandler =
-      llvm::make_unique<PragmaUnrollHintHandler>("nounroll_and_jam");
-  PP.AddPragmaHandler(NoUnrollAndJamHintHandler.get());
-
-  FPHandler = llvm::make_unique<PragmaFPHandler>();
+  FPHandler.reset(new PragmaFPHandler());
   PP.AddPragmaHandler("clang", FPHandler.get());
 
-  AttributePragmaHandler =
-      llvm::make_unique<PragmaAttributeHandler>(AttrFactory);
+  AttributePragmaHandler.reset(new PragmaAttributeHandler(AttrFactory));
   PP.AddPragmaHandler("clang", AttributePragmaHandler.get());
 }
 
@@ -471,12 +450,6 @@ void Parser::resetPragmaHandlers() {
 
   PP.RemovePragmaHandler(NoUnrollHintHandler.get());
   NoUnrollHintHandler.reset();
-
-  PP.RemovePragmaHandler(UnrollAndJamHintHandler.get());
-  UnrollAndJamHintHandler.reset();
-
-  PP.RemovePragmaHandler(NoUnrollAndJamHintHandler.get());
-  NoUnrollAndJamHintHandler.reset();
 
   PP.RemovePragmaHandler("clang", FPHandler.get());
   FPHandler.reset();
@@ -618,30 +591,6 @@ void Parser::HandlePragmaFPContract() {
   ConsumeAnnotationToken();
 }
 
-void Parser::HandlePragmaFEnvAccess() {
-  assert(Tok.is(tok::annot_pragma_fenv_access));
-  tok::OnOffSwitch OOS =
-    static_cast<tok::OnOffSwitch>(
-    reinterpret_cast<uintptr_t>(Tok.getAnnotationValue()));
-
-  LangOptions::FEnvAccessModeKind FPC;
-  switch (OOS) {
-  case tok::OOS_ON:
-    FPC = LangOptions::FEA_On;
-    break;
-  case tok::OOS_OFF:
-    FPC = LangOptions::FEA_Off;
-    break;
-  case tok::OOS_DEFAULT: // FIXME: Add this cli option when it makes sense.
-    FPC = LangOptions::FEA_Off;
-    break;
-  }
-
-  Actions.ActOnPragmaFEnvAccess(FPC);
-  ConsumeAnnotationToken();
-}
-
-
 StmtResult Parser::HandlePragmaCaptured()
 {
   assert(Tok.is(tok::annot_pragma_captured));
@@ -693,12 +642,13 @@ void Parser::HandlePragmaOpenCLExtension() {
   if (Name == "all") {
     if (State == Disable) {
       Opt.disableAll();
-      Opt.enableSupportedCore(getLangOpts());
+      Opt.enableSupportedCore(getLangOpts().OpenCLVersion);
     } else {
       PP.Diag(NameLoc, diag::warn_pragma_expected_predicate) << 1;
     }
   } else if (State == Begin) {
-    if (!Opt.isKnown(Name) || !Opt.isSupported(Name, getLangOpts())) {
+    if (!Opt.isKnown(Name) ||
+        !Opt.isSupported(Name, getLangOpts().OpenCLVersion)) {
       Opt.support(Name);
     }
     Actions.setCurrentOpenCLExtension(Name);
@@ -708,9 +658,9 @@ void Parser::HandlePragmaOpenCLExtension() {
     Actions.setCurrentOpenCLExtension("");
   } else if (!Opt.isKnown(Name))
     PP.Diag(NameLoc, diag::warn_pragma_unknown_extension) << Ident;
-  else if (Opt.isSupportedExtension(Name, getLangOpts()))
+  else if (Opt.isSupportedExtension(Name, getLangOpts().OpenCLVersion))
     Opt.enable(Name, State == Enable);
-  else if (Opt.isSupportedCore(Name, getLangOpts()))
+  else if (Opt.isSupportedCore(Name, getLangOpts().OpenCLVersion))
     PP.Diag(NameLoc, diag::warn_pragma_extension_is_core) << Ident;
   else
     PP.Diag(NameLoc, diag::warn_pragma_unsupported_extension) << Ident;
@@ -1005,8 +955,6 @@ static std::string PragmaLoopHintString(Token PragmaName, Token Option) {
   if (PragmaName.getIdentifierInfo()->getName() == "loop") {
     PragmaString = "clang loop ";
     PragmaString += Option.getIdentifierInfo()->getName();
-  } else if (PragmaName.getIdentifierInfo()->getName() == "unroll_and_jam") {
-    PragmaString = "unroll_and_jam";
   } else {
     assert(PragmaName.getIdentifierInfo()->getName() == "unroll" &&
            "Unexpected pragma name");
@@ -1038,10 +986,7 @@ bool Parser::HandlePragmaLoopHint(LoopHint &Hint) {
   // without an argument.
   bool PragmaUnroll = PragmaNameInfo->getName() == "unroll";
   bool PragmaNoUnroll = PragmaNameInfo->getName() == "nounroll";
-  bool PragmaUnrollAndJam = PragmaNameInfo->getName() == "unroll_and_jam";
-  bool PragmaNoUnrollAndJam = PragmaNameInfo->getName() == "nounroll_and_jam";
-  if (Toks.empty() && (PragmaUnroll || PragmaNoUnroll || PragmaUnrollAndJam ||
-                       PragmaNoUnrollAndJam)) {
+  if (Toks.empty() && (PragmaUnroll || PragmaNoUnroll)) {
     ConsumeAnnotationToken();
     Hint.Range = Info->PragmaName.getLocation();
     return true;
@@ -1054,31 +999,24 @@ bool Parser::HandlePragmaLoopHint(LoopHint &Hint) {
 
   // If no option is specified the argument is assumed to be a constant expr.
   bool OptionUnroll = false;
-  bool OptionUnrollAndJam = false;
   bool OptionDistribute = false;
-  bool OptionPipelineDisabled = false;
   bool StateOption = false;
   if (OptionInfo) { // Pragma Unroll does not specify an option.
     OptionUnroll = OptionInfo->isStr("unroll");
-    OptionUnrollAndJam = OptionInfo->isStr("unroll_and_jam");
     OptionDistribute = OptionInfo->isStr("distribute");
-    OptionPipelineDisabled = OptionInfo->isStr("pipeline");
     StateOption = llvm::StringSwitch<bool>(OptionInfo->getName())
                       .Case("vectorize", true)
                       .Case("interleave", true)
                       .Default(false) ||
-                  OptionUnroll || OptionUnrollAndJam || OptionDistribute ||
-                  OptionPipelineDisabled;
+                  OptionUnroll || OptionDistribute;
   }
 
-  bool AssumeSafetyArg = !OptionUnroll && !OptionUnrollAndJam &&
-                         !OptionDistribute && !OptionPipelineDisabled;
+  bool AssumeSafetyArg = !OptionUnroll && !OptionDistribute;
   // Verify loop hint has an argument.
   if (Toks[0].is(tok::eof)) {
     ConsumeAnnotationToken();
     Diag(Toks[0].getLocation(), diag::err_pragma_loop_missing_argument)
-        << /*StateArgument=*/StateOption
-        << /*FullKeyword=*/(OptionUnroll || OptionUnrollAndJam)
+        << /*StateArgument=*/StateOption << /*FullKeyword=*/OptionUnroll
         << /*AssumeSafetyKeyword=*/AssumeSafetyArg;
     return false;
   }
@@ -1091,19 +1029,14 @@ bool Parser::HandlePragmaLoopHint(LoopHint &Hint) {
 
     bool Valid = StateInfo &&
                  llvm::StringSwitch<bool>(StateInfo->getName())
-                     .Case("disable", true)
-                     .Case("enable", !OptionPipelineDisabled)
-                     .Case("full", OptionUnroll || OptionUnrollAndJam)
+                     .Cases("enable", "disable", true)
+                     .Case("full", OptionUnroll)
                      .Case("assume_safety", AssumeSafetyArg)
                      .Default(false);
     if (!Valid) {
-      if (OptionPipelineDisabled) {
-        Diag(Toks[0].getLocation(), diag::err_pragma_pipeline_invalid_keyword);
-      } else {
-        Diag(Toks[0].getLocation(), diag::err_pragma_invalid_keyword)
-            << /*FullKeyword=*/(OptionUnroll || OptionUnrollAndJam)
-            << /*AssumeSafetyKeyword=*/AssumeSafetyArg;
-      }
+      Diag(Toks[0].getLocation(), diag::err_pragma_invalid_keyword)
+          << /*FullKeyword=*/OptionUnroll
+          << /*AssumeSafetyKeyword=*/AssumeSafetyArg;
       return false;
     }
     if (Toks.size() > 2)
@@ -1143,10 +1076,9 @@ bool Parser::HandlePragmaLoopHint(LoopHint &Hint) {
 
 namespace {
 struct PragmaAttributeInfo {
-  enum ActionType { Push, Pop, Attribute };
+  enum ActionType { Push, Pop };
   ParsedAttributes &Attributes;
   ActionType Action;
-  const IdentifierInfo *Namespace = nullptr;
   ArrayRef<Token> Tokens;
 
   PragmaAttributeInfo(ParsedAttributes &Attributes) : Attributes(Attributes) {}
@@ -1401,20 +1333,12 @@ void Parser::HandlePragmaAttribute() {
   auto *Info = static_cast<PragmaAttributeInfo *>(Tok.getAnnotationValue());
   if (Info->Action == PragmaAttributeInfo::Pop) {
     ConsumeAnnotationToken();
-    Actions.ActOnPragmaAttributePop(PragmaLoc, Info->Namespace);
+    Actions.ActOnPragmaAttributePop(PragmaLoc);
     return;
   }
   // Parse the actual attribute with its arguments.
-  assert((Info->Action == PragmaAttributeInfo::Push ||
-          Info->Action == PragmaAttributeInfo::Attribute) &&
+  assert(Info->Action == PragmaAttributeInfo::Push &&
          "Unexpected #pragma attribute command");
-
-  if (Info->Action == PragmaAttributeInfo::Push && Info->Tokens.empty()) {
-    ConsumeAnnotationToken();
-    Actions.ActOnPragmaAttributeEmptyPush(PragmaLoc, Info->Namespace);
-    return;
-  }
-
   PP.EnterTokenStream(Info->Tokens, /*DisableMacroExpansion=*/false);
   ConsumeAnnotationToken();
 
@@ -1561,12 +1485,8 @@ void Parser::HandlePragmaAttribute() {
   // Consume the eof terminator token.
   ConsumeToken();
 
-  // Handle a mixed push/attribute by desurging to a push, then an attribute.
-  if (Info->Action == PragmaAttributeInfo::Push)
-    Actions.ActOnPragmaAttributeEmptyPush(PragmaLoc, Info->Namespace);
-
-  Actions.ActOnPragmaAttributeAttribute(Attribute, PragmaLoc,
-                                        std::move(SubjectMatchRules));
+  Actions.ActOnPragmaAttributePush(Attribute, PragmaLoc,
+                                   std::move(SubjectMatchRules));
 }
 
 // #pragma GCC visibility comes in two variants:
@@ -2817,8 +2737,6 @@ static bool ParseLoopHintValue(Preprocessor &PP, Token &Tok, Token PragmaName,
 ///    'vectorize_width' '(' loop-hint-value ')'
 ///    'interleave_count' '(' loop-hint-value ')'
 ///    'unroll_count' '(' loop-hint-value ')'
-///    'pipeline' '(' disable ')'
-///    'pipeline_initiation_interval' '(' loop-hint-value ')'
 ///
 ///  loop-hint-keyword:
 ///    'enable'
@@ -2878,8 +2796,6 @@ void PragmaLoopHintHandler::HandlePragma(Preprocessor &PP,
                            .Case("vectorize_width", true)
                            .Case("interleave_count", true)
                            .Case("unroll_count", true)
-                           .Case("pipeline", true)
-                           .Case("pipeline_initiation_interval", true)
                            .Default(false);
     if (!OptionValid) {
       PP.Diag(Tok.getLocation(), diag::err_pragma_loop_invalid_option)
@@ -2928,10 +2844,6 @@ void PragmaLoopHintHandler::HandlePragma(Preprocessor &PP,
 ///  #pragma unroll unroll-hint-value
 ///  #pragma unroll '(' unroll-hint-value ')'
 ///  #pragma nounroll
-///  #pragma unroll_and_jam
-///  #pragma unroll_and_jam unroll-hint-value
-///  #pragma unroll_and_jam '(' unroll-hint-value ')'
-///  #pragma nounroll_and_jam
 ///
 ///  unroll-hint-value:
 ///    constant-expression
@@ -2956,10 +2868,9 @@ void PragmaUnrollHintHandler::HandlePragma(Preprocessor &PP,
     // nounroll or unroll pragma without an argument.
     Info->PragmaName = PragmaName;
     Info->Option.startToken();
-  } else if (PragmaName.getIdentifierInfo()->getName() == "nounroll" ||
-             PragmaName.getIdentifierInfo()->getName() == "nounroll_and_jam") {
+  } else if (PragmaName.getIdentifierInfo()->getName() == "nounroll") {
     PP.Diag(Tok.getLocation(), diag::warn_pragma_extra_tokens_at_eol)
-        << PragmaName.getIdentifierInfo()->getName();
+        << "nounroll";
     return;
   } else {
     // Unroll pragma with an argument: "#pragma unroll N" or
@@ -3130,20 +3041,8 @@ void PragmaForceCUDAHostDeviceHandler::HandlePragma(
 ///
 /// The syntax is:
 /// \code
-///  #pragma clang attribute push (attribute, subject-set)
-///  #pragma clang attribute push
-///  #pragma clang attribute (attribute, subject-set)
+///  #pragma clang attribute push(attribute, subject-set)
 ///  #pragma clang attribute pop
-/// \endcode
-///
-/// There are also 'namespace' variants of push and pop directives. The bare
-/// '#pragma clang attribute (attribute, subject-set)' version doesn't require a
-/// namespace, since it always applies attributes to the most recently pushed
-/// group, regardless of namespace.
-/// \code
-///  #pragma clang attribute namespace.push (attribute, subject-set)
-///  #pragma clang attribute namespace.push
-///  #pragma clang attribute namespace.pop
 /// \endcode
 ///
 /// The subject-set clause defines the set of declarations which receive the
@@ -3161,56 +3060,25 @@ void PragmaAttributeHandler::HandlePragma(Preprocessor &PP,
   auto *Info = new (PP.getPreprocessorAllocator())
       PragmaAttributeInfo(AttributesForPragmaAttribute);
 
-  // Parse the optional namespace followed by a period.
-  if (Tok.is(tok::identifier)) {
-    IdentifierInfo *II = Tok.getIdentifierInfo();
-    if (!II->isStr("push") && !II->isStr("pop")) {
-      Info->Namespace = II;
-      PP.Lex(Tok);
-
-      if (!Tok.is(tok::period)) {
-        PP.Diag(Tok.getLocation(), diag::err_pragma_attribute_expected_period)
-            << II;
-        return;
-      }
-      PP.Lex(Tok);
-    }
-  }
-
-  if (!Tok.isOneOf(tok::identifier, tok::l_paren)) {
-    PP.Diag(Tok.getLocation(),
-            diag::err_pragma_attribute_expected_push_pop_paren);
+  // Parse the 'push' or 'pop'.
+  if (Tok.isNot(tok::identifier)) {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_attribute_expected_push_pop);
     return;
   }
-
-  // Determine what action this pragma clang attribute represents.
-  if (Tok.is(tok::l_paren)) {
-    if (Info->Namespace) {
-      PP.Diag(Tok.getLocation(),
-              diag::err_pragma_attribute_namespace_on_attribute);
-      PP.Diag(Tok.getLocation(),
-              diag::note_pragma_attribute_namespace_on_attribute);
-      return;
-    }
-    Info->Action = PragmaAttributeInfo::Attribute;
-  } else {
-    const IdentifierInfo *II = Tok.getIdentifierInfo();
-    if (II->isStr("push"))
-      Info->Action = PragmaAttributeInfo::Push;
-    else if (II->isStr("pop"))
-      Info->Action = PragmaAttributeInfo::Pop;
-    else {
-      PP.Diag(Tok.getLocation(), diag::err_pragma_attribute_invalid_argument)
-          << PP.getSpelling(Tok);
-      return;
-    }
-
-    PP.Lex(Tok);
+  const auto *II = Tok.getIdentifierInfo();
+  if (II->isStr("push"))
+    Info->Action = PragmaAttributeInfo::Push;
+  else if (II->isStr("pop"))
+    Info->Action = PragmaAttributeInfo::Pop;
+  else {
+    PP.Diag(Tok.getLocation(), diag::err_pragma_attribute_invalid_argument)
+        << PP.getSpelling(Tok);
+    return;
   }
+  PP.Lex(Tok);
 
   // Parse the actual attribute.
-  if ((Info->Action == PragmaAttributeInfo::Push && Tok.isNot(tok::eod)) ||
-      Info->Action == PragmaAttributeInfo::Attribute) {
+  if (Info->Action == PragmaAttributeInfo::Push) {
     if (Tok.isNot(tok::l_paren)) {
       PP.Diag(Tok.getLocation(), diag::err_expected) << tok::l_paren;
       return;

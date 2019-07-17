@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 ///
-/// This file implements classes for searching and analyzing source code clones.
+///  This file implements classes for searching and anlyzing source code clones.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -45,8 +45,8 @@ bool StmtSequence::contains(const StmtSequence &Other) const {
   // Otherwise check if the start and end locations of the current sequence
   // surround the other sequence.
   bool StartIsInBounds =
-      SM.isBeforeInTranslationUnit(getBeginLoc(), Other.getBeginLoc()) ||
-      getBeginLoc() == Other.getBeginLoc();
+      SM.isBeforeInTranslationUnit(getStartLoc(), Other.getStartLoc()) ||
+      getStartLoc() == Other.getStartLoc();
   if (!StartIsInBounds)
     return false;
 
@@ -78,13 +78,13 @@ ASTContext &StmtSequence::getASTContext() const {
 }
 
 SourceLocation StmtSequence::getBeginLoc() const {
-  return front()->getBeginLoc();
+  return front()->getLocStart();
 }
 
-SourceLocation StmtSequence::getEndLoc() const { return back()->getEndLoc(); }
+SourceLocation StmtSequence::getEndLoc() const { return back()->getLocEnd(); }
 
 SourceRange StmtSequence::getSourceRange() const {
-  return SourceRange(getBeginLoc(), getEndLoc());
+  return SourceRange(getStartLoc(), getEndLoc());
 }
 
 void CloneDetector::analyzeCodeBody(const Decl *D) {
@@ -433,7 +433,7 @@ size_t MinComplexityConstraint::calculateStmtComplexity(
 
   // Look up what macros expanded into the current statement.
   std::string MacroStack =
-      data_collection::getMacroStack(Seq.getBeginLoc(), Context);
+      data_collection::getMacroStack(Seq.getStartLoc(), Context);
 
   // First, check if ParentMacroStack is not empty which means we are currently
   // dealing with a parent statement which was expanded from a macro.
@@ -523,7 +523,8 @@ void CloneConstraint::splitCloneGroups(
       Result.push_back(PotentialGroup);
     }
 
-    assert(llvm::all_of(Indexes, [](char c) { return c == 1; }));
+    assert(std::all_of(Indexes.begin(), Indexes.end(),
+                       [](char c) { return c == 1; }));
   }
   CloneGroups = Result;
 }

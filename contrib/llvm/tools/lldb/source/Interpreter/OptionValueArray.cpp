@@ -9,6 +9,10 @@
 
 #include "lldb/Interpreter/OptionValueArray.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Host/StringConvert.h"
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/Stream.h"
@@ -27,17 +31,13 @@ void OptionValueArray::DumpValue(const ExecutionContext *exe_ctx, Stream &strm,
       strm.Printf("(%s)", GetTypeAsCString());
   }
   if (dump_mask & eDumpOptionValue) {
-    const bool one_line = dump_mask & eDumpOptionCommand;
-    const uint32_t size = m_values.size();
     if (dump_mask & eDumpOptionType)
-      strm.Printf(" =%s", (m_values.size() > 0 && !one_line) ? "\n" : "");
-    if (!one_line)
-      strm.IndentMore();
+      strm.Printf(" =%s", (m_values.size() > 0) ? "\n" : "");
+    strm.IndentMore();
+    const uint32_t size = m_values.size();
     for (uint32_t i = 0; i < size; ++i) {
-      if (!one_line) {
-        strm.Indent();
-        strm.Printf("[%u]: ", i);
-      }
+      strm.Indent();
+      strm.Printf("[%u]: ", i);
       const uint32_t extra_dump_options = m_raw_value_dump ? eDumpOptionRaw : 0;
       switch (array_element_type) {
       default:
@@ -63,16 +63,10 @@ void OptionValueArray::DumpValue(const ExecutionContext *exe_ctx, Stream &strm,
                                                   extra_dump_options);
         break;
       }
-
-      if (!one_line) {
-        if (i < (size - 1))
-          strm.EOL();
-      } else {
-        strm << ' ';
-      }
+      if (i < (size - 1))
+        strm.EOL();
     }
-    if (!one_line)
-      strm.IndentLess();
+    strm.IndentLess();
   }
 }
 
@@ -221,7 +215,7 @@ Status OptionValueArray::SetArgs(const Args &args, VarSetOperationType op) {
         if (num_remove_indexes) {
           // Sort and then erase in reverse so indexes are always valid
           if (num_remove_indexes > 1) {
-            llvm::sort(remove_indexes.begin(), remove_indexes.end());
+            std::sort(remove_indexes.begin(), remove_indexes.end());
             for (std::vector<int>::const_reverse_iterator
                      pos = remove_indexes.rbegin(),
                      end = remove_indexes.rend();

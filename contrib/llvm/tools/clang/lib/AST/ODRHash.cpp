@@ -32,24 +32,12 @@ void ODRHash::AddIdentifierInfo(const IdentifierInfo *II) {
   ID.AddString(II->getName());
 }
 
-void ODRHash::AddDeclarationName(DeclarationName Name, bool TreatAsDecl) {
-  if (TreatAsDecl)
-    // Matches the NamedDecl check in AddDecl
-    AddBoolean(true);
-
-  AddDeclarationNameImpl(Name);
-
-  if (TreatAsDecl)
-    // Matches the ClassTemplateSpecializationDecl check in AddDecl
-    AddBoolean(false);
-}
-
-void ODRHash::AddDeclarationNameImpl(DeclarationName Name) {
+void ODRHash::AddDeclarationName(DeclarationName Name) {
   // Index all DeclarationName and use index numbers to refer to them.
   auto Result = DeclNameMap.insert(std::make_pair(Name, DeclNameMap.size()));
   ID.AddInteger(Result.first->second);
   if (!Result.second) {
-    // If found in map, the DeclarationName has previously been processed.
+    // If found in map, the the DeclarationName has previously been processed.
     return;
   }
 
@@ -417,7 +405,6 @@ public:
 
   void VisitFunctionTemplateDecl(const FunctionTemplateDecl *D) {
     AddDecl(D->getTemplatedDecl());
-    ID.AddInteger(D->getTemplatedDecl()->getODRHash());
     Inherited::VisitFunctionTemplateDecl(D);
   }
 
@@ -565,27 +552,11 @@ void ODRHash::AddFunctionDecl(const FunctionDecl *Function,
                        !Function->isDefaulted() && !Function->isDeleted() &&
                        !Function->isLateTemplateParsed();
   AddBoolean(HasBody);
-  if (!HasBody) {
-    return;
-  }
-
-  auto *Body = Function->getBody();
-  AddBoolean(Body);
-  if (Body)
-    AddStmt(Body);
-
-  // Filter out sub-Decls which will not be processed in order to get an
-  // accurate count of Decl's.
-  llvm::SmallVector<const Decl *, 16> Decls;
-  for (Decl *SubDecl : Function->decls()) {
-    if (isWhitelistedDecl(SubDecl, Function)) {
-      Decls.push_back(SubDecl);
-    }
-  }
-
-  ID.AddInteger(Decls.size());
-  for (auto SubDecl : Decls) {
-    AddSubDecl(SubDecl);
+  if (HasBody) {
+    auto *Body = Function->getBody();
+    AddBoolean(Body);
+    if (Body)
+      AddStmt(Body);
   }
 }
 
@@ -621,24 +592,13 @@ void ODRHash::AddDecl(const Decl *D) {
   assert(D && "Expecting non-null pointer.");
   D = D->getCanonicalDecl();
 
-  const NamedDecl *ND = dyn_cast<NamedDecl>(D);
-  AddBoolean(ND);
-  if (!ND) {
-    ID.AddInteger(D->getKind());
+  if (const NamedDecl *ND = dyn_cast<NamedDecl>(D)) {
+    AddDeclarationName(ND->getDeclName());
     return;
   }
 
-  AddDeclarationName(ND->getDeclName());
-
-  const auto *Specialization =
-            dyn_cast<ClassTemplateSpecializationDecl>(D);
-  AddBoolean(Specialization);
-  if (Specialization) {
-    const TemplateArgumentList &List = Specialization->getTemplateArgs();
-    ID.AddInteger(List.size());
-    for (const TemplateArgument &TA : List.asArray())
-      AddTemplateArgument(TA);
-  }
+  ID.AddInteger(D->getKind());
+  // TODO: Handle non-NamedDecl here.
 }
 
 namespace {
@@ -740,64 +700,8 @@ public:
     VisitArrayType(T);
   }
 
-  void VisitAttributedType(const AttributedType *T) {
-    ID.AddInteger(T->getAttrKind());
-    AddQualType(T->getModifiedType());
-    AddQualType(T->getEquivalentType());
-
-    VisitType(T);
-  }
-
-  void VisitBlockPointerType(const BlockPointerType *T) {
-    AddQualType(T->getPointeeType());
-    VisitType(T);
-  }
-
   void VisitBuiltinType(const BuiltinType *T) {
     ID.AddInteger(T->getKind());
-    VisitType(T);
-  }
-
-  void VisitComplexType(const ComplexType *T) {
-    AddQualType(T->getElementType());
-    VisitType(T);
-  }
-
-  void VisitDecltypeType(const DecltypeType *T) {
-    AddStmt(T->getUnderlyingExpr());
-    AddQualType(T->getUnderlyingType());
-    VisitType(T);
-  }
-
-  void VisitDependentDecltypeType(const DependentDecltypeType *T) {
-    VisitDecltypeType(T);
-  }
-
-  void VisitDeducedType(const DeducedType *T) {
-    AddQualType(T->getDeducedType());
-    VisitType(T);
-  }
-
-  void VisitAutoType(const AutoType *T) {
-    ID.AddInteger((unsigned)T->getKeyword());
-    VisitDeducedType(T);
-  }
-
-  void VisitDeducedTemplateSpecializationType(
-      const DeducedTemplateSpecializationType *T) {
-    Hash.AddTemplateName(T->getTemplateName());
-    VisitDeducedType(T);
-  }
-
-  void VisitDependentAddressSpaceType(const DependentAddressSpaceType *T) {
-    AddQualType(T->getPointeeType());
-    AddStmt(T->getAddrSpaceExpr());
-    VisitType(T);
-  }
-
-  void VisitDependentSizedExtVectorType(const DependentSizedExtVectorType *T) {
-    AddQualType(T->getElementType());
-    AddStmt(T->getSizeExpr());
     VisitType(T);
   }
 
@@ -822,74 +726,6 @@ public:
     VisitFunctionType(T);
   }
 
-  void VisitInjectedClassNameType(const InjectedClassNameType *T) {
-    AddDecl(T->getDecl());
-    VisitType(T);
-  }
-
-  void VisitMemberPointerType(const MemberPointerType *T) {
-    AddQualType(T->getPointeeType());
-    AddType(T->getClass());
-    VisitType(T);
-  }
-
-  void VisitObjCObjectPointerType(const ObjCObjectPointerType *T) {
-    AddQualType(T->getPointeeType());
-    VisitType(T);
-  }
-
-  void VisitObjCObjectType(const ObjCObjectType *T) {
-    AddDecl(T->getInterface());
-
-    auto TypeArgs = T->getTypeArgsAsWritten();
-    ID.AddInteger(TypeArgs.size());
-    for (auto Arg : TypeArgs) {
-      AddQualType(Arg);
-    }
-
-    auto Protocols = T->getProtocols();
-    ID.AddInteger(Protocols.size());
-    for (auto Protocol : Protocols) {
-      AddDecl(Protocol);
-    }
-
-    Hash.AddBoolean(T->isKindOfType());
-
-    VisitType(T);
-  }
-
-  void VisitObjCInterfaceType(const ObjCInterfaceType *T) {
-    // This type is handled by the parent type ObjCObjectType.
-    VisitObjCObjectType(T);
-  }
-
-  void VisitObjCTypeParamType(const ObjCTypeParamType *T) {
-    AddDecl(T->getDecl());
-    auto Protocols = T->getProtocols();
-    ID.AddInteger(Protocols.size());
-    for (auto Protocol : Protocols) {
-      AddDecl(Protocol);
-    }
-
-    VisitType(T);
-  }
-
-  void VisitPackExpansionType(const PackExpansionType *T) {
-    AddQualType(T->getPattern());
-    VisitType(T);
-  }
-
-  void VisitParenType(const ParenType *T) {
-    AddQualType(T->getInnerType());
-    VisitType(T);
-  }
-
-  void VisitPipeType(const PipeType *T) {
-    AddQualType(T->getElementType());
-    Hash.AddBoolean(T->isReadOnly());
-    VisitType(T);
-  }
-
   void VisitPointerType(const PointerType *T) {
     AddQualType(T->getPointeeType());
     VisitType(T);
@@ -906,43 +742,6 @@ public:
 
   void VisitRValueReferenceType(const RValueReferenceType *T) {
     VisitReferenceType(T);
-  }
-
-  void
-  VisitSubstTemplateTypeParmPackType(const SubstTemplateTypeParmPackType *T) {
-    AddType(T->getReplacedParameter());
-    Hash.AddTemplateArgument(T->getArgumentPack());
-    VisitType(T);
-  }
-
-  void VisitSubstTemplateTypeParmType(const SubstTemplateTypeParmType *T) {
-    AddType(T->getReplacedParameter());
-    AddQualType(T->getReplacementType());
-    VisitType(T);
-  }
-
-  void VisitTagType(const TagType *T) {
-    AddDecl(T->getDecl());
-    VisitType(T);
-  }
-
-  void VisitRecordType(const RecordType *T) { VisitTagType(T); }
-  void VisitEnumType(const EnumType *T) { VisitTagType(T); }
-
-  void VisitTemplateSpecializationType(const TemplateSpecializationType *T) {
-    ID.AddInteger(T->getNumArgs());
-    for (const auto &TA : T->template_arguments()) {
-      Hash.AddTemplateArgument(TA);
-    }
-    Hash.AddTemplateName(T->getTemplateName());
-    VisitType(T);
-  }
-
-  void VisitTemplateTypeParmType(const TemplateTypeParmType *T) {
-    ID.AddInteger(T->getDepth());
-    ID.AddInteger(T->getIndex());
-    Hash.AddBoolean(T->isParameterPack());
-    AddDecl(T->getDecl());
   }
 
   void VisitTypedefType(const TypedefType *T) {
@@ -967,18 +766,13 @@ public:
     VisitType(T);
   }
 
-  void VisitTypeOfExprType(const TypeOfExprType *T) {
-    AddStmt(T->getUnderlyingExpr());
-    Hash.AddBoolean(T->isSugared());
-    if (T->isSugared())
-      AddQualType(T->desugar());
+  void VisitTagType(const TagType *T) {
+    AddDecl(T->getDecl());
+    VisitType(T);
+  }
 
-    VisitType(T);
-  }
-  void VisitTypeOfType(const TypeOfType *T) {
-    AddQualType(T->getUnderlyingType());
-    VisitType(T);
-  }
+  void VisitRecordType(const RecordType *T) { VisitTagType(T); }
+  void VisitEnumType(const EnumType *T) { VisitTagType(T); }
 
   void VisitTypeWithKeyword(const TypeWithKeyword *T) {
     ID.AddInteger(T->getKeyword());
@@ -1008,26 +802,20 @@ public:
     VisitTypeWithKeyword(T);
   }
 
-  void VisitUnaryTransformType(const UnaryTransformType *T) {
-    AddQualType(T->getUnderlyingType());
-    AddQualType(T->getBaseType());
+  void VisitTemplateSpecializationType(const TemplateSpecializationType *T) {
+    ID.AddInteger(T->getNumArgs());
+    for (const auto &TA : T->template_arguments()) {
+      Hash.AddTemplateArgument(TA);
+    }
+    Hash.AddTemplateName(T->getTemplateName());
     VisitType(T);
   }
 
-  void VisitUnresolvedUsingType(const UnresolvedUsingType *T) {
+  void VisitTemplateTypeParmType(const TemplateTypeParmType *T) {
+    ID.AddInteger(T->getDepth());
+    ID.AddInteger(T->getIndex());
+    Hash.AddBoolean(T->isParameterPack());
     AddDecl(T->getDecl());
-    VisitType(T);
-  }
-
-  void VisitVectorType(const VectorType *T) {
-    AddQualType(T->getElementType());
-    ID.AddInteger(T->getNumElements());
-    ID.AddInteger(T->getVectorKind());
-    VisitType(T);
-  }
-
-  void VisitExtVectorType(const ExtVectorType * T) {
-    VisitVectorType(T);
   }
 };
 } // namespace

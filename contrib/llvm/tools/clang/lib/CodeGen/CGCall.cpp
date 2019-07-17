@@ -23,11 +23,11 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
-#include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/CodeGen/SwiftCallingConv.h"
+#include "clang/Frontend/CodeGenOptions.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -59,7 +59,6 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
   case CC_X86Pascal: return llvm::CallingConv::C;
   // TODO: Add support for __vectorcall to LLVM.
   case CC_X86VectorCall: return llvm::CallingConv::X86_VectorCall;
-  case CC_AArch64VectorCall: return llvm::CallingConv::AArch64_VectorCall;
   case CC_SpirFunction: return llvm::CallingConv::SPIR_FUNC;
   case CC_OpenCLKernel: return CGM.getTargetCodeGenInfo().getOpenCLKernelCallingConv();
   case CC_PreserveMost: return llvm::CallingConv::PreserveMost;
@@ -68,13 +67,11 @@ unsigned CodeGenTypes::ClangCallConvToLLVMCallConv(CallingConv CC) {
   }
 }
 
-/// Derives the 'this' type for codegen purposes, i.e. ignoring method CVR
+/// Derives the 'this' type for codegen purposes, i.e. ignoring method
 /// qualification.
-static CanQualType GetThisType(ASTContext &Context, const CXXRecordDecl *RD,
-                               const CXXMethodDecl *MD) {
+/// FIXME: address space qualification?
+static CanQualType GetThisType(ASTContext &Context, const CXXRecordDecl *RD) {
   QualType RecTy = Context.getTagDeclType(RD)->getCanonicalTypeInternal();
-  if (MD)
-    RecTy = Context.getAddrSpaceQualType(RecTy, MD->getTypeQualifiers().getAddressSpace());
   return Context.getPointerType(CanQualType::CreateUnsafe(RecTy));
 }
 
@@ -217,9 +214,6 @@ static CallingConv getCallingConventionForDecl(const Decl *D, bool IsWindows) {
   if (PcsAttr *PCS = D->getAttr<PcsAttr>())
     return (PCS->getPCS() == PcsAttr::AAPCS ? CC_AAPCS : CC_AAPCS_VFP);
 
-  if (D->hasAttr<AArch64VectorPcsAttr>())
-    return CC_AArch64VectorCall;
-
   if (D->hasAttr<IntelOclBiccAttr>())
     return CC_IntelOclBicc;
 
@@ -252,7 +246,7 @@ CodeGenTypes::arrangeCXXMethodType(const CXXRecordDecl *RD,
 
   // Add the 'this' pointer.
   if (RD)
-    argTypes.push_back(GetThisType(Context, RD, MD));
+    argTypes.push_back(GetThisType(Context, RD));
   else
     argTypes.push_back(Context.VoidPtrTy);
 
@@ -308,7 +302,7 @@ CodeGenTypes::arrangeCXXStructorDeclaration(const CXXMethodDecl *MD,
 
   SmallVector<CanQualType, 16> argTypes;
   SmallVector<FunctionProtoType::ExtParameterInfo, 16> paramInfos;
-  argTypes.push_back(GetThisType(Context, MD->getParent(), MD));
+  argTypes.push_back(GetThisType(Context, MD->getParent()));
 
   bool PassParams = true;
 
@@ -535,7 +529,7 @@ const CGFunctionInfo &
 CodeGenTypes::arrangeUnprototypedMustTailThunk(const CXXMethodDecl *MD) {
   assert(MD->isVirtual() && "only methods have thunks");
   CanQual<FunctionProtoType> FTP = GetFormalType(MD);
-  CanQualType ArgTys[] = { GetThisType(Context, MD->getParent(), MD) };
+  CanQualType ArgTys[] = { GetThisType(Context, MD->getParent()) };
   return arrangeLLVMFunctionInfo(Context.VoidTy, /*instanceMethod=*/false,
                                  /*chainCall=*/false, ArgTys,
                                  FTP->getExtInfo(), {}, RequiredArgs(1));
@@ -549,7 +543,7 @@ CodeGenTypes::arrangeMSCtorClosure(const CXXConstructorDecl *CD,
   CanQual<FunctionProtoType> FTP = GetFormalType(CD);
   SmallVector<CanQualType, 2> ArgTys;
   const CXXRecordDecl *RD = CD->getParent();
-  ArgTys.push_back(GetThisType(Context, RD, CD));
+  ArgTys.push_back(GetThisType(Context, RD));
   if (CT == Ctor_CopyingClosure)
     ArgTys.push_back(*FTP->param_type_begin());
   if (RD->getNumVBases() > 0)
@@ -747,8 +741,8 @@ CodeGenTypes::arrangeLLVMFunctionInfo(CanQualType resultType,
                                       FunctionType::ExtInfo info,
                      ArrayRef<FunctionProtoType::ExtParameterInfo> paramInfos,
                                       RequiredArgs required) {
-  assert(llvm::all_of(argTypes,
-                      [](CanQualType T) { return T.isCanonicalAsParam(); }));
+  assert(std::all_of(argTypes.begin(), argTypes.end(),
+                     [](CanQualType T) { return T.isCanonicalAsParam(); }));
 
   // Lookup or create unique function info.
   llvm::FoldingSetNodeID ID;
@@ -1259,8 +1253,8 @@ static llvm::Value *CreateCoercedLoad(Address Src, llvm::Type *Ty,
 
   // Otherwise do coercion through memory. This is stupid, but simple.
   Address Tmp = CreateTempAllocaForCoercion(CGF, Ty, Src.getAlignment());
-  Address Casted = CGF.Builder.CreateElementBitCast(Tmp,CGF.Int8Ty);
-  Address SrcCasted = CGF.Builder.CreateElementBitCast(Src,CGF.Int8Ty);
+  Address Casted = CGF.Builder.CreateBitCast(Tmp, CGF.AllocaInt8PtrTy);
+  Address SrcCasted = CGF.Builder.CreateBitCast(Src, CGF.AllocaInt8PtrTy);
   CGF.Builder.CreateMemCpy(Casted, SrcCasted,
       llvm::ConstantInt::get(CGF.IntPtrTy, SrcSize),
       false);
@@ -1341,8 +1335,8 @@ static void CreateCoercedStore(llvm::Value *Src,
     // to that information.
     Address Tmp = CreateTempAllocaForCoercion(CGF, SrcTy, Dst.getAlignment());
     CGF.Builder.CreateStore(Src, Tmp);
-    Address Casted = CGF.Builder.CreateElementBitCast(Tmp,CGF.Int8Ty);
-    Address DstCasted = CGF.Builder.CreateElementBitCast(Dst,CGF.Int8Ty);
+    Address Casted = CGF.Builder.CreateBitCast(Tmp, CGF.AllocaInt8PtrTy);
+    Address DstCasted = CGF.Builder.CreateBitCast(Dst, CGF.AllocaInt8PtrTy);
     CGF.Builder.CreateMemCpy(DstCasted, Casted,
         llvm::ConstantInt::get(CGF.IntPtrTy, DstSize),
         false);
@@ -1715,8 +1709,6 @@ void CodeGenModule::ConstructDefaultFnAttrList(StringRef Name, bool HasOptnone,
 
   if (CodeGenOpts.DisableRedZone)
     FuncAttrs.addAttribute(llvm::Attribute::NoRedZone);
-  if (CodeGenOpts.IndirectTlsSegRefs)
-    FuncAttrs.addAttribute("indirect-tls-seg-refs");
   if (CodeGenOpts.NoImplicitFloat)
     FuncAttrs.addAttribute(llvm::Attribute::NoImplicitFloat);
 
@@ -1792,11 +1784,6 @@ void CodeGenModule::ConstructDefaultFnAttrList(StringRef Name, bool HasOptnone,
       FuncAttrs.addAttribute("stackrealign");
     if (CodeGenOpts.Backchain)
       FuncAttrs.addAttribute("backchain");
-
-    // FIXME: The interaction of this attribute with the SLH command line flag
-    // has not been determined.
-    if (CodeGenOpts.SpeculativeLoadHardening)
-      FuncAttrs.addAttribute(llvm::Attribute::SpeculativeLoadHardening);
   }
 
   if (getLangOpts().assumeFunctionsAreConvergent()) {
@@ -1815,12 +1802,6 @@ void CodeGenModule::ConstructDefaultFnAttrList(StringRef Name, bool HasOptnone,
     // Respect -fcuda-flush-denormals-to-zero.
     if (CodeGenOpts.FlushDenorm)
       FuncAttrs.addAttribute("nvptx-f32ftz", "true");
-  }
-
-  for (StringRef Attr : CodeGenOpts.DefaultFunctionAttrs) {
-    StringRef Var, Value;
-    std::tie(Var, Value) = Attr.split('=');
-    FuncAttrs.addAttribute(Var, Value);
   }
 }
 
@@ -1847,7 +1828,7 @@ void CodeGenModule::ConstructAttributeList(
   AddAttributesFromFunctionProtoType(getContext(), FuncAttrs,
                                      CalleeInfo.getCalleeFunctionProtoType());
 
-  const Decl *TargetDecl = CalleeInfo.getCalleeDecl().getDecl();
+  const Decl *TargetDecl = CalleeInfo.getCalleeDecl();
 
   bool HasOptnone = false;
   // FIXME: handle sseregparm someday...
@@ -1864,8 +1845,6 @@ void CodeGenModule::ConstructAttributeList(
       FuncAttrs.addAttribute(llvm::Attribute::NoDuplicate);
     if (TargetDecl->hasAttr<ConvergentAttr>())
       FuncAttrs.addAttribute(llvm::Attribute::Convergent);
-    if (TargetDecl->hasAttr<SpeculativeLoadHardeningAttr>())
-      FuncAttrs.addAttribute(llvm::Attribute::SpeculativeLoadHardening);
 
     if (const FunctionDecl *Fn = dyn_cast<FunctionDecl>(TargetDecl)) {
       AddAttributesFromFunctionProtoType(
@@ -1957,7 +1936,7 @@ void CodeGenModule::ConstructAttributeList(
 
     FuncAttrs.addAttribute("disable-tail-calls",
                            llvm::toStringRef(DisableTailCalls));
-    GetCPUAndFeaturesAttributes(CalleeInfo.getCalleeDecl(), FuncAttrs);
+    GetCPUAndFeaturesAttributes(TargetDecl, FuncAttrs);
   }
 
   ClangToLLVMArgMapping IRFunctionArgs(getContext(), FI);
@@ -2348,7 +2327,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       } else {
         // Load scalar value from indirect argument.
         llvm::Value *V =
-            EmitLoadOfScalar(ParamAddr, false, Ty, Arg->getBeginLoc());
+          EmitLoadOfScalar(ParamAddr, false, Ty, Arg->getLocStart());
 
         if (isPromoted)
           V = emitArgumentDemotion(*this, Arg, V);
@@ -2410,10 +2389,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
           if (!AVAttr)
             if (const auto *TOTy = dyn_cast<TypedefType>(OTy))
               AVAttr = TOTy->getDecl()->getAttr<AlignValueAttr>();
-          if (AVAttr && !SanOpts.has(SanitizerKind::Alignment)) {
-            // If alignment-assumption sanitizer is enabled, we do *not* add
-            // alignment attribute here, but emit normal alignment assumption,
-            // so the UBSAN check could function.
+          if (AVAttr) {
             llvm::Value *AlignmentValue =
               EmitScalarExpr(AVAttr->getAlignment());
             llvm::ConstantInt *AlignmentCI =
@@ -2514,7 +2490,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       // Match to what EmitParmDecl is expecting for this type.
       if (CodeGenFunction::hasScalarEvaluationKind(Ty)) {
         llvm::Value *V =
-            EmitLoadOfScalar(Alloca, false, Ty, Arg->getBeginLoc());
+          EmitLoadOfScalar(Alloca, false, Ty, Arg->getLocStart());
         if (isPromoted)
           V = emitArgumentDemotion(*this, Arg, V);
         ArgVals.push_back(ParamValue::forDirect(V));
@@ -3087,9 +3063,8 @@ void CodeGenFunction::EmitDelegateCallArg(CallArgList &args,
 
   QualType type = param->getType();
 
-  if (isInAllocaArgument(CGM.getCXXABI(), type)) {
-    CGM.ErrorUnsupported(param, "forwarded non-trivially copyable parameter");
-  }
+  assert(!isInAllocaArgument(CGM.getCXXABI(), type) &&
+         "cannot emit delegate call arguments for inalloca arguments!");
 
   // GetAddrOfLocalVar returns a pointer-to-pointer for references,
   // but the argument needs to be the original pointer.
@@ -3970,28 +3945,15 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         } else if (I->hasLValue()) {
           auto LV = I->getKnownLValue();
           auto AS = LV.getAddressSpace();
-
           if ((!ArgInfo.getIndirectByVal() &&
                (LV.getAlignment() >=
-                getContext().getTypeAlignInChars(I->Ty)))) {
-            NeedCopy = true;
-          }
-          if (!getLangOpts().OpenCL) {
-            if ((ArgInfo.getIndirectByVal() &&
-                (AS != LangAS::Default &&
-                 AS != CGM.getASTAllocaAddressSpace()))) {
-              NeedCopy = true;
-            }
-          }
-          // For OpenCL even if RV is located in default or alloca address space
-          // we don't want to perform address space cast for it.
-          else if ((ArgInfo.getIndirectByVal() &&
-                    Addr.getType()->getAddressSpace() != IRFuncTy->
-                      getParamType(FirstIRArg)->getPointerAddressSpace())) {
+                getContext().getTypeAlignInChars(I->Ty))) ||
+              (ArgInfo.getIndirectByVal() &&
+               ((AS != LangAS::Default && AS != LangAS::opencl_private &&
+                 AS != CGM.getASTAllocaAddressSpace())))) {
             NeedCopy = true;
           }
         }
-
         if (NeedCopy) {
           // Create an aligned temporary, and copy to it.
           Address AI = CreateMemTempWithoutCast(
@@ -4273,13 +4235,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   }
 #endif
 
-  // Update the largest vector width if any arguments have vector types.
-  for (unsigned i = 0; i < IRCallArgs.size(); ++i) {
-    if (auto *VT = dyn_cast<llvm::VectorType>(IRCallArgs[i]->getType()))
-      LargestVectorWidth = std::max(LargestVectorWidth,
-                                    VT->getPrimitiveSizeInBits());
-  }
-
   // Compute the calling convention and attributes.
   unsigned CallingConv;
   llvm::AttributeList Attrs;
@@ -4293,11 +4248,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   // Apply always_inline to all calls within flatten functions.
   // FIXME: should this really take priority over __try, below?
   if (CurCodeDecl && CurCodeDecl->hasAttr<FlattenAttr>() &&
-      !(Callee.getAbstractInfo().getCalleeDecl().getDecl() &&
-        Callee.getAbstractInfo()
-            .getCalleeDecl()
-            .getDecl()
-            ->hasAttr<NoInlineAttr>())) {
+      !(Callee.getAbstractInfo().getCalleeDecl() &&
+        Callee.getAbstractInfo().getCalleeDecl()->hasAttr<NoInlineAttr>())) {
     Attrs =
         Attrs.addAttribute(getLLVMContext(), llvm::AttributeList::FunctionIndex,
                            llvm::Attribute::AlwaysInline);
@@ -4363,11 +4315,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   if (!CI->getType()->isVoidTy())
     CI->setName("call");
 
-  // Update largest vector width from the return type.
-  if (auto *VT = dyn_cast<llvm::VectorType>(CI->getType()))
-    LargestVectorWidth = std::max(LargestVectorWidth,
-                                  VT->getPrimitiveSizeInBits());
-
   // Insert instrumentation or attach profile metadata at indirect call sites.
   // For more details, see the comment before the definition of
   // IPVK_IndirectCallTarget in InstrProfData.inc.
@@ -4382,7 +4329,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   // Suppress tail calls if requested.
   if (llvm::CallInst *Call = dyn_cast<llvm::CallInst>(CI)) {
-    const Decl *TargetDecl = Callee.getAbstractInfo().getCalleeDecl().getDecl();
+    const Decl *TargetDecl = Callee.getAbstractInfo().getCalleeDecl();
     if (TargetDecl && TargetDecl->hasAttr<NotTailCalledAttr>())
       Call->setTailCallKind(llvm::CallInst::TCK_NoTail);
   }
@@ -4529,7 +4476,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   } ();
 
   // Emit the assume_aligned check on the return value.
-  const Decl *TargetDecl = Callee.getAbstractInfo().getCalleeDecl().getDecl();
+  const Decl *TargetDecl = Callee.getAbstractInfo().getCalleeDecl();
   if (Ret.isScalar() && TargetDecl) {
     if (const auto *AA = TargetDecl->getAttr<AssumeAlignedAttr>()) {
       llvm::Value *OffsetValue = nullptr;
@@ -4538,14 +4485,13 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
       llvm::Value *Alignment = EmitScalarExpr(AA->getAlignment());
       llvm::ConstantInt *AlignmentCI = cast<llvm::ConstantInt>(Alignment);
-      EmitAlignmentAssumption(Ret.getScalarVal(), RetTy, Loc, AA->getLocation(),
-                              AlignmentCI->getZExtValue(), OffsetValue);
+      EmitAlignmentAssumption(Ret.getScalarVal(), AlignmentCI->getZExtValue(),
+                              OffsetValue);
     } else if (const auto *AA = TargetDecl->getAttr<AllocAlignAttr>()) {
-      llvm::Value *AlignmentVal = CallArgs[AA->getParamIndex().getLLVMIndex()]
-                                      .getRValue(*this)
-                                      .getScalarVal();
-      EmitAlignmentAssumption(Ret.getScalarVal(), RetTy, Loc, AA->getLocation(),
-                              AlignmentVal);
+      llvm::Value *ParamVal =
+          CallArgs[AA->getParamIndex().getLLVMIndex()].getRValue(
+              *this).getScalarVal();
+      EmitAlignmentAssumption(Ret.getScalarVal(), ParamVal);
     }
   }
 
@@ -4556,8 +4502,8 @@ CGCallee CGCallee::prepareConcreteCallee(CodeGenFunction &CGF) const {
   if (isVirtual()) {
     const CallExpr *CE = getVirtualCallExpr();
     return CGF.CGM.getCXXABI().getVirtualFunctionPointer(
-        CGF, getVirtualMethodDecl(), getThisAddress(), getFunctionType(),
-        CE ? CE->getBeginLoc() : SourceLocation());
+        CGF, getVirtualMethodDecl(), getThisAddress(),
+        getFunctionType(), CE ? CE->getLocStart() : SourceLocation());
   }
 
   return *this;

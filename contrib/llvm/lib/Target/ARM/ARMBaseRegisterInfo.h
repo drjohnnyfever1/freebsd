@@ -131,8 +131,6 @@ public:
                                              CallingConv::ID) const;
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
-  bool isAsmClobberable(const MachineFunction &MF,
-                       unsigned PhysReg) const override;
 
   const TargetRegisterClass *
   getPointerRegClass(const MachineFunction &MF,
@@ -156,6 +154,7 @@ public:
 
   void updateRegAllocHint(unsigned Reg, unsigned NewReg,
                           MachineFunction &MF) const override;
+  bool enableMultipleCopyHints() const override { return true; }
 
   bool hasBasePointer(const MachineFunction &MF) const;
 

@@ -21,10 +21,10 @@ namespace ento {
 
 // Recursively find any substatements containing macros
 bool containsMacro(const Stmt *S) {
-  if (S->getBeginLoc().isMacroID())
+  if (S->getLocStart().isMacroID())
     return true;
 
-  if (S->getEndLoc().isMacroID())
+  if (S->getLocEnd().isMacroID())
     return true;
 
   for (const Stmt *Child : S->children())
@@ -103,9 +103,9 @@ Nullability getNullabilityAnnotation(QualType Type) {
   const auto *AttrType = Type->getAs<AttributedType>();
   if (!AttrType)
     return Nullability::Unspecified;
-  if (AttrType->getAttrKind() == attr::TypeNullable)
+  if (AttrType->getAttrKind() == AttributedType::attr_nullable)
     return Nullability::Nullable;
-  else if (AttrType->getAttrKind() == attr::TypeNonNull)
+  else if (AttrType->getAttrKind() == AttributedType::attr_nonnull)
     return Nullability::Nonnull;
   return Nullability::Unspecified;
 }

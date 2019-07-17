@@ -222,10 +222,6 @@ namespace Mips {
     fixup_Mips_SUB,
     fixup_MICROMIPS_SUB,
 
-    // resulting in - R_MIPS_JALR/R_MICROMIPS_JALR
-    fixup_Mips_JALR,
-    fixup_MICROMIPS_JALR,
-
     // Marker
     LastTargetFixupKind,
     NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind

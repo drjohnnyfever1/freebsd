@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <mutex>
 
+// Other libraries and framework includes
+// Project includes
 #include "ObjCLanguage.h"
 
 #include "lldb/Core/PluginManager.h"
@@ -409,9 +413,6 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
       "NSArray summary provider", ConstString("__NSCFArray"), appkit_flags);
   AddCXXSummary(
       objc_category_sp, lldb_private::formatters::NSArraySummaryProvider,
-      "NSArray summary provider", ConstString("_NSCallStackArray"), appkit_flags);
-  AddCXXSummary(
-      objc_category_sp, lldb_private::formatters::NSArraySummaryProvider,
       "NSArray summary provider", ConstString("CFArrayRef"), appkit_flags);
   AddCXXSummary(objc_category_sp,
                 lldb_private::formatters::NSArraySummaryProvider,
@@ -528,10 +529,6 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSArraySyntheticFrontEndCreator,
                   "NSArray synthetic children", ConstString("__NSCFArray"),
-                  ScriptedSyntheticChildren::Flags());
-  AddCXXSynthetic(objc_category_sp,
-                  lldb_private::formatters::NSArraySyntheticFrontEndCreator,
-                  "NSArray synthetic children", ConstString("_NSCallStackArray"),
                   ScriptedSyntheticChildren::Flags());
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSArraySyntheticFrontEndCreator,
@@ -1104,13 +1101,4 @@ bool ObjCLanguage::IsNilReference(ValueObject &valobj) {
   bool canReadValue = true;
   bool isZero = valobj.GetValueAsUnsigned(0, &canReadValue) == 0;
   return canReadValue && isZero;
-}
-
-bool ObjCLanguage::IsSourceFile(llvm::StringRef file_path) const {
-  const auto suffixes = {".h", ".m", ".M"};
-  for (auto suffix : suffixes) {
-    if (file_path.endswith_lower(suffix))
-      return true;
-  }
-  return false;
 }

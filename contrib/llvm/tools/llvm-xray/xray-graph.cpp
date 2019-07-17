@@ -246,10 +246,6 @@ Error GraphRenderer::accountRecord(const XRayRecord &Record) {
     updateStat(G[Record.FuncId].S, D);
     break;
   }
-  case RecordTypes::CUSTOM_EVENT:
-  case RecordTypes::TYPED_EVENT:
-    // TODO: Support custom and typed events in the graph processing?
-    break;
   }
 
   return Error::success();

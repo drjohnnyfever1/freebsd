@@ -156,9 +156,9 @@ static void combineWeight(Weight &W, const Weight &OtherW) {
 
 static void combineWeightsBySorting(WeightList &Weights) {
   // Sort so edges to the same node are adjacent.
-  llvm::sort(Weights, [](const Weight &L, const Weight &R) {
-    return L.TargetNode < R.TargetNode;
-  });
+  llvm::sort(Weights.begin(), Weights.end(),
+             [](const Weight &L,
+                const Weight &R) { return L.TargetNode < R.TargetNode; });
 
   // Combine adjacent edges.
   WeightList::iterator O = Weights.begin();
@@ -573,9 +573,7 @@ BlockFrequencyInfoImplBase::getProfileCountFromFreq(const Function &F,
   APInt BlockFreq(128, Freq);
   APInt EntryFreq(128, getEntryFreq());
   BlockCount *= BlockFreq;
-  // Rounded division of BlockCount by EntryFreq. Since EntryFreq is unsigned
-  // lshr by 1 gives EntryFreq/2.
-  BlockCount = (BlockCount + EntryFreq.lshr(1)).udiv(EntryFreq);
+  BlockCount = BlockCount.udiv(EntryFreq);
   return BlockCount.getLimitedValue();
 }
 
@@ -707,7 +705,7 @@ static void findIrreducibleHeaders(
          "Expected irreducible CFG; -loop-info is likely invalid");
   if (Headers.size() == InSCC.size()) {
     // Every block is a header.
-    llvm::sort(Headers);
+    llvm::sort(Headers.begin(), Headers.end());
     return;
   }
 
@@ -742,8 +740,8 @@ static void findIrreducibleHeaders(
     Others.push_back(Irr.Node);
     LLVM_DEBUG(dbgs() << "  => other = " << BFI.getBlockName(Irr.Node) << "\n");
   }
-  llvm::sort(Headers);
-  llvm::sort(Others);
+  llvm::sort(Headers.begin(), Headers.end());
+  llvm::sort(Others.begin(), Others.end());
 }
 
 static void createIrreducibleLoop(

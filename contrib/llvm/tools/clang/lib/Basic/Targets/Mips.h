@@ -57,7 +57,7 @@ class LLVM_LIBRARY_VISIBILITY MipsTargetInfo : public TargetInfo {
   bool UseIndirectJumpHazard;
 
 protected:
-  enum FPModeEnum { FPXX, FP32, FP64 } FPMode;
+  bool HasFP64;
   std::string ABI;
 
 public:
@@ -66,20 +66,15 @@ public:
         IsNan2008(false), IsAbs2008(false), IsSingleFloat(false),
         IsNoABICalls(false), CanUseBSDABICalls(false), FloatABI(HardFloat),
         DspRev(NoDSP), HasMSA(false), DisableMadd4(false),
-        UseIndirectJumpHazard(false), FPMode(FPXX) {
+        UseIndirectJumpHazard(false), HasFP64(false) {
     TheCXXABI.set(TargetCXXABI::GenericMIPS);
 
-    if (Triple.isMIPS32())
-      setABI("o32");
-    else if (Triple.getEnvironment() == llvm::Triple::GNUABIN32)
-      setABI("n32");
-    else
-      setABI("n64");
+    setABI(getTriple().isMIPS32() ? "o32" : "n64");
 
     CPU = ABI == "o32" ? "mips32r2" : "mips64r2";
 
-    CanUseBSDABICalls = Triple.isOSFreeBSD() ||
-                        Triple.isOSOpenBSD();
+    CanUseBSDABICalls = Triple.getOS() == llvm::Triple::FreeBSD ||
+                        Triple.getOS() == llvm::Triple::OpenBSD;
   }
 
   bool isIEEE754_2008Default() const {
@@ -132,7 +127,7 @@ public:
   void setN32N64ABITypes() {
     LongDoubleWidth = LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::IEEEquad();
-    if (getTriple().isOSFreeBSD()) {
+    if (getTriple().getOS() == llvm::Triple::FreeBSD) {
       LongDoubleWidth = LongDoubleAlign = 64;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble();
     }
@@ -142,7 +137,7 @@ public:
 
   void setN64ABITypes() {
     setN32N64ABITypes();
-    if (getTriple().isOSOpenBSD()) {
+    if (getTriple().getOS() == llvm::Triple::OpenBSD) {
       Int64Type = SignedLongLong;
     } else {
       Int64Type = SignedLong;
@@ -185,8 +180,6 @@ public:
       Features[CPU] = true;
     return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
   }
-
-  unsigned getISARev() const;
 
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
@@ -312,7 +305,7 @@ public:
     IsSingleFloat = false;
     FloatABI = HardFloat;
     DspRev = NoDSP;
-    FPMode = isFP64Default() ? FP64 : FPXX;
+    HasFP64 = isFP64Default();
 
     for (const auto &Feature : Features) {
       if (Feature == "+single-float")
@@ -332,11 +325,9 @@ public:
       else if (Feature == "+nomadd4")
         DisableMadd4 = true;
       else if (Feature == "+fp64")
-        FPMode = FP64;
+        HasFP64 = true;
       else if (Feature == "-fp64")
-        FPMode = FP32;
-      else if (Feature == "+fpxx")
-        FPMode = FPXX;
+        HasFP64 = false;
       else if (Feature == "+nan2008")
         IsNan2008 = true;
       else if (Feature == "-nan2008")

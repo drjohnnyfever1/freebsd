@@ -30,7 +30,8 @@ public:
   typedef UniqueCStringMap<EnumeratorInfo> EnumerationMap;
   typedef EnumerationMap::Entry EnumerationMapEntry;
 
-  OptionValueEnumeration(const OptionEnumValues &enumerators, enum_type value);
+  OptionValueEnumeration(const OptionEnumValueElement *enumerators,
+                         enum_type value);
 
   ~OptionValueEnumeration() override;
 
@@ -79,7 +80,7 @@ public:
   void SetDefaultValue(enum_type value) { m_default_value = value; }
 
 protected:
-  void SetEnumerations(const OptionEnumValues &enumerators);
+  void SetEnumerations(const OptionEnumValueElement *enumerators);
 
   enum_type m_current_value;
   enum_type m_default_value;

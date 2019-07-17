@@ -46,21 +46,21 @@ class CGCalleeInfo {
   /// The function prototype of the callee.
   const FunctionProtoType *CalleeProtoTy;
   /// The function declaration of the callee.
-  GlobalDecl CalleeDecl;
+  const Decl *CalleeDecl;
 
 public:
-  explicit CGCalleeInfo() : CalleeProtoTy(nullptr), CalleeDecl() {}
-  CGCalleeInfo(const FunctionProtoType *calleeProtoTy, GlobalDecl calleeDecl)
+  explicit CGCalleeInfo() : CalleeProtoTy(nullptr), CalleeDecl(nullptr) {}
+  CGCalleeInfo(const FunctionProtoType *calleeProtoTy, const Decl *calleeDecl)
       : CalleeProtoTy(calleeProtoTy), CalleeDecl(calleeDecl) {}
   CGCalleeInfo(const FunctionProtoType *calleeProtoTy)
-      : CalleeProtoTy(calleeProtoTy), CalleeDecl() {}
-  CGCalleeInfo(GlobalDecl calleeDecl)
+      : CalleeProtoTy(calleeProtoTy), CalleeDecl(nullptr) {}
+  CGCalleeInfo(const Decl *calleeDecl)
       : CalleeProtoTy(nullptr), CalleeDecl(calleeDecl) {}
 
   const FunctionProtoType *getCalleeFunctionProtoType() const {
     return CalleeProtoTy;
   }
-  const GlobalDecl getCalleeDecl() const { return CalleeDecl; }
+  const Decl *getCalleeDecl() const { return CalleeDecl; }
   };
 
   /// All available information about a concrete callee.
@@ -171,7 +171,7 @@ public:
     }
     CGCalleeInfo getAbstractInfo() const {
       if (isVirtual())
-        return VirtualInfo.MD;
+        return VirtualInfo.MD.getDecl();
       assert(isOrdinary());
       return AbstractInfo;
     }

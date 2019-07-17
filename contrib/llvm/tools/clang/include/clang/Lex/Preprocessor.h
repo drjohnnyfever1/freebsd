@@ -29,6 +29,7 @@
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/ModuleMap.h"
 #include "clang/Lex/PPCallbacks.h"
+#include "clang/Lex/PTHLexer.h"
 #include "clang/Lex/Token.h"
 #include "clang/Lex/TokenLexer.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -78,6 +79,7 @@ class PragmaNamespace;
 class PreprocessingRecord;
 class PreprocessorLexer;
 class PreprocessorOptions;
+class PTHManager;
 class ScratchBuffer;
 class TargetInfo;
 
@@ -140,6 +142,10 @@ class Preprocessor {
 
   /// External source of macros.
   ExternalPreprocessorSource *ExternalSource;
+
+  /// An optional PTHManager object used for getting tokens from
+  /// a token cache rather than lexing the original source file.
+  std::unique_ptr<PTHManager> PTH;
 
   /// A BumpPtrAllocator object used to quickly allocate and release
   /// objects internal to the Preprocessor.
@@ -304,9 +310,6 @@ class Preprocessor {
   /// on the stem that is to be code completed.
   IdentifierInfo *CodeCompletionII = nullptr;
 
-  /// Range for the code completion token.
-  SourceRange CodeCompletionTokenRange;
-
   /// The directory that the main file should be considered to occupy,
   /// if it does not correspond to a real file (as happens when building a
   /// module).
@@ -318,10 +321,6 @@ class Preprocessor {
   ///
   /// This is used when loading a precompiled preamble.
   std::pair<int, bool> SkipMainFilePreamble;
-
-  /// Whether we hit an error due to reaching max allowed include depth. Allows
-  /// to avoid hitting the same error over and over again.
-  bool HasReachedMaxIncludeDepth = false;
 
 public:
   struct PreambleSkipInfo {
@@ -390,13 +389,19 @@ private:
   /// The current top of the stack that we're lexing from if
   /// not expanding a macro and we are lexing directly from source code.
   ///
-  /// Only one of CurLexer, or CurTokenLexer will be non-null.
+  /// Only one of CurLexer, CurPTHLexer, or CurTokenLexer will be non-null.
   std::unique_ptr<Lexer> CurLexer;
+
+  /// The current top of stack that we're lexing from if
+  /// not expanding from a macro and we are lexing from a PTH cache.
+  ///
+  /// Only one of CurLexer, CurPTHLexer, or CurTokenLexer will be non-null.
+  std::unique_ptr<PTHLexer> CurPTHLexer;
 
   /// The current top of the stack what we're lexing from
   /// if not expanding a macro.
   ///
-  /// This is an alias for CurLexer.
+  /// This is an alias for either CurLexer or  CurPTHLexer.
   PreprocessorLexer *CurPPLexer = nullptr;
 
   /// Used to find the current FileEntry, if CurLexer is non-null
@@ -414,6 +419,7 @@ private:
   /// The kind of lexer we're currently working with.
   enum CurLexerKind {
     CLK_Lexer,
+    CLK_PTHLexer,
     CLK_TokenLexer,
     CLK_CachingLexer,
     CLK_LexAfterModuleImport
@@ -430,6 +436,7 @@ private:
     enum CurLexerKind           CurLexerKind;
     Module                     *TheSubmodule;
     std::unique_ptr<Lexer>      TheLexer;
+    std::unique_ptr<PTHLexer>   ThePTHLexer;
     PreprocessorLexer          *ThePPLexer;
     std::unique_ptr<TokenLexer> TheTokenLexer;
     const DirectoryLookup      *TheDirLookup;
@@ -438,11 +445,13 @@ private:
     // versions, only needed to pacify MSVC.
     IncludeStackInfo(enum CurLexerKind CurLexerKind, Module *TheSubmodule,
                      std::unique_ptr<Lexer> &&TheLexer,
+                     std::unique_ptr<PTHLexer> &&ThePTHLexer,
                      PreprocessorLexer *ThePPLexer,
                      std::unique_ptr<TokenLexer> &&TheTokenLexer,
                      const DirectoryLookup *TheDirLookup)
         : CurLexerKind(std::move(CurLexerKind)),
           TheSubmodule(std::move(TheSubmodule)), TheLexer(std::move(TheLexer)),
+          ThePTHLexer(std::move(ThePTHLexer)),
           ThePPLexer(std::move(ThePPLexer)),
           TheTokenLexer(std::move(TheTokenLexer)),
           TheDirLookup(std::move(TheDirLookup)) {}
@@ -714,9 +723,6 @@ private:
   /// The file ID for the PCH through header.
   FileID PCHThroughHeaderFileID;
 
-  /// Whether tokens are being skipped until a #pragma hdrstop is seen.
-  bool SkippingUntilPragmaHdrStop = false;
-
   /// Whether tokens are being skipped until the through header is seen.
   bool SkippingUntilPCHThroughHeader = false;
 
@@ -825,6 +831,10 @@ public:
   SelectorTable &getSelectorTable() { return Selectors; }
   Builtin::Context &getBuiltinInfo() { return BuiltinInfo; }
   llvm::BumpPtrAllocator &getPreprocessorAllocator() { return BP; }
+
+  void setPTHManager(PTHManager* pm);
+
+  PTHManager *getPTHManager() { return PTH.get(); }
 
   void setExternalSource(ExternalPreprocessorSource *Source) {
     ExternalSource = Source;
@@ -1112,10 +1122,6 @@ public:
     CodeComplete = nullptr;
   }
 
-  /// Hook used by the lexer to invoke the "included file" code
-  /// completion point.
-  void CodeCompleteIncludedFile(llvm::StringRef Dir, bool IsAngled);
-
   /// Hook used by the lexer to invoke the "natural language" code
   /// completion point.
   void CodeCompleteNaturalLanguage();
@@ -1123,16 +1129,6 @@ public:
   /// Set the code completion token for filtering purposes.
   void setCodeCompletionIdentifierInfo(IdentifierInfo *Filter) {
     CodeCompletionII = Filter;
-  }
-
-  /// Set the code completion token range for detecting replacement range later
-  /// on.
-  void setCodeCompletionTokenRange(const SourceLocation Start,
-                                   const SourceLocation End) {
-    CodeCompletionTokenRange = {Start, End};
-  }
-  SourceRange getCodeCompletionTokenRange() const {
-    return CodeCompletionTokenRange;
   }
 
   /// Get the code completion token for filtering purposes.
@@ -1151,7 +1147,7 @@ public:
   void createPreprocessingRecord();
 
   /// Returns true if the FileEntry is the PCH through header.
-  bool isPCHThroughHeader(const FileEntry *FE);
+  bool isPCHThroughHeader(const FileEntry *File);
 
   /// True if creating a PCH with a through header.
   bool creatingPCHWithThroughHeader();
@@ -1159,19 +1155,11 @@ public:
   /// True if using a PCH with a through header.
   bool usingPCHWithThroughHeader();
 
-  /// True if creating a PCH with a #pragma hdrstop.
-  bool creatingPCHWithPragmaHdrStop();
+  /// Skip tokens until after the #include of the through header.
+  void SkipTokensUntilPCHThroughHeader();
 
-  /// True if using a PCH with a #pragma hdrstop.
-  bool usingPCHWithPragmaHdrStop();
-
-  /// Skip tokens until after the #include of the through header or
-  /// until after a #pragma hdrstop.
-  void SkipTokensWhileUsingPCH();
-
-  /// Process directives while skipping until the through header or
-  /// #pragma hdrstop is found.
-  void HandleSkippedDirectiveWhileUsingPCH(Token &Result,
+  /// Process directives while skipping until the through header is found.
+  void HandleSkippedThroughHeaderDirective(Token &Result,
                                            SourceLocation HashLoc);
 
   /// Enter the specified FileID as the main source file,
@@ -1185,7 +1173,7 @@ public:
   /// start lexing tokens from it instead of the current buffer.
   ///
   /// Emits a diagnostic, doesn't enter the file, and returns true on error.
-  bool EnterSourceFile(FileID FID, const DirectoryLookup *Dir,
+  bool EnterSourceFile(FileID CurFileID, const DirectoryLookup *Dir,
                        SourceLocation Loc);
 
   /// Add a Macro to the top of the include stack and start lexing
@@ -1194,7 +1182,7 @@ public:
   /// \param Args specifies the tokens input to a function-like macro.
   /// \param ILEnd specifies the location of the ')' for a function-like macro
   /// or the identifier for an object-like macro.
-  void EnterMacro(Token &Tok, SourceLocation ILEnd, MacroInfo *Macro,
+  void EnterMacro(Token &Identifier, SourceLocation ILEnd, MacroInfo *Macro,
                   MacroArgs *Args);
 
   /// Add a "macro" context to the top of the include stack,
@@ -1440,7 +1428,7 @@ public:
       CachedTokens[CachedLexPos-1] = Tok;
   }
 
-  /// Recompute the current lexer kind based on the CurLexer/
+  /// Recompute the current lexer kind based on the CurLexer/CurPTHLexer/
   /// CurTokenLexer pointers.
   void recomputeCurLexerKind();
 
@@ -1748,7 +1736,7 @@ public:
   void SetPoisonReason(IdentifierInfo *II, unsigned DiagID);
 
   /// Display reason for poisoned identifier.
-  void HandlePoisonedIdentifier(Token & Identifier);
+  void HandlePoisonedIdentifier(Token & Tok);
 
   void MaybeHandlePoisonedIdentifier(Token & Identifier) {
     if(IdentifierInfo * II = Identifier.getIdentifierInfo()) {
@@ -1813,7 +1801,7 @@ public:
   /// If not, emit a diagnostic and consume up until the eod.
   /// If \p EnableMacros is true, then we consider macros that expand to zero
   /// tokens as being ok.
-  void CheckEndOfDirective(const char *DirType, bool EnableMacros = false);
+  void CheckEndOfDirective(const char *Directive, bool EnableMacros = false);
 
   /// Read and discard all tokens remaining on the current line until
   /// the tok::eod token is found.
@@ -1842,7 +1830,7 @@ public:
   ///
   /// \returns true if the input filename was in <>'s or false if it was
   /// in ""'s.
-  bool GetIncludeFilenameSpelling(SourceLocation Loc,StringRef &Buffer);
+  bool GetIncludeFilenameSpelling(SourceLocation Loc,StringRef &Filename);
 
   /// Given a "foo" or \<foo> reference, look up the indicated file.
   ///
@@ -1885,7 +1873,7 @@ public:
 
   /// Lex an on-off-switch (C99 6.10.6p2) and verify that it is
   /// followed by EOD.  Return true if the token is not a valid on-off-switch.
-  bool LexOnOffSwitch(tok::OnOffSwitch &Result);
+  bool LexOnOffSwitch(tok::OnOffSwitch &OOS);
 
   bool CheckMacroName(Token &MacroNameTok, MacroUse isDefineUndef,
                       bool *ShadowFlag = nullptr);
@@ -1899,13 +1887,15 @@ private:
   void PushIncludeMacroStack() {
     assert(CurLexerKind != CLK_CachingLexer && "cannot push a caching lexer");
     IncludeMacroStack.emplace_back(CurLexerKind, CurLexerSubmodule,
-                                   std::move(CurLexer), CurPPLexer,
-                                   std::move(CurTokenLexer), CurDirLookup);
+                                   std::move(CurLexer), std::move(CurPTHLexer),
+                                   CurPPLexer, std::move(CurTokenLexer),
+                                   CurDirLookup);
     CurPPLexer = nullptr;
   }
 
   void PopIncludeMacroStack() {
     CurLexer = std::move(IncludeMacroStack.back().TheLexer);
+    CurPTHLexer = std::move(IncludeMacroStack.back().ThePTHLexer);
     CurPPLexer = IncludeMacroStack.back().ThePPLexer;
     CurTokenLexer = std::move(IncludeMacroStack.back().TheTokenLexer);
     CurDirLookup  = IncludeMacroStack.back().TheDirLookup;
@@ -1974,6 +1964,9 @@ private:
                                     bool FoundNonSkipPortion, bool FoundElse,
                                     SourceLocation ElseLoc = SourceLocation());
 
+  /// A fast PTH version of SkipExcludedConditionalBlock.
+  void PTHSkipExcludedConditionalBlock();
+
   /// Information about the result for evaluating an expression for a
   /// preprocessor directive.
   struct DirectiveEvalResult {
@@ -2000,7 +1993,7 @@ private:
   /// If an identifier token is read that is to be expanded as a macro, handle
   /// it and return the next token as 'Tok'.  If we lexed a token, return true;
   /// otherwise the caller should lex again.
-  bool HandleMacroExpandedIdentifier(Token &Identifier, const MacroDefinition &MD);
+  bool HandleMacroExpandedIdentifier(Token &Tok, const MacroDefinition &MD);
 
   /// Cache macro expanded tokens for TokenLexers.
   //
@@ -2020,7 +2013,7 @@ private:
   /// After reading "MACRO(", this method is invoked to read all of the formal
   /// arguments specified for the macro invocation.  Returns null on error.
   MacroArgs *ReadMacroCallArgumentList(Token &MacroName, MacroInfo *MI,
-                                       SourceLocation &MacroEnd);
+                                       SourceLocation &ExpansionEnd);
 
   /// If an identifier token is read that is to be expanded
   /// as a builtin macro, handle it and return the next token as 'Tok'.
@@ -2038,6 +2031,10 @@ private:
   /// Add a lexer to the top of the include stack and
   /// start lexing tokens from it instead of the current buffer.
   void EnterSourceFileWithLexer(Lexer *TheLexer, const DirectoryLookup *Dir);
+
+  /// Add a lexer to the top of the include stack and
+  /// start getting tokens from it using the PTH cache.
+  void EnterSourceFileWithPTH(PTHLexer *PL, const DirectoryLookup *Dir);
 
   /// Set the FileID for the preprocessor predefines.
   void setPredefinesFileID(FileID FID) {
@@ -2069,7 +2066,8 @@ private:
   bool InCachingLexMode() const {
     // If the Lexer pointers are 0 and IncludeMacroStack is empty, it means
     // that we are past EOF, not that we are in CachingLex mode.
-    return !CurPPLexer && !CurTokenLexer && !IncludeMacroStack.empty();
+    return !CurPPLexer && !CurTokenLexer && !CurPTHLexer &&
+           !IncludeMacroStack.empty();
   }
 
   void EnterCachingLexMode();
@@ -2166,17 +2164,17 @@ private:
   void replayPreambleConditionalStack();
 
   // Macro handling.
-  void HandleDefineDirective(Token &Tok, bool ImmediatelyAfterHeaderGuard);
+  void HandleDefineDirective(Token &Tok, bool ImmediatelyAfterTopLevelIfndef);
   void HandleUndefDirective();
 
   // Conditional Inclusion.
-  void HandleIfdefDirective(Token &Result, const Token &HashToken,
+  void HandleIfdefDirective(Token &Tok, const Token &HashToken,
                             bool isIfndef, bool ReadAnyTokensBeforeDirective);
-  void HandleIfDirective(Token &IfToken, const Token &HashToken,
+  void HandleIfDirective(Token &Tok, const Token &HashToken,
                          bool ReadAnyTokensBeforeDirective);
-  void HandleEndifDirective(Token &EndifToken);
-  void HandleElseDirective(Token &Result, const Token &HashToken);
-  void HandleElifDirective(Token &ElifToken, const Token &HashToken);
+  void HandleEndifDirective(Token &Tok);
+  void HandleElseDirective(Token &Tok, const Token &HashToken);
+  void HandleElifDirective(Token &Tok, const Token &HashToken);
 
   // Pragmas.
   void HandlePragmaDirective(SourceLocation IntroducerLoc,
@@ -2192,12 +2190,11 @@ public:
   void HandlePragmaPopMacro(Token &Tok);
   void HandlePragmaIncludeAlias(Token &Tok);
   void HandlePragmaModuleBuild(Token &Tok);
-  void HandlePragmaHdrstop(Token &Tok);
   IdentifierInfo *ParsePragmaPushOrPopMacro(Token &Tok);
 
   // Return true and store the first token only if any CommentHandler
   // has inserted some tokens and getCommentRetentionState() is false.
-  bool HandleComment(Token &result, SourceRange Comment);
+  bool HandleComment(Token &Token, SourceRange Comment);
 
   /// A macro is used, update information about macros that need unused
   /// warnings.

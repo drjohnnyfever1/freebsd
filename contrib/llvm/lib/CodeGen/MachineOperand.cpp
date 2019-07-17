@@ -14,7 +14,6 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/Loads.h"
-#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/CodeGen/MIRPrinter.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
@@ -461,8 +460,7 @@ static void printIRValueReference(raw_ostream &OS, const Value &V,
     printLLVMNameWithoutPrefix(OS, V.getName());
     return;
   }
-  int Slot = MST.getCurrentFunction() ? MST.getLocalSlot(&V) : -1;
-  MachineOperand::printIRSlotNumber(OS, Slot);
+  MachineOperand::printIRSlotNumber(OS, MST.getLocalSlot(&V));
 }
 
 static void printSyncScope(raw_ostream &OS, const LLVMContext &Context,
@@ -697,11 +695,6 @@ static void printCFI(raw_ostream &OS, const MCCFIInstruction &CFI,
     if (MCSymbol *Label = CFI.getLabel())
       MachineOperand::printSymbol(OS, *Label);
     break;
-  case MCCFIInstruction::OpNegateRAState:
-    OS << "negate_ra_sign_state ";
-    if (MCSymbol *Label = CFI.getLabel())
-      MachineOperand::printSymbol(OS, *Label);
-    break;
   default:
     // TODO: Print the other CFI Operations.
     OS << "<unserializable cfi directive>";
@@ -749,10 +742,10 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
       OS << "undef ";
     if (isEarlyClobber())
       OS << "early-clobber ";
+    if (isDebug())
+      OS << "debug-use ";
     if (TargetRegisterInfo::isPhysicalRegister(getReg()) && isRenamable())
       OS << "renamable ";
-    // isDebug() is exactly true for register operands of a DBG_VALUE. So we
-    // simply infer it when parsing and do not need to print it.
 
     const MachineRegisterInfo *MRI = nullptr;
     if (TargetRegisterInfo::isVirtualRegister(Reg)) {
@@ -1085,11 +1078,7 @@ void MachineMemOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
   if (getFailureOrdering() != AtomicOrdering::NotAtomic)
     OS << toIRString(getFailureOrdering()) << ' ';
 
-  if (getSize() == MemoryLocation::UnknownSize)
-    OS << "unknown-size";
-  else
-    OS << getSize();
-
+  OS << getSize();
   if (const Value *Val = getValue()) {
     OS << ((isLoad() && isStore()) ? " on " : isLoad() ? " from " : " into ");
     printIRValueReference(OS, *Val, MST);

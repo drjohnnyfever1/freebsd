@@ -61,7 +61,8 @@ void InitializeFlags(Flags *f, const char *env) {
       // Does not work as expected for Go: runtime handles SIGABRT and crashes.
       cf.abort_on_error = false;
       // Go does not have mutexes.
-      cf.detect_deadlocks = false;
+    } else {
+      cf.detect_deadlocks = true;
     }
     cf.print_suppressions = false;
     cf.stack_trace_format = "    #%n %f %S %M";

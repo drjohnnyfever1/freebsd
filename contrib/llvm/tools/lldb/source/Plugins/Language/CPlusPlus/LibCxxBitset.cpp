@@ -79,24 +79,17 @@ ValueObjectSP BitsetFrontEnd::GetChildAtIndex(size_t idx) {
   CompilerType type;
   ValueObjectSP chunk;
   // For small bitsets __first_ is not an array, but a plain size_t.
-  if (m_first->GetCompilerType().IsArrayType(&type, nullptr, nullptr)) {
-    llvm::Optional<uint64_t> bit_size =
-        type.GetBitSize(ctx.GetBestExecutionContextScope());
-    if (!bit_size || *bit_size == 0)
-      return {};
-    chunk = m_first->GetChildAtIndex(idx / *bit_size, true);
-  } else {
+  if (m_first->GetCompilerType().IsArrayType(&type, nullptr, nullptr))
+    chunk = m_first->GetChildAtIndex(
+        idx / type.GetBitSize(ctx.GetBestExecutionContextScope()), true);
+  else {
     type = m_first->GetCompilerType();
     chunk = m_first;
   }
   if (!type || !chunk)
-    return {};
+    return ValueObjectSP();
 
-  llvm::Optional<uint64_t> bit_size =
-      type.GetBitSize(ctx.GetBestExecutionContextScope());
-  if (!bit_size || *bit_size == 0)
-    return {};
-  size_t chunk_idx = idx % *bit_size;
+  size_t chunk_idx = idx % type.GetBitSize(ctx.GetBestExecutionContextScope());
   uint8_t value = !!(chunk->GetValueAsUnsigned(0) & (uint64_t(1) << chunk_idx));
   DataExtractor data(&value, sizeof(value), m_byte_order, m_byte_size);
 

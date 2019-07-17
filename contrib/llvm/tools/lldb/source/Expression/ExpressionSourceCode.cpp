@@ -105,7 +105,10 @@ public:
       if (m_file_stack.back() != m_current_file)
         return true;
 
-      return line < m_current_file_line;
+      if (line >= m_current_file_line)
+        return false;
+      else
+        return true;
     default:
       return false;
     }
@@ -375,5 +378,7 @@ bool ExpressionSourceCode::GetOriginalBodyBounds(
     return false;
   start_loc += strlen(start_marker);
   end_loc = transformed_text.find(end_marker);
-  return end_loc != std::string::npos;
+  if (end_loc == std::string::npos)
+    return false;
+  return true;
 }

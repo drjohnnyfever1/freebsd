@@ -85,7 +85,7 @@ const FunctionDecl *SVal::getAsFunctionDecl() const {
 SymbolRef SVal::getAsLocSymbol(bool IncludeBaseRegions) const {
   // FIXME: should we consider SymbolRef wrapped in CodeTextRegion?
   if (Optional<nonloc::LocAsInteger> X = getAs<nonloc::LocAsInteger>())
-    return X->getLoc().getAsLocSymbol(IncludeBaseRegions);
+    return X->getLoc().getAsLocSymbol();
 
   if (Optional<loc::MemRegionVal> X = getAs<loc::MemRegionVal>()) {
     const MemRegion *R = X->getRegion();
@@ -169,10 +169,6 @@ const void *nonloc::LazyCompoundVal::getStore() const {
 
 const TypedValueRegion *nonloc::LazyCompoundVal::getRegion() const {
   return static_cast<const LazyCompoundValData*>(Data)->getRegion();
-}
-
-bool nonloc::PointerToMember::isNullMemberPointer() const {
-  return getPTMData().isNull();
 }
 
 const DeclaratorDecl *nonloc::PointerToMember::getDecl() const {

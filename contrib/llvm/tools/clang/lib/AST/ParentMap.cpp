@@ -163,7 +163,7 @@ bool ParentMap::isConsumedExpr(Expr* E) const {
 
   // Ignore parents that don't guarantee consumption.
   while (P && (isa<ParenExpr>(P) || isa<CastExpr>(P) ||
-               isa<FullExpr>(P))) {
+               isa<ExprWithCleanups>(P))) {
     DirectChild = P;
     P = getParent(P);
   }

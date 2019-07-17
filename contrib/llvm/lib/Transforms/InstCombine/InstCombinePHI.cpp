@@ -211,20 +211,20 @@ Instruction *InstCombiner::FoldIntegerTypedPHI(PHINode &PN) {
   }
 
   // If it requires a conversion for every PHI operand, do not do it.
-  if (all_of(AvailablePtrVals, [&](Value *V) {
-        return (V->getType() != IntToPtr->getType()) || isa<IntToPtrInst>(V);
-      }))
+  if (std::all_of(AvailablePtrVals.begin(), AvailablePtrVals.end(),
+                  [&](Value *V) {
+                    return (V->getType() != IntToPtr->getType()) ||
+                           isa<IntToPtrInst>(V);
+                  }))
     return nullptr;
 
   // If any of the operand that requires casting is a terminator
   // instruction, do not do it.
-  if (any_of(AvailablePtrVals, [&](Value *V) {
-        if (V->getType() == IntToPtr->getType())
-          return false;
-
-        auto *Inst = dyn_cast<Instruction>(V);
-        return Inst && Inst->isTerminator();
-      }))
+  if (std::any_of(AvailablePtrVals.begin(), AvailablePtrVals.end(),
+                  [&](Value *V) {
+                    return (V->getType() != IntToPtr->getType()) &&
+                           isa<TerminatorInst>(V);
+                  }))
     return nullptr;
 
   PHINode *NewPtrPHI = PHINode::Create(
@@ -608,7 +608,6 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
     LLVMContext::MD_align,
     LLVMContext::MD_dereferenceable,
     LLVMContext::MD_dereferenceable_or_null,
-    LLVMContext::MD_access_group,
   };
 
   for (unsigned ID : KnownIDs)
@@ -617,7 +616,7 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
   // Add all operands to the new PHI and combine TBAA metadata.
   for (unsigned i = 1, e = PN.getNumIncomingValues(); i != e; ++i) {
     LoadInst *LI = cast<LoadInst>(PN.getIncomingValue(i));
-    combineMetadata(NewLI, LI, KnownIDs, true);
+    combineMetadata(NewLI, LI, KnownIDs);
     Value *NewInVal = LI->getOperand(0);
     if (NewInVal != InVal)
       InVal = nullptr;
@@ -650,7 +649,7 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
 Instruction *InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
   // We cannot create a new instruction after the PHI if the terminator is an
   // EHPad because there is no valid insertion point.
-  if (Instruction *TI = Phi.getParent()->getTerminator())
+  if (TerminatorInst *TI = Phi.getParent()->getTerminator())
     if (TI->isEHPad())
       return nullptr;
 
@@ -724,7 +723,7 @@ Instruction *InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
 Instruction *InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
   // We cannot create a new instruction after the PHI if the terminator is an
   // EHPad because there is no valid insertion point.
-  if (Instruction *TI = PN.getParent()->getTerminator())
+  if (TerminatorInst *TI = PN.getParent()->getTerminator())
     if (TI->isEHPad())
       return nullptr;
 

@@ -366,9 +366,6 @@ public:
                                     AccountRecordState *state) {
     auto &TS = ThreadStackMap[R.TId];
     switch (R.Type) {
-    case RecordTypes::CUSTOM_EVENT:
-    case RecordTypes::TYPED_EVENT:
-      return AccountRecordStatus::OK;
     case RecordTypes::ENTER:
     case RecordTypes::ENTER_ARG: {
       state->wasLastRecordExit = false;
@@ -737,7 +734,7 @@ static CommandRegistration Unused(&Stack, []() -> Error {
                 Twine("Failed loading input file '") + Filename + "'",
                 std::make_error_code(std::errc::invalid_argument)),
             TraceOrErr.takeError());
-      logAllUnhandledErrors(TraceOrErr.takeError(), errs());
+      logAllUnhandledErrors(TraceOrErr.takeError(), errs(), "");
       continue;
     }
     auto &T = *TraceOrErr;

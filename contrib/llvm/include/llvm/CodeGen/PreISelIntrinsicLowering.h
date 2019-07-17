@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This pass implements IR lowering for the llvm.load.relative and llvm.objc.*
-// intrinsics.
+// This pass implements IR lowering for the llvm.load.relative intrinsic.
 //
 //===----------------------------------------------------------------------===//
 #ifndef LLVM_CODEGEN_PREISELINTRINSICLOWERING_H

@@ -13,9 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenDAGPatterns.h"
-#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -28,7 +26,6 @@
 #include "llvm/TableGen/Record.h"
 #include <algorithm>
 #include <cstdio>
-#include <iterator>
 #include <set>
 using namespace llvm;
 
@@ -102,29 +99,22 @@ bool TypeSetByHwMode::isPossible() const {
 
 bool TypeSetByHwMode::insert(const ValueTypeByHwMode &VVT) {
   bool Changed = false;
-  bool ContainsDefault = false;
-  MVT DT = MVT::Other;
-
   SmallDenseSet<unsigned, 4> Modes;
   for (const auto &P : VVT) {
     unsigned M = P.first;
     Modes.insert(M);
     // Make sure there exists a set for each specific mode from VVT.
     Changed |= getOrCreate(M).insert(P.second).second;
-    // Cache VVT's default mode.
-    if (DefaultMode == M) {
-      ContainsDefault = true;
-      DT = P.second;
-    }
   }
 
   // If VVT has a default mode, add the corresponding type to all
   // modes in "this" that do not exist in VVT.
-  if (ContainsDefault)
+  if (Modes.count(DefaultMode)) {
+    MVT DT = VVT.getType(DefaultMode);
     for (auto &I : *this)
       if (!Modes.count(I.first))
         Changed |= I.second.insert(DT).second;
-
+  }
   return Changed;
 }
 
@@ -208,17 +198,15 @@ void TypeSetByHwMode::writeToStream(const SetType &S, raw_ostream &OS) {
 }
 
 bool TypeSetByHwMode::operator==(const TypeSetByHwMode &VTS) const {
-  // The isSimple call is much quicker than hasDefault - check this first.
-  bool IsSimple = isSimple();
-  bool VTSIsSimple = VTS.isSimple();
-  if (IsSimple && VTSIsSimple)
-    return *begin() == *VTS.begin();
-
-  // Speedup: We have a default if the set is simple.
-  bool HaveDefault = IsSimple || hasDefault();
-  bool VTSHaveDefault = VTSIsSimple || VTS.hasDefault();
-  if (HaveDefault != VTSHaveDefault)
+  bool HaveDefault = hasDefault();
+  if (HaveDefault != VTS.hasDefault())
     return false;
+
+  if (isSimple()) {
+    if (VTS.isSimple())
+      return *begin() == *VTS.begin();
+    return false;
+  }
 
   SmallDenseSet<unsigned, 4> Modes;
   for (auto &I : *this)
@@ -743,12 +731,17 @@ bool TypeInfer::EnforceSameSize(TypeSetByHwMode &A, TypeSetByHwMode &B) {
 
 void TypeInfer::expandOverloads(TypeSetByHwMode &VTS) {
   ValidateOnExit _1(VTS, *this);
-  const TypeSetByHwMode &Legal = getLegalTypes();
-  assert(Legal.isDefaultOnly() && "Default-mode only expected");
-  const TypeSetByHwMode::SetType &LegalTypes = Legal.get(DefaultMode);
+  TypeSetByHwMode Legal = getLegalTypes();
+  bool HaveLegalDef = Legal.hasDefault();
 
-  for (auto &I : VTS)
-    expandOverloads(I.second, LegalTypes);
+  for (auto &I : VTS) {
+    unsigned M = I.first;
+    if (!Legal.hasMode(M) && !HaveLegalDef) {
+      TP.error("Invalid mode " + Twine(M));
+      return;
+    }
+    expandOverloads(I.second, Legal.get(M));
+  }
 }
 
 void TypeInfer::expandOverloads(TypeSetByHwMode::SetType &Out,
@@ -800,17 +793,17 @@ void TypeInfer::expandOverloads(TypeSetByHwMode::SetType &Out,
   }
 }
 
-const TypeSetByHwMode &TypeInfer::getLegalTypes() {
+TypeSetByHwMode TypeInfer::getLegalTypes() {
   if (!LegalTypesCached) {
-    TypeSetByHwMode::SetType &LegalTypes = LegalCache.getOrCreate(DefaultMode);
     // Stuff all types from all modes into the default mode.
     const TypeSetByHwMode &LTS = TP.getDAGPatterns().getLegalTypes();
     for (const auto &I : LTS)
-      LegalTypes.insert(I.second);
+      LegalCache.insert(I.second);
     LegalTypesCached = true;
   }
-  assert(LegalCache.isDefaultOnly() && "Default-mode only expected");
-  return LegalCache;
+  TypeSetByHwMode VTS;
+  VTS.getOrCreate(DefaultMode) = LegalCache;
+  return VTS;
 }
 
 #ifndef NDEBUG
@@ -825,20 +818,6 @@ TypeInfer::ValidateOnExit::~ValidateOnExit() {
   }
 }
 #endif
-
-
-//===----------------------------------------------------------------------===//
-// ScopedName Implementation
-//===----------------------------------------------------------------------===//
-
-bool ScopedName::operator==(const ScopedName &o) const {
-  return Scope == o.Scope && Identifier == o.Identifier;
-}
-
-bool ScopedName::operator!=(const ScopedName &o) const {
-  return !(*this == o);
-}
-
 
 //===----------------------------------------------------------------------===//
 // TreePredicateFn Implementation
@@ -1085,9 +1064,6 @@ bool TreePredicateFn::isPredefinedPredicateEqualTo(StringRef Field,
     return false;
   return Result == Value;
 }
-bool TreePredicateFn::usesOperands() const {
-  return isPredefinedPredicateEqualTo("PredicateCodeUsesOperands", true);
-}
 bool TreePredicateFn::isLoad() const {
   return isPredefinedPredicateEqualTo("IsLoad", true);
 }
@@ -1269,7 +1245,7 @@ std::string TreePredicateFn::getCodeToRunOnSDNode() const {
   else
     Result = "    auto *N = cast<" + ClassName.str() + ">(Node);\n";
 
-  return (Twine(Result) + "    (void)N;\n" + getPredCode()).str();
+  return Result + getPredCode();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1295,14 +1271,14 @@ static unsigned getPatternSize(const TreePatternNode *P,
 
   // If this node has some predicate function that must match, it adds to the
   // complexity of this node.
-  if (!P->getPredicateCalls().empty())
+  if (!P->getPredicateFns().empty())
     ++Size;
 
   // Count children in the count if they are also nodes.
   for (unsigned i = 0, e = P->getNumChildren(); i != e; ++i) {
     const TreePatternNode *Child = P->getChild(i);
     if (!Child->isLeaf() && Child->getNumTypes()) {
-      const TypeSetByHwMode &T0 = Child->getExtType(0);
+      const TypeSetByHwMode &T0 = Child->getType(0);
       // At this point, all variable type sets should be simple, i.e. only
       // have a default mode.
       if (T0.getMachineValueType() != MVT::Other) {
@@ -1315,7 +1291,7 @@ static unsigned getPatternSize(const TreePatternNode *P,
         Size += 5;  // Matches a ConstantSDNode (+3) and a specific value (+2).
       else if (Child->getComplexPatternInfo(CGP))
         Size += getPatternSize(Child, CGP);
-      else if (!Child->getPredicateCalls().empty())
+      else if (!Child->getPredicateFns().empty())
         ++Size;
     }
   }
@@ -1337,7 +1313,7 @@ std::string PatternToMatch::getPredicateCheck() const {
   SmallVector<const Predicate*,4> PredList;
   for (const Predicate &P : Predicates)
     PredList.push_back(&P);
-  llvm::sort(PredList, deref<llvm::less>());
+  llvm::sort(PredList.begin(), PredList.end(), deref<llvm::less>());
 
   std::string Check;
   for (unsigned i = 0, e = PredList.size(); i != e; ++i) {
@@ -1770,19 +1746,13 @@ void TreePatternNode::print(raw_ostream &OS) const {
     OS << ")";
   }
 
-  for (const TreePredicateCall &Pred : PredicateCalls) {
-    OS << "<<P:";
-    if (Pred.Scope)
-      OS << Pred.Scope << ":";
-    OS << Pred.Fn.getFnName() << ">>";
-  }
+  for (const TreePredicateFn &Pred : PredicateFns)
+    OS << "<<P:" << Pred.getFnName() << ">>";
   if (TransformFn)
     OS << "<<X:" << TransformFn->getName() << ">>";
   if (!getName().empty())
     OS << ":$" << getName();
 
-  for (const ScopedName &Name : NamesAsPredicateArg)
-    OS << ":$pred:" << Name.getScope() << ":" << Name.getIdentifier();
 }
 void TreePatternNode::dump() const {
   print(errs());
@@ -1799,7 +1769,7 @@ bool TreePatternNode::isIsomorphicTo(const TreePatternNode *N,
                                      const MultipleUseVarSet &DepVars) const {
   if (N == this) return true;
   if (N->isLeaf() != isLeaf() || getExtTypes() != N->getExtTypes() ||
-      getPredicateCalls() != N->getPredicateCalls() ||
+      getPredicateFns() != N->getPredicateFns() ||
       getTransformFn() != N->getTransformFn())
     return false;
 
@@ -1837,9 +1807,8 @@ TreePatternNodePtr TreePatternNode::clone() const {
                                             getNumTypes());
   }
   New->setName(getName());
-  New->setNamesAsPredicateArg(getNamesAsPredicateArg());
   New->Types = Types;
-  New->setPredicateCalls(getPredicateCalls());
+  New->setPredicateFns(getPredicateFns());
   New->setTransformFn(getTransformFn());
   return New;
 }
@@ -1871,8 +1840,8 @@ void TreePatternNode::SubstituteFormalArguments(
         // We found a use of a formal argument, replace it with its value.
         TreePatternNodePtr NewChild = ArgMap[Child->getName()];
         assert(NewChild && "Couldn't find formal argument!");
-        assert((Child->getPredicateCalls().empty() ||
-                NewChild->getPredicateCalls() == Child->getPredicateCalls()) &&
+        assert((Child->getPredicateFns().empty() ||
+                NewChild->getPredicateFns() == Child->getPredicateFns()) &&
                "Non-empty child predicate clobbered!");
         setChild(i, std::move(NewChild));
       }
@@ -1918,8 +1887,8 @@ void TreePatternNode::InlinePatternFragments(
         return;
 
       for (auto NewChild : ChildAlternatives[i])
-        assert((Child->getPredicateCalls().empty() ||
-                NewChild->getPredicateCalls() == Child->getPredicateCalls()) &&
+        assert((Child->getPredicateFns().empty() ||
+                NewChild->getPredicateFns() == Child->getPredicateFns()) &&
                "Non-empty child predicate clobbered!");
     }
 
@@ -1937,13 +1906,10 @@ void TreePatternNode::InlinePatternFragments(
 
       // Copy over properties.
       R->setName(getName());
-      R->setNamesAsPredicateArg(getNamesAsPredicateArg());
-      R->setPredicateCalls(getPredicateCalls());
+      R->setPredicateFns(getPredicateFns());
       R->setTransformFn(getTransformFn());
       for (unsigned i = 0, e = getNumTypes(); i != e; ++i)
         R->setType(i, getExtType(i));
-      for (unsigned i = 0, e = getNumResults(); i != e; ++i)
-        R->setResultIndex(i, getResultIndex(i));
 
       // Register alternative.
       OutAlternatives.push_back(R);
@@ -1975,19 +1941,10 @@ void TreePatternNode::InlinePatternFragments(
     return;
   }
 
-  TreePredicateFn PredFn(Frag);
-  unsigned Scope = 0;
-  if (TreePredicateFn(Frag).usesOperands())
-    Scope = TP.getDAGPatterns().allocateScope();
-
   // Compute the map of formal to actual arguments.
   std::map<std::string, TreePatternNodePtr> ArgMap;
   for (unsigned i = 0, e = Frag->getNumArgs(); i != e; ++i) {
-    TreePatternNodePtr Child = getChildShared(i);
-    if (Scope != 0) {
-      Child = Child->clone();
-      Child->addNameAsPredicateArg(ScopedName(Scope, Frag->getArgName(i)));
-    }
+    const TreePatternNodePtr &Child = getChildShared(i);
     ArgMap[Frag->getArgName(i)] = Child;
   }
 
@@ -1995,8 +1952,9 @@ void TreePatternNode::InlinePatternFragments(
   for (auto Alternative : Frag->getTrees()) {
     TreePatternNodePtr FragTree = Alternative->clone();
 
+    TreePredicateFn PredFn(Frag);
     if (!PredFn.isAlwaysTrue())
-      FragTree->addPredicateCall(PredFn, Scope);
+      FragTree->addPredicateFn(PredFn);
 
     // Resolve formal arguments to their actual value.
     if (Frag->getNumArgs())
@@ -2009,8 +1967,8 @@ void TreePatternNode::InlinePatternFragments(
       FragTree->UpdateNodeType(i, getExtType(i), TP);
 
     // Transfer in the old predicates.
-    for (const TreePredicateCall &Pred : getPredicateCalls())
-      FragTree->addPredicateCall(Pred);
+    for (const TreePredicateFn &Pred : getPredicateFns())
+      FragTree->addPredicateFn(Pred);
 
     // The fragment we inlined could have recursive inlining that is needed.  See
     // if there are any pattern fragments in it and inline them as needed.
@@ -3074,6 +3032,13 @@ void CodeGenDAGPatterns::ParsePatternFragments(bool OutFrags) {
       P->error("Operands list does not contain an entry for operand '" +
                *OperandsSet.begin() + "'!");
 
+    // If there is a code init for this fragment, keep track of the fact that
+    // this fragment uses it.
+    TreePredicateFn PredFn(P);
+    if (!PredFn.isAlwaysTrue())
+      for (auto T : P->getTrees())
+        T->addPredicateFn(PredFn);
+
     // If there is a node transformation corresponding to this, keep track of
     // it.
     Record *Transform = Frag->getValueAsDef("OperandTransform");
@@ -3211,8 +3176,7 @@ static bool HandleUse(TreePattern &I, TreePatternNodePtr Pat,
 void CodeGenDAGPatterns::FindPatternInputsAndOutputs(
     TreePattern &I, TreePatternNodePtr Pat,
     std::map<std::string, TreePatternNodePtr> &InstInputs,
-    MapVector<std::string, TreePatternNodePtr, std::map<std::string, unsigned>>
-        &InstResults,
+    std::map<std::string, TreePatternNodePtr> &InstResults,
     std::vector<Record *> &InstImpResults) {
 
   // The instruction pattern still has unresolved fragments.  For *named*
@@ -3532,8 +3496,7 @@ void CodeGenDAGPatterns::parseInstructionPattern(
 
   // InstResults - Keep track of all the virtual registers that are 'set'
   // in the instruction, including what reg class they are.
-  MapVector<std::string, TreePatternNodePtr, std::map<std::string, unsigned>>
-      InstResults;
+  std::map<std::string, TreePatternNodePtr> InstResults;
 
   std::vector<Record*> InstImpResults;
 
@@ -3570,28 +3533,19 @@ void CodeGenDAGPatterns::parseInstructionPattern(
 
   // Check that all of the results occur first in the list.
   std::vector<Record*> Results;
-  std::vector<unsigned> ResultIndices;
   SmallVector<TreePatternNodePtr, 2> ResNodes;
   for (unsigned i = 0; i != NumResults; ++i) {
-    if (i == CGI.Operands.size()) {
-      const std::string &OpName =
-          std::find_if(InstResults.begin(), InstResults.end(),
-                       [](const std::pair<std::string, TreePatternNodePtr> &P) {
-                         return P.second;
-                       })
-              ->first;
-
-      I.error("'" + OpName + "' set but does not appear in operand list!");
-    }
-
+    if (i == CGI.Operands.size())
+      I.error("'" + InstResults.begin()->first +
+               "' set but does not appear in operand list!");
     const std::string &OpName = CGI.Operands[i].Name;
 
     // Check that it exists in InstResults.
-    auto InstResultIter = InstResults.find(OpName);
-    if (InstResultIter == InstResults.end() || !InstResultIter->second)
+    TreePatternNodePtr RNode = InstResults[OpName];
+    if (!RNode)
       I.error("Operand $" + OpName + " does not exist in operand list!");
 
-    TreePatternNodePtr RNode = InstResultIter->second;
+
     Record *R = cast<DefInit>(RNode->getLeafValue())->getDef();
     ResNodes.push_back(std::move(RNode));
     if (!R)
@@ -3604,11 +3558,8 @@ void CodeGenDAGPatterns::parseInstructionPattern(
     // Remember the return type.
     Results.push_back(CGI.Operands[i].Rec);
 
-    // Remember the result index.
-    ResultIndices.push_back(std::distance(InstResults.begin(), InstResultIter));
-
     // Okay, this one checks out.
-    InstResultIter->second = nullptr;
+    InstResults.erase(OpName);
   }
 
   // Loop over the inputs next.
@@ -3647,7 +3598,7 @@ void CodeGenDAGPatterns::parseInstructionPattern(
     TreePatternNodePtr OpNode = InVal->clone();
 
     // No predicate is useful on the result.
-    OpNode->clearPredicateCalls();
+    OpNode->clearPredicateFns();
 
     // Promote the xform function to be an explicit node if set.
     if (Record *Xform = OpNode->getTransformFn()) {
@@ -3672,7 +3623,6 @@ void CodeGenDAGPatterns::parseInstructionPattern(
   for (unsigned i = 0; i != NumResults; ++i) {
     assert(ResNodes[i]->getNumTypes() == 1 && "FIXME: Unhandled");
     ResultPattern->setType(i, ResNodes[i]->getExtType(0));
-    ResultPattern->setResultIndex(i, ResultIndices[i]);
   }
 
   // FIXME: Assume only the first tree is the pattern. The others are clobber
@@ -3787,7 +3737,7 @@ std::vector<Predicate> CodeGenDAGPatterns::makePredList(ListInit *L) {
   }
 
   // Sort so that different orders get canonicalized to the same string.
-  llvm::sort(Preds);
+  llvm::sort(Preds.begin(), Preds.end());
   return Preds;
 }
 
@@ -4132,8 +4082,7 @@ void CodeGenDAGPatterns::ParsePatterns() {
 
     // Validate that the input pattern is correct.
     std::map<std::string, TreePatternNodePtr> InstInputs;
-    MapVector<std::string, TreePatternNodePtr, std::map<std::string, unsigned>>
-        InstResults;
+    std::map<std::string, TreePatternNodePtr> InstResults;
     std::vector<Record*> InstImpResults;
     for (unsigned j = 0, ee = Pattern.getNumTrees(); j != ee; ++j)
       FindPatternInputsAndOutputs(Pattern, Pattern.getTree(j), InstInputs,
@@ -4304,8 +4253,7 @@ static void CombineChildVariants(
 
     // Copy over properties.
     R->setName(Orig->getName());
-    R->setNamesAsPredicateArg(Orig->getNamesAsPredicateArg());
-    R->setPredicateCalls(Orig->getPredicateCalls());
+    R->setPredicateFns(Orig->getPredicateFns());
     R->setTransformFn(Orig->getTransformFn());
     for (unsigned i = 0, e = Orig->getNumTypes(); i != e; ++i)
       R->setType(i, Orig->getExtType(i));
@@ -4357,7 +4305,7 @@ GatherChildrenOfAssociativeOpcode(TreePatternNodePtr N,
   Record *Operator = N->getOperator();
 
   // Only permit raw nodes.
-  if (!N->getName().empty() || !N->getPredicateCalls().empty() ||
+  if (!N->getName().empty() || !N->getPredicateFns().empty() ||
       N->getTransformFn()) {
     Children.push_back(N);
     return;
@@ -4508,18 +4456,8 @@ void CodeGenDAGPatterns::GenerateVariants() {
   // intentionally do not reconsider these.  Any variants of added patterns have
   // already been added.
   //
-  const unsigned NumOriginalPatterns = PatternsToMatch.size();
-  BitVector MatchedPatterns(NumOriginalPatterns);
-  std::vector<BitVector> MatchedPredicates(NumOriginalPatterns,
-                                           BitVector(NumOriginalPatterns));
-
-  typedef std::pair<MultipleUseVarSet, std::vector<TreePatternNodePtr>>
-      DepsAndVariants;
-  std::map<unsigned, DepsAndVariants> PatternsWithVariants;
-
-  // Collect patterns with more than one variant.
-  for (unsigned i = 0; i != NumOriginalPatterns; ++i) {
-    MultipleUseVarSet DepVars;
+  for (unsigned i = 0, e = PatternsToMatch.size(); i != e; ++i) {
+    MultipleUseVarSet             DepVars;
     std::vector<TreePatternNodePtr> Variants;
     FindDepVars(PatternsToMatch[i].getSrcPattern(), DepVars);
     LLVM_DEBUG(errs() << "Dependent/multiply used variables: ");
@@ -4529,46 +4467,14 @@ void CodeGenDAGPatterns::GenerateVariants() {
                        *this, DepVars);
 
     assert(!Variants.empty() && "Must create at least original variant!");
-    if (Variants.size() == 1) // No additional variants for this pattern.
+    if (Variants.size() == 1)  // No additional variants for this pattern.
       continue;
 
     LLVM_DEBUG(errs() << "FOUND VARIANTS OF: ";
                PatternsToMatch[i].getSrcPattern()->dump(); errs() << "\n");
 
-    PatternsWithVariants[i] = std::make_pair(DepVars, Variants);
-
-    // Cache matching predicates.
-    if (MatchedPatterns[i])
-      continue;
-
-    const std::vector<Predicate> &Predicates =
-        PatternsToMatch[i].getPredicates();
-
-    BitVector &Matches = MatchedPredicates[i];
-    MatchedPatterns.set(i);
-    Matches.set(i);
-
-    // Don't test patterns that have already been cached - it won't match.
-    for (unsigned p = 0; p != NumOriginalPatterns; ++p)
-      if (!MatchedPatterns[p])
-        Matches[p] = (Predicates == PatternsToMatch[p].getPredicates());
-
-    // Copy this to all the matching patterns.
-    for (int p = Matches.find_first(); p != -1; p = Matches.find_next(p))
-      if (p != (int)i) {
-        MatchedPatterns.set(p);
-        MatchedPredicates[p] = Matches;
-      }
-  }
-
-  for (auto it : PatternsWithVariants) {
-    unsigned i = it.first;
-    const MultipleUseVarSet &DepVars = it.second.first;
-    const std::vector<TreePatternNodePtr> &Variants = it.second.second;
-
     for (unsigned v = 0, e = Variants.size(); v != e; ++v) {
       TreePatternNodePtr Variant = Variants[v];
-      BitVector &Matches = MatchedPredicates[i];
 
       LLVM_DEBUG(errs() << "  VAR#" << v << ": "; Variant->dump();
                  errs() << "\n");
@@ -4577,7 +4483,8 @@ void CodeGenDAGPatterns::GenerateVariants() {
       bool AlreadyExists = false;
       for (unsigned p = 0, e = PatternsToMatch.size(); p != e; ++p) {
         // Skip if the top level predicates do not match.
-        if (!Matches[p])
+        if (PatternsToMatch[i].getPredicates() !=
+            PatternsToMatch[p].getPredicates())
           continue;
         // Check to see if this variant already exists.
         if (Variant->isIsomorphicTo(PatternsToMatch[p].getSrcPattern(),
@@ -4596,11 +4503,6 @@ void CodeGenDAGPatterns::GenerateVariants() {
           Variant, PatternsToMatch[i].getDstPatternShared(),
           PatternsToMatch[i].getDstRegs(),
           PatternsToMatch[i].getAddedComplexity(), Record::getNewUID()));
-      MatchedPredicates.push_back(Matches);
-
-      // Add a new match the same as this pattern.
-      for (auto &P : MatchedPredicates)
-        P.push_back(P[i]);
     }
 
     LLVM_DEBUG(errs() << "\n");

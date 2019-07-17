@@ -11,22 +11,22 @@
 #define liblldb_IOHandler_h_
 
 #include "lldb/Core/ValueObjectList.h"
+#include "lldb/Host/Predicate.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Flags.h"
-#include "lldb/Utility/Predicate.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StringList.h"
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-forward.h"
-#include "llvm/ADT/StringRef.h"
+#include "lldb/lldb-defines.h"  // for DISALLOW_COPY_AND_ASSIGN
+#include "lldb/lldb-forward.h"  // for IOHandlerSP, StreamFileSP
+#include "llvm/ADT/StringRef.h" // for StringRef
 
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
-#include <stdint.h>
-#include <stdio.h>
+#include <stdint.h> // for uint32_t
+#include <stdio.h>  // for FILE
 
 namespace lldb_private {
 class Debugger;
@@ -205,7 +205,7 @@ public:
   virtual int IOHandlerComplete(IOHandler &io_handler, const char *current_line,
                                 const char *cursor, const char *last_char,
                                 int skip_first_n_matches, int max_matches,
-                                StringList &matches, StringList &descriptions);
+                                StringList &matches);
 
   virtual const char *IOHandlerGetFixIndentationCharacters() { return nullptr; }
 
@@ -430,8 +430,7 @@ private:
   static int AutoCompleteCallback(const char *current_line, const char *cursor,
                                   const char *last_char,
                                   int skip_first_n_matches, int max_matches,
-                                  StringList &matches, StringList &descriptions,
-                                  void *baton);
+                                  StringList &matches, void *baton);
 #endif
 
 protected:
@@ -465,7 +464,7 @@ public:
   int IOHandlerComplete(IOHandler &io_handler, const char *current_line,
                         const char *cursor, const char *last_char,
                         int skip_first_n_matches, int max_matches,
-                        StringList &matches, StringList &descriptions) override;
+                        StringList &matches) override;
 
   void IOHandlerInputComplete(IOHandler &io_handler,
                               std::string &data) override;

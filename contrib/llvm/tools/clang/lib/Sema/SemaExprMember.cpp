@@ -496,7 +496,7 @@ Sema::ActOnDependentMemberExpr(Expr *BaseExpr, QualType BaseType,
   // allows this, while still reporting an error if T is a struct pointer.
   if (!IsArrow) {
     const PointerType *PT = BaseType->getAs<PointerType>();
-    if (PT && (!getLangOpts().ObjC ||
+    if (PT && (!getLangOpts().ObjC1 ||
                PT->getPointeeType()->isRecordType())) {
       assert(BaseExpr && "cannot happen with implicit member accesses");
       Diag(OpLoc, diag::err_typecheck_member_reference_struct_union)
@@ -1708,31 +1708,9 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
   }
 
   ActOnMemberAccessExtraArgs ExtraArgs = {S, Id, ObjCImpDecl};
-  ExprResult Res = BuildMemberReferenceExpr(
-      Base, Base->getType(), OpLoc, IsArrow, SS, TemplateKWLoc,
-      FirstQualifierInScope, NameInfo, TemplateArgs, S, &ExtraArgs);
-
-  if (!Res.isInvalid() && isa<MemberExpr>(Res.get()))
-    CheckMemberAccessOfNoDeref(cast<MemberExpr>(Res.get()));
-
-  return Res;
-}
-
-void Sema::CheckMemberAccessOfNoDeref(const MemberExpr *E) {
-  QualType ResultTy = E->getType();
-
-  // Do not warn on member accesses to arrays since this returns an array
-  // lvalue and does not actually dereference memory.
-  if (isa<ArrayType>(ResultTy))
-    return;
-
-  if (E->isArrow()) {
-    if (const auto *Ptr = dyn_cast<PointerType>(
-            E->getBase()->getType().getDesugaredType(Context))) {
-      if (Ptr->getPointeeType()->hasAttr(attr::NoDeref))
-        ExprEvalContexts.back().PossibleDerefs.insert(E);
-    }
-  }
+  return BuildMemberReferenceExpr(Base, Base->getType(), OpLoc, IsArrow, SS,
+                                  TemplateKWLoc, FirstQualifierInScope,
+                                  NameInfo, TemplateArgs, S, &ExtraArgs);
 }
 
 ExprResult

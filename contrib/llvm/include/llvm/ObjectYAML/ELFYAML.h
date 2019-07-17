@@ -68,7 +68,6 @@ struct FileHeader {
   ELF_ELFCLASS Class;
   ELF_ELFDATA Data;
   ELF_ELFOSABI OSABI;
-  llvm::yaml::Hex8 ABIVersion;
   ELF_ET Type;
   ELF_EM Machine;
   ELF_EF Flags;
@@ -124,7 +123,6 @@ struct Section {
   StringRef Link;
   StringRef Info;
   llvm::yaml::Hex64 AddressAlign;
-  Optional<llvm::yaml::Hex64> EntSize;
 
   Section(SectionKind Kind) : Kind(Kind) {}
   virtual ~Section();

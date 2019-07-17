@@ -150,7 +150,7 @@ void til::simplifyIncompleteArg(til::Phi *Ph) {
 }
 
 // Renumbers the arguments and instructions to have unique, sequential IDs.
-unsigned BasicBlock::renumberInstrs(unsigned ID) {
+int BasicBlock::renumberInstrs(int ID) {
   for (auto *Arg : Args)
     Arg->setID(this, ID++);
   for (auto *Instr : Instrs)
@@ -163,8 +163,7 @@ unsigned BasicBlock::renumberInstrs(unsigned ID) {
 // Each block will be written into the Blocks array in order, and its BlockID
 // will be set to the index in the array.  Sorting should start from the entry
 // block, and ID should be the total number of blocks.
-unsigned BasicBlock::topologicalSort(SimpleArray<BasicBlock *> &Blocks,
-                                     unsigned ID) {
+int BasicBlock::topologicalSort(SimpleArray<BasicBlock *> &Blocks, int ID) {
   if (Visited) return ID;
   Visited = true;
   for (auto *Block : successors())
@@ -187,8 +186,7 @@ unsigned BasicBlock::topologicalSort(SimpleArray<BasicBlock *> &Blocks,
 // critical edges, and (3) the entry block is reachable from the exit block
 // and no blocks are accessible via traversal of back-edges from the exit that
 // weren't accessible via forward edges from the entry.
-unsigned BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock *> &Blocks,
-                                          unsigned ID) {
+int BasicBlock::topologicalFinalSort(SimpleArray<BasicBlock*>& Blocks, int ID) {
   // Visited is assumed to have been set by the topologicalSort.  This pass
   // assumes !Visited means that we've visited this node before.
   if (!Visited) return ID;
@@ -259,7 +257,7 @@ void BasicBlock::computePostDominator() {
 
 // Renumber instructions in all blocks
 void SCFG::renumberInstrs() {
-  unsigned InstrID = 0;
+  int InstrID = 0;
   for (auto *Block : Blocks)
     InstrID = Block->renumberInstrs(InstrID);
 }
@@ -290,11 +288,11 @@ static inline void computeNodeID(BasicBlock *B,
 // 3) Topologically sorting the blocks into the "Blocks" array.
 void SCFG::computeNormalForm() {
   // Topologically sort the blocks starting from the entry block.
-  unsigned NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
+  int NumUnreachableBlocks = Entry->topologicalSort(Blocks, Blocks.size());
   if (NumUnreachableBlocks > 0) {
     // If there were unreachable blocks shift everything down, and delete them.
-    for (unsigned I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I) {
-      unsigned NI = I - NumUnreachableBlocks;
+    for (size_t I = NumUnreachableBlocks, E = Blocks.size(); I < E; ++I) {
+      size_t NI = I - NumUnreachableBlocks;
       Blocks[NI] = Blocks[I];
       Blocks[NI]->BlockID = NI;
       // FIXME: clean up predecessor pointers to unreachable blocks?
@@ -307,7 +305,7 @@ void SCFG::computeNormalForm() {
     Block->computeDominator();
 
   // Once dominators have been computed, the final sort may be performed.
-  unsigned NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
+  int NumBlocks = Exit->topologicalFinalSort(Blocks, 0);
   assert(static_cast<size_t>(NumBlocks) == Blocks.size());
   (void) NumBlocks;
 
