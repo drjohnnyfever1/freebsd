@@ -31,7 +31,7 @@
 
 #include "_libelf.h"
 
-ELFTC_VCSID("$Id: libelf_phdr.c 3632 2018-10-10 21:12:43Z jkoshy $");
+ELFTC_VCSID("$Id: libelf_phdr.c 3174 2015-03-27 17:13:41Z emaste $");
 
 void *
 _libelf_getphdr(Elf *e, int ec)
@@ -42,7 +42,8 @@ _libelf_getphdr(Elf *e, int ec)
 	Elf32_Ehdr *eh32;
 	Elf64_Ehdr *eh64;
 	void *ehdr, *phdr;
-	_libelf_translator_function *xlator;
+	int (*xlator)(unsigned char *_d, size_t _dsz, unsigned char *_s,
+	    size_t _c, int _swap);
 
 	assert(ec == ELFCLASS32 || ec == ELFCLASS64);
 
@@ -97,8 +98,7 @@ _libelf_getphdr(Elf *e, int ec)
 		e->e_u.e_elf.e_phdr.e_phdr64 = phdr;
 
 
-	xlator = _libelf_get_translator(ELF_T_PHDR, ELF_TOMEMORY, ec,
-	    _libelf_elfmachine(e));
+	xlator = _libelf_get_translator(ELF_T_PHDR, ELF_TOMEMORY, ec);
 	(*xlator)(phdr, phnum * msz, e->e_rawfile + phoff, phnum,
 	    e->e_byteorder != LIBELF_PRIVATE(byteorder));
 

@@ -29,7 +29,7 @@
 
 #include "_libelf.h"
 
-ELFTC_VCSID("$Id: libelf_xlate.c 3632 2018-10-10 21:12:43Z jkoshy $");
+ELFTC_VCSID("$Id: libelf_xlate.c 3174 2015-03-27 17:13:41Z emaste $");
 
 /*
  * Translate to/from the file representation of ELF objects.
@@ -45,12 +45,11 @@ ELFTC_VCSID("$Id: libelf_xlate.c 3632 2018-10-10 21:12:43Z jkoshy $");
 
 Elf_Data *
 _libelf_xlate(Elf_Data *dst, const Elf_Data *src, unsigned int encoding,
-    int elfclass, int elfmachine, int direction)
+    int elfclass, int direction)
 {
 	int byteswap;
 	size_t cnt, dsz, fsz, msz;
 	uintptr_t sb, se, db, de;
-	_libelf_translator_function *xlator;
 
 	if (encoding == ELFDATANONE)
 		encoding = LIBELF_PRIVATE(byteorder);
@@ -139,9 +138,8 @@ _libelf_xlate(Elf_Data *dst, const Elf_Data *src, unsigned int encoding,
 	    (db == sb && !byteswap && fsz == msz))
 		return (dst);	/* nothing more to do */
 
-	xlator = _libelf_get_translator(src->d_type, direction, elfclass,
-	    elfmachine);
-	if (!xlator(dst->d_buf, dsz, src->d_buf, cnt, byteswap)) {
+	if (!(_libelf_get_translator(src->d_type, direction, elfclass))
+	    (dst->d_buf, dsz, src->d_buf, cnt, byteswap)) {
 		LIBELF_SET_ERROR(DATA, 0);
 		return (NULL);
 	}

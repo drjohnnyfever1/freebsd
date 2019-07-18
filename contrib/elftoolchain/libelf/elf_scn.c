@@ -36,7 +36,7 @@
 
 #include "_libelf.h"
 
-ELFTC_VCSID("$Id: elf_scn.c 3632 2018-10-10 21:12:43Z jkoshy $");
+ELFTC_VCSID("$Id: elf_scn.c 3177 2015-03-30 18:19:41Z emaste $");
 
 static int
 elfscn_cmp(struct _Elf_Scn *s1, struct _Elf_Scn *s2)
@@ -64,7 +64,8 @@ _libelf_load_section_headers(Elf *e, void *ehdr)
 	int ec, swapbytes;
 	unsigned char *src;
 	size_t fsz, i, shnum;
-	_libelf_translator_function *xlator;
+	int (*xlator)(unsigned char *_d, size_t _dsz, unsigned char *_s,
+	    size_t _c, int _swap);
 
 	assert(e != NULL);
 	assert(ehdr != NULL);
@@ -96,8 +97,7 @@ _libelf_load_section_headers(Elf *e, void *ehdr)
 		CHECK_EHDR(e, eh64);
 	}
 
-	xlator = _libelf_get_translator(ELF_T_SHDR, ELF_TOMEMORY, ec,
-	    _libelf_elfmachine(e));
+	xlator = _libelf_get_translator(ELF_T_SHDR, ELF_TOMEMORY, ec);
 
 	swapbytes = e->e_byteorder != LIBELF_PRIVATE(byteorder);
 	src = e->e_rawfile + shoff;
