@@ -2499,7 +2499,7 @@ pmap_remove_l2(pmap_t pmap, pt_entry_t *l2, vm_offset_t sva,
 /*
  * pmap_remove_l3: do the things to unmap a page in a process
  */
-static int __unused
+static int
 pmap_remove_l3(pmap_t pmap, pt_entry_t *l3, vm_offset_t va,
     pd_entry_t l2e, struct spglist *free, struct rwlock **lockp)
 {
@@ -4839,6 +4839,118 @@ out:
 void
 pmap_advise(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, int advice)
 {
+	struct rwlock *lock;
+	vm_offset_t va, va_next;
+	vm_page_t m;
+	pd_entry_t *l0, *l1, *l2, oldl2;
+	pt_entry_t *l3, oldl3;
+
+	if (advice != MADV_DONTNEED && advice != MADV_FREE)
+		return;
+
+	PMAP_LOCK(pmap);
+	for (; sva < eva; sva = va_next) {
+		l0 = pmap_l0(pmap, sva);
+		if (pmap_load(l0) == 0) {
+			va_next = (sva + L0_SIZE) & ~L0_OFFSET;
+			if (va_next < sva)
+				va_next = eva;
+			continue;
+		}
+		l1 = pmap_l0_to_l1(l0, sva);
+		if (pmap_load(l1) == 0) {
+			va_next = (sva + L1_SIZE) & ~L1_OFFSET;
+			if (va_next < sva)
+				va_next = eva;
+			continue;
+		}
+		va_next = (sva + L2_SIZE) & ~L2_OFFSET;
+		if (va_next < sva)
+			va_next = eva;
+		l2 = pmap_l1_to_l2(l1, sva);
+		oldl2 = pmap_load(l2);
+		if (oldl2 == 0)
+			continue;
+		if ((oldl2 & ATTR_DESCR_MASK) == L2_BLOCK) {
+			if ((oldl2 & ATTR_SW_MANAGED) == 0)
+				continue;
+			lock = NULL;
+			if (!pmap_demote_l2_locked(pmap, l2, sva, &lock)) {
+				if (lock != NULL)
+					rw_wunlock(lock);
+
+				/*
+				 * The 2MB page mapping was destroyed.
+				 */
+				continue;
+			}
+
+			/*
+			 * Unless the page mappings are wired, remove the
+			 * mapping to a single page so that a subsequent
+			 * access may repromote.  Choosing the last page
+			 * within the address range [sva, min(va_next, eva))
+			 * generally results in more repromotions.  Since the
+			 * underlying page table page is fully populated, this
+			 * removal never frees a page table page.
+			 */
+			if ((oldl2 & ATTR_SW_WIRED) == 0) {
+				va = eva;
+				if (va > va_next)
+					va = va_next;
+				va -= PAGE_SIZE;
+				KASSERT(va >= sva,
+				    ("pmap_advise: no address gap"));
+				l3 = pmap_l2_to_l3(l2, va);
+				KASSERT(pmap_load(l3) != 0,
+				    ("pmap_advise: invalid PTE"));
+				pmap_remove_l3(pmap, l3, va, pmap_load(l2),
+				    NULL, &lock);
+			}
+			if (lock != NULL)
+				rw_wunlock(lock);
+		}
+		KASSERT((pmap_load(l2) & ATTR_DESCR_MASK) == L2_TABLE,
+		    ("pmap_advise: invalid L2 entry after demotion"));
+		if (va_next > eva)
+			va_next = eva;
+		va = va_next;
+		for (l3 = pmap_l2_to_l3(l2, sva); sva != va_next; l3++,
+		    sva += L3_SIZE) {
+			oldl3 = pmap_load(l3);
+			if ((oldl3 & (ATTR_SW_MANAGED | ATTR_DESCR_MASK)) !=
+			    (ATTR_SW_MANAGED | L3_PAGE))
+				goto maybe_invlrng;
+			else if (pmap_pte_dirty(oldl3)) {
+				if (advice == MADV_DONTNEED) {
+					/*
+					 * Future calls to pmap_is_modified()
+					 * can be avoided by making the page
+					 * dirty now.
+					 */
+					m = PHYS_TO_VM_PAGE(oldl3 & ~ATTR_MASK);
+					vm_page_dirty(m);
+				}
+				while (!atomic_fcmpset_long(l3, &oldl3,
+				    (oldl3 & ~ATTR_AF) | ATTR_AP(ATTR_AP_RO)))
+					cpu_spinwait();
+			} else if ((oldl3 & ATTR_AF) != 0)
+				pmap_clear_bits(l3, ATTR_AF);
+			else
+				goto maybe_invlrng;
+			if (va == va_next)
+				va = sva;
+			continue;
+maybe_invlrng:
+			if (va != va_next) {
+				pmap_invalidate_range(pmap, va, sva);
+				va = va_next;
+			}
+		}
+		if (va != va_next)
+			pmap_invalidate_range(pmap, va, sva);
+	}
+	PMAP_UNLOCK(pmap);
 }
 
 /*
@@ -4889,28 +5001,22 @@ restart:
 		va = pv->pv_va;
 		l2 = pmap_l2(pmap, va);
 		oldl2 = pmap_load(l2);
-		if ((oldl2 & ATTR_SW_DBM) != 0) {
-			if (pmap_demote_l2_locked(pmap, l2, va, &lock)) {
-				if ((oldl2 & ATTR_SW_WIRED) == 0) {
-					/*
-					 * Write protect the mapping to a
-					 * single page so that a subsequent
-					 * write access may repromote.
-					 */
-					va += VM_PAGE_TO_PHYS(m) -
-					    (oldl2 & ~ATTR_MASK);
-					l3 = pmap_l2_to_l3(l2, va);
-					oldl3 = pmap_load(l3);
-					if (pmap_l3_valid(oldl3)) {
-						while (!atomic_fcmpset_long(l3,
-						    &oldl3, (oldl3 & ~ATTR_SW_DBM) |
-						    ATTR_AP(ATTR_AP_RO)))
-							cpu_spinwait();
-						vm_page_dirty(m);
-						pmap_invalidate_page(pmap, va);
-					}
-				}
-			}
+		/* If oldl2 has ATTR_SW_DBM set, then it is also dirty. */
+		if ((oldl2 & ATTR_SW_DBM) != 0 &&
+		    pmap_demote_l2_locked(pmap, l2, va, &lock) &&
+		    (oldl2 & ATTR_SW_WIRED) == 0) {
+			/*
+			 * Write protect the mapping to a single page so that
+			 * a subsequent write access may repromote.
+			 */
+			va += VM_PAGE_TO_PHYS(m) - (oldl2 & ~ATTR_MASK);
+			l3 = pmap_l2_to_l3(l2, va);
+			oldl3 = pmap_load(l3);
+			while (!atomic_fcmpset_long(l3, &oldl3,
+			    (oldl3 & ~ATTR_SW_DBM) | ATTR_AP(ATTR_AP_RO)))
+				cpu_spinwait();
+			vm_page_dirty(m);
+			pmap_invalidate_page(pmap, va);
 		}
 		PMAP_UNLOCK(pmap);
 	}
@@ -5645,7 +5751,7 @@ pmap_sync_icache(pmap_t pmap, vm_offset_t va, vm_size_t sz)
 int
 pmap_fault(pmap_t pmap, uint64_t esr, uint64_t far)
 {
-	pt_entry_t *pte;
+	pt_entry_t pte, *ptep;
 	register_t intr;
 	uint64_t ec, par;
 	int lvl, rv;
@@ -5669,9 +5775,9 @@ pmap_fault(pmap_t pmap, uint64_t esr, uint64_t far)
 	case ISS_DATA_DFSC_AFF_L2:
 	case ISS_DATA_DFSC_AFF_L3:
 		PMAP_LOCK(pmap);
-		pte = pmap_pte(pmap, far, &lvl);
-		if (pte != NULL) {
-			pmap_set_bits(pte, ATTR_AF);
+		ptep = pmap_pte(pmap, far, &lvl);
+		if (ptep != NULL) {
+			pmap_set_bits(ptep, ATTR_AF);
 			rv = KERN_SUCCESS;
 			/*
 			 * XXXMJ as an optimization we could mark the entry
@@ -5687,12 +5793,13 @@ pmap_fault(pmap_t pmap, uint64_t esr, uint64_t far)
 		    (esr & ISS_DATA_WnR) == 0)
 			return (rv);
 		PMAP_LOCK(pmap);
-		pte = pmap_pte(pmap, far, &lvl);
-		if (pte != NULL &&
-		    (pmap_load(pte) & (ATTR_AP_RW_BIT | ATTR_SW_DBM)) ==
-		    (ATTR_AP(ATTR_AP_RO) | ATTR_SW_DBM)) {
-			pmap_clear_bits(pte, ATTR_AP_RW_BIT);
-			pmap_invalidate_page(pmap, trunc_page(far));
+		ptep = pmap_pte(pmap, far, &lvl);
+		if (ptep != NULL &&
+		    ((pte = pmap_load(ptep)) & ATTR_SW_DBM) != 0) {
+			if ((pte & ATTR_AP_RW_BIT) == ATTR_AP(ATTR_AP_RO)) {
+				pmap_clear_bits(ptep, ATTR_AP_RW_BIT);
+				pmap_invalidate_page(pmap, far);
+			}
 			rv = KERN_SUCCESS;
 		}
 		PMAP_UNLOCK(pmap);
