@@ -270,9 +270,11 @@ rs_destroy(epoch_context_t ctx)
 
 }
 
+#ifdef INET
 extern counter_u64_t rate_limit_set_ok;
 extern counter_u64_t rate_limit_active;
 extern counter_u64_t rate_limit_alloc_fail;
+#endif
 
 static int
 rl_attach_txrtlmt(struct ifnet *ifp,
@@ -294,12 +296,14 @@ rl_attach_txrtlmt(struct ifnet *ifp,
 		error = EOPNOTSUPP;
 	} else {
 		error = ifp->if_snd_tag_alloc(ifp, &params, tag);
+#ifdef INET
 		if (error == 0) {
 			if_ref((*tag)->ifp);
 			counter_u64_add(rate_limit_set_ok, 1);
 			counter_u64_add(rate_limit_active, 1);
 		} else
 			counter_u64_add(rate_limit_alloc_fail, 1);
+#endif
 	}
 	return (error);
 }
@@ -945,7 +949,7 @@ use_real_interface:
 		 * We use an atomic here for accounting so we don't have to
 		 * use locks when freeing.
 		 */
-		atomic_add_long(&rs->rs_flows_using, 1);
+		atomic_add_64(&rs->rs_flows_using, 1);
 	}
 	epoch_exit_preempt(net_epoch_preempt, &et);
 	return (rte);
@@ -1186,7 +1190,7 @@ tcp_rel_pacing_rate(const struct tcp_hwrate_limit_table *crte, struct tcpcb *tp)
 	 * in order to release our refcount.
 	 */
 	rs = __DECONST(struct tcp_rate_set *, crs);
-	pre = atomic_fetchadd_long(&rs->rs_flows_using, -1);
+	pre = atomic_fetchadd_64(&rs->rs_flows_using, -1);
 	if (pre == 1) {
 		mtx_lock(&rs_mtx);
 		/*
