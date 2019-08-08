@@ -78,9 +78,9 @@ cam/cam_xpt.c			optional scbus
 cam/ata/ata_all.c		optional scbus
 cam/ata/ata_xpt.c		optional scbus
 cam/ata/ata_pmp.c		optional scbus
-cam/nvme/nvme_all.c		optional scbus nvme
-cam/nvme/nvme_da.c		optional scbus nvme da
-cam/nvme/nvme_xpt.c		optional scbus nvme
+cam/nvme/nvme_all.c		optional scbus
+cam/nvme/nvme_da.c		optional nda | da
+cam/nvme/nvme_xpt.c		optional scbus
 cam/scsi/scsi_xpt.c		optional scbus
 cam/scsi/scsi_all.c		optional scbus
 cam/scsi/scsi_cd.c		optional cd
@@ -1759,6 +1759,8 @@ dev/extres/clk/clk_mux.c	optional ext_resources clk fdt
 dev/extres/phy/phy.c		optional ext_resources phy fdt
 dev/extres/phy/phydev_if.m	optional ext_resources phy fdt
 dev/extres/phy/phynode_if.m	optional ext_resources phy fdt
+dev/extres/phy/phy_usb.c	optional ext_resources phy fdt
+dev/extres/phy/phynode_usb_if.m	optional ext_resources phy fdt
 dev/extres/hwreset/hwreset.c	optional ext_resources hwreset fdt
 dev/extres/hwreset/hwreset_if.m	optional ext_resources hwreset fdt
 dev/extres/nvmem/nvmem.c	optional ext_resources nvmem fdt
@@ -1783,6 +1785,7 @@ dev/fdt/fdt_slicer.c		optional fdt cfi | fdt nand | fdt mx25l | fdt n25q | fdt a
 dev/fdt/fdt_static_dtb.S	optional fdt fdt_dtb_static \
 	dependency	"${FDT_DTS_FILE:T:R}.dtb"
 dev/fdt/simplebus.c		optional fdt
+dev/fdt/simple_mfd.c		optional fdt
 dev/fe/if_fe.c			optional fe
 dev/fe/if_fe_pccard.c		optional fe pccard
 dev/filemon/filemon.c		optional filemon
