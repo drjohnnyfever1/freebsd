@@ -440,6 +440,10 @@
             files
             ..
         ..
+        ping
+        ..
+        ping6
+        ..
     ..
     secure
         lib

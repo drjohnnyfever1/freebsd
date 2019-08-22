@@ -261,6 +261,8 @@ main(int argc, char *const *argv)
 #endif
 	cap_rights_t rights;
 
+	options |= F_NUMERIC;
+
 	/*
 	 * Do the stuff that we need root priv's for *first*, and
 	 * then drop our setuid bit.  Save error reporting for
@@ -297,7 +299,7 @@ main(int argc, char *const *argv)
 
 	outpack = outpackhdr + sizeof(struct ip);
 	while ((ch = getopt(argc, argv,
-		"Aac:DdfG:g:h:I:i:Ll:M:m:nop:QqRrS:s:T:t:vW:z:"
+		"Aac:DdfG:g:Hh:I:i:Ll:M:m:nop:QqRrS:s:T:t:vW:z:"
 #ifdef IPSEC
 #ifdef IPSEC_POLICY_IPSEC
 		"P:"
@@ -362,6 +364,9 @@ main(int argc, char *const *argv)
 			}
 			options |= F_SWEEP;
 			sweepmin = ltmp;
+			break;
+		case 'H':
+			options &= ~F_NUMERIC;
 			break;
 		case 'h': /* Packet size increment for ping sweep */
 			ltmp = strtol(optarg, &ep, 0);
@@ -610,6 +615,7 @@ main(int argc, char *const *argv)
 	}
 
 	/* From now on we will use only reverse DNS lookups. */
+#ifdef WITH_CASPER
 	if (capdns != NULL) {
 		const char *types[1];
 
@@ -617,7 +623,7 @@ main(int argc, char *const *argv)
 		if (cap_dns_type_limit(capdns, types, 1) < 0)
 			err(1, "unable to limit access to system.dns service");
 	}
-
+#endif
 	if (connect(ssend, (struct sockaddr *)&whereto, sizeof(whereto)) != 0)
 		err(1, "connect");
 
@@ -1167,8 +1173,7 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from, struct timespec *tv)
 			(void)write(STDOUT_FILENO, &BSPACE, 1);
 		else {
 			(void)printf("%d bytes from %s: icmp_seq=%u", cc,
-			   inet_ntoa(*(struct in_addr *)&from->sin_addr.s_addr),
-			   seq);
+			    pr_addr(from->sin_addr), seq);
 			(void)printf(" ttl=%d", ip->ip_ttl);
 			if (timing)
 				(void)printf(" time=%.3f ms", triptime);
@@ -1661,7 +1666,7 @@ pr_retip(struct ip *ip)
 static char *
 pr_ntime(n_time timestamp)
 {
-	static char buf[10];
+	static char buf[11];
 	int hour, min, sec;
 
 	sec = ntohl(timestamp) / 1000;
@@ -1709,9 +1714,10 @@ static cap_channel_t *
 capdns_setup(void)
 {
 	cap_channel_t *capcas, *capdnsloc;
+#ifdef WITH_CASPER
 	const char *types[2];
 	int families[1];
-
+#endif
 	capcas = cap_init();
 	if (capcas == NULL)
 		err(1, "unable to create casper process");
@@ -1720,6 +1726,7 @@ capdns_setup(void)
 	cap_close(capcas);
 	if (capdnsloc == NULL)
 		err(1, "unable to open system.dns service");
+#ifdef WITH_CASPER
 	types[0] = "NAME2ADDR";
 	types[1] = "ADDR2NAME";
 	if (cap_dns_type_limit(capdnsloc, types, 2) < 0)
@@ -1727,7 +1734,7 @@ capdns_setup(void)
 	families[0] = AF_INET;
 	if (cap_dns_family_limit(capdnsloc, families, 1) < 0)
 		err(1, "unable to limit access to system.dns service");
-
+#endif
 	return (capdnsloc);
 }
 
@@ -1741,11 +1748,11 @@ usage(void)
 {
 
 	(void)fprintf(stderr, "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
-"usage: ping [-AaDdfnoQqRrv] [-c count] [-G sweepmaxsize] [-g sweepminsize]",
+"usage: ping [-AaDdfHnoQqRrv] [-c count] [-G sweepmaxsize] [-g sweepminsize]",
 "            [-h sweepincrsize] [-i wait] [-l preload] [-M mask | time] [-m ttl]",
 "           " SECOPT " [-p pattern] [-S src_addr] [-s packetsize] [-t timeout]",
 "            [-W waittime] [-z tos] host",
-"       ping [-AaDdfLnoQqRrv] [-c count] [-I iface] [-i wait] [-l preload]",
+"       ping [-AaDdfHLnoQqRrv] [-c count] [-I iface] [-i wait] [-l preload]",
 "            [-M mask | time] [-m ttl]" SECOPT " [-p pattern] [-S src_addr]",
 "            [-s packetsize] [-T ttl] [-t timeout] [-W waittime]",
 "            [-z tos] mcast-group");
