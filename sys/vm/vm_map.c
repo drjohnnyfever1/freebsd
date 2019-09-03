@@ -546,12 +546,20 @@ vm_map_entry_set_vnode_text(vm_map_entry_t entry, bool add)
 		    "entry %p, object %p, add %d", entry, object, add));
 	}
 	if (vp != NULL) {
-		if (add)
+		if (add) {
 			VOP_SET_TEXT_CHECKED(vp);
-		else
+			VM_OBJECT_RUNLOCK(object);
+		} else {
+			vhold(vp);
+			VM_OBJECT_RUNLOCK(object);
+			vn_lock(vp, LK_SHARED | LK_RETRY);
 			VOP_UNSET_TEXT_CHECKED(vp);
+			VOP_UNLOCK(vp, 0);
+			vdrop(vp);
+		}
+	} else {
+		VM_OBJECT_RUNLOCK(object);
 	}
-	VM_OBJECT_RUNLOCK(object);
 }
 
 static void
@@ -4148,8 +4156,20 @@ vm_map_stack_locked(vm_map_t map, vm_offset_t addrbos, vm_size_t max_ssize,
 	rv = vm_map_insert(map, NULL, 0, gap_bot, gap_top, VM_PROT_NONE,
 	    VM_PROT_NONE, MAP_CREATE_GUARD | (orient == MAP_STACK_GROWS_DOWN ?
 	    MAP_CREATE_STACK_GAP_DN : MAP_CREATE_STACK_GAP_UP));
-	if (rv != KERN_SUCCESS)
+	if (rv == KERN_SUCCESS) {
+		/*
+		 * Gap can never successfully handle a fault, so
+		 * read-ahead logic is never used for it.  Re-use
+		 * next_read of the gap entry to store
+		 * stack_guard_page for vm_map_growstack().
+		 */
+		if (orient == MAP_STACK_GROWS_DOWN)
+			new_entry->prev->next_read = sgp;
+		else
+			new_entry->next->next_read = sgp;
+	} else {
 		(void)vm_map_delete(map, bot, top);
+	}
 	return (rv);
 }
 
@@ -4190,7 +4210,6 @@ vm_map_growstack(vm_map_t map, vm_offset_t addr, vm_map_entry_t gap_entry)
 
 	MPASS(!map->system_map);
 
-	guard = stack_guard_page * PAGE_SIZE;
 	lmemlim = lim_cur(curthread, RLIMIT_MEMLOCK);
 	stacklim = lim_cur(curthread, RLIMIT_STACK);
 	vmemlim = lim_cur(curthread, RLIMIT_VMEM);
@@ -4217,6 +4236,7 @@ retry:
 	} else {
 		return (KERN_FAILURE);
 	}
+	guard = gap_entry->next_read;
 	max_grow = gap_entry->end - gap_entry->start;
 	if (guard > max_grow)
 		return (KERN_NO_SPACE);
