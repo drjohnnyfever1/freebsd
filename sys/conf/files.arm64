@@ -51,6 +51,7 @@ arm/allwinner/if_awg.c		optional	awg ext_resources syscon aw_sid nvmem fdt
 arm/allwinner/clkng/aw_ccung.c		optional	aw_ccu fdt
 arm/allwinner/clkng/aw_clk_frac.c	optional	aw_ccu fdt
 arm/allwinner/clkng/aw_clk_m.c		optional	aw_ccu fdt
+arm/allwinner/clkng/aw_clk_mipi.c	optional	aw_ccu fdt
 arm/allwinner/clkng/aw_clk_nkmp.c	optional	aw_ccu fdt
 arm/allwinner/clkng/aw_clk_nm.c		optional	aw_ccu fdt
 arm/allwinner/clkng/aw_clk_prediv_mux.c	optional	aw_ccu fdt
@@ -174,6 +175,9 @@ arm64/coresight/coresight-dynamic-replicator.c	standard
 arm64/coresight/coresight-etm4x.c		standard
 arm64/coresight/coresight-funnel.c		standard
 arm64/coresight/coresight-tmc.c			standard
+arm64/intel/firmware.c				optional soc_intel_stratix10
+arm64/intel/stratix10-soc-fpga-mgr.c		optional soc_intel_stratix10
+arm64/intel/stratix10-svc.c			optional soc_intel_stratix10
 arm64/qualcomm/qcom_gcc.c			optional qcom_gcc fdt
 contrib/vchiq/interface/compat/vchi_bsd.c	optional vchiq soc_brcm_bcm2837 \
 	compile-with "${NORMAL_C} -DUSE_VCHIQ_ARM -D__VCCOREVER__=0x04000000 -I$S/contrib/vchiq"
@@ -233,7 +237,7 @@ dev/pci/pci_host_generic.c	optional	pci
 dev/pci/pci_host_generic_acpi.c	optional	pci acpi
 dev/pci/pci_host_generic_fdt.c	optional	pci fdt
 dev/psci/psci.c			standard
-dev/psci/psci_arm64.S		standard
+dev/psci/smccc_arm64.S		standard
 dev/psci/smccc.c		standard
 dev/sdhci/sdhci_xenon.c		optional	sdhci_xenon sdhci fdt
 dev/uart/uart_cpu_arm64.c	optional	uart
@@ -278,6 +282,7 @@ arm64/rockchip/rk805.c			optional fdt rk805 soc_rockchip_rk3328 | fdt rk805 soc_
 arm64/rockchip/rk_grf.c			optional fdt soc_rockchip_rk3328 | fdt soc_rockchip_rk3399
 arm64/rockchip/rk_pinctrl.c		optional fdt rk_pinctrl soc_rockchip_rk3328 | fdt rk_pinctrl soc_rockchip_rk3399
 arm64/rockchip/rk_gpio.c		optional fdt rk_gpio soc_rockchip_rk3328 | fdt rk_gpio soc_rockchip_rk3399
+arm64/rockchip/rk_usb2phy.c		optional fdt rk_usb2phy soc_rockchip_rk3328 | soc_rockchip_rk3399
 arm64/rockchip/if_dwc_rk.c		optional fdt dwc_rk soc_rockchip_rk3328 | fdt dwc_rk soc_rockchip_rk3399
 dev/dwc/if_dwc.c			optional fdt dwc_rk soc_rockchip_rk3328 | fdt dwc_rk soc_rockchip_rk3399
 dev/dwc/if_dwc_if.m			optional fdt dwc_rk soc_rockchip_rk3328 | fdt dwc_rk soc_rockchip_rk3399

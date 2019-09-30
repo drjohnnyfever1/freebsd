@@ -87,9 +87,12 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/racct.h>
+#include <sys/refcount.h>
 #include <sys/resourcevar.h>
 #include <sys/rwlock.h>
+#include <sys/signalvar.h>
 #include <sys/sysctl.h>
+#include <sys/sysent.h>
 #include <sys/vmmeter.h>
 #include <sys/vnode.h>
 #ifdef KTRACE
@@ -339,7 +342,7 @@ vm_fault_restore_map_lock(struct faultstate *fs)
 {
 
 	VM_OBJECT_ASSERT_WLOCKED(fs->first_object);
-	MPASS(fs->first_object->paging_in_progress > 0);
+	MPASS(REFCOUNT_COUNT(fs->first_object->paging_in_progress) > 0);
 
 	if (!vm_map_trylock_read(fs->map)) {
 		VM_OBJECT_WUNLOCK(fs->first_object);
@@ -394,7 +397,7 @@ vm_fault_populate(struct faultstate *fs, vm_prot_t prot, int fault_type,
 
 	MPASS(fs->object == fs->first_object);
 	VM_OBJECT_ASSERT_WLOCKED(fs->first_object);
-	MPASS(fs->first_object->paging_in_progress > 0);
+	MPASS(REFCOUNT_COUNT(fs->first_object->paging_in_progress) > 0);
 	MPASS(fs->first_object->backing_object == NULL);
 	MPASS(fs->lookup_still_valid);
 
@@ -519,8 +522,19 @@ vm_fault_populate(struct faultstate *fs, vm_prot_t prot, int fault_type,
 	return (KERN_SUCCESS);
 }
 
+static int prot_fault_translation;
+SYSCTL_INT(_machdep, OID_AUTO, prot_fault_translation, CTLFLAG_RWTUN,
+    &prot_fault_translation, 0,
+    "Control signal to deliver on protection fault");
+
+/* compat definition to keep common code for signal translation */
+#define	UCODE_PAGEFLT	12
+#ifdef T_PAGEFLT
+_Static_assert(UCODE_PAGEFLT == T_PAGEFLT, "T_PAGEFLT");
+#endif
+
 /*
- *	vm_fault:
+ *	vm_fault_trap:
  *
  *	Handle a page fault occurring at the given address,
  *	requiring the given permissions, in the map specified.
@@ -537,12 +551,13 @@ vm_fault_populate(struct faultstate *fs, vm_prot_t prot, int fault_type,
  *	Caller may hold no locks.
  */
 int
-vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
-    int fault_flags)
+vm_fault_trap(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
+    int fault_flags, int *signo, int *ucode)
 {
 	struct thread *td;
 	int result;
 
+	MPASS(signo == NULL || ucode != NULL);
 	td = curthread;
 	if ((td->td_pflags & TDP_NOFAULTING) != 0)
 		return (KERN_PROTECTION_FAILURE);
@@ -550,17 +565,69 @@ vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
 	if (map != kernel_map && KTRPOINT(td, KTR_FAULT))
 		ktrfault(vaddr, fault_type);
 #endif
-	result = vm_fault_hold(map, trunc_page(vaddr), fault_type, fault_flags,
+	result = vm_fault(map, trunc_page(vaddr), fault_type, fault_flags,
 	    NULL);
+	KASSERT(result == KERN_SUCCESS || result == KERN_FAILURE ||
+	    result == KERN_INVALID_ADDRESS ||
+	    result == KERN_RESOURCE_SHORTAGE ||
+	    result == KERN_PROTECTION_FAILURE ||
+	    result == KERN_OUT_OF_BOUNDS,
+	    ("Unexpected Mach error %d from vm_fault()", result));
 #ifdef KTRACE
 	if (map != kernel_map && KTRPOINT(td, KTR_FAULTEND))
 		ktrfaultend(result);
 #endif
+	if (result != KERN_SUCCESS && signo != NULL) {
+		switch (result) {
+		case KERN_FAILURE:
+		case KERN_INVALID_ADDRESS:
+			*signo = SIGSEGV;
+			*ucode = SEGV_MAPERR;
+			break;
+		case KERN_RESOURCE_SHORTAGE:
+			*signo = SIGBUS;
+			*ucode = BUS_OOMERR;
+			break;
+		case KERN_OUT_OF_BOUNDS:
+			*signo = SIGBUS;
+			*ucode = BUS_OBJERR;
+			break;
+		case KERN_PROTECTION_FAILURE:
+			if (prot_fault_translation == 0) {
+				/*
+				 * Autodetect.  This check also covers
+				 * the images without the ABI-tag ELF
+				 * note.
+				 */
+				if (SV_CURPROC_ABI() == SV_ABI_FREEBSD &&
+				    curproc->p_osrel >= P_OSREL_SIGSEGV) {
+					*signo = SIGSEGV;
+					*ucode = SEGV_ACCERR;
+				} else {
+					*signo = SIGBUS;
+					*ucode = UCODE_PAGEFLT;
+				}
+			} else if (prot_fault_translation == 1) {
+				/* Always compat mode. */
+				*signo = SIGBUS;
+				*ucode = UCODE_PAGEFLT;
+			} else {
+				/* Always SIGSEGV mode. */
+				*signo = SIGSEGV;
+				*ucode = SEGV_ACCERR;
+			}
+			break;
+		default:
+			KASSERT(0, ("Unexpected Mach error %d from vm_fault()",
+			    result));
+			break;
+		}
+	}
 	return (result);
 }
 
 int
-vm_fault_hold(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
+vm_fault(vm_map_t map, vm_offset_t vaddr, vm_prot_t fault_type,
     int fault_flags, vm_page_t *m_hold)
 {
 	struct faultstate fs;
@@ -774,7 +841,7 @@ RetryFault_oom:
 		    fs.object == fs.first_object) {
 			if (fs.pindex >= fs.object->size) {
 				unlock_and_deallocate(&fs);
-				return (KERN_PROTECTION_FAILURE);
+				return (KERN_OUT_OF_BOUNDS);
 			}
 
 			if (fs.object == fs.first_object &&
@@ -1023,8 +1090,7 @@ readrest:
 					vm_page_xunbusy(fs.m);
 				fs.m = NULL;
 				unlock_and_deallocate(&fs);
-				return (rv == VM_PAGER_ERROR ? KERN_FAILURE :
-				    KERN_PROTECTION_FAILURE);
+				return (KERN_OUT_OF_BOUNDS);
 			}
 
 			/*
@@ -1584,7 +1650,7 @@ vm_fault_quick_hold_pages(vm_map_t map, vm_offset_t addr, vm_size_t len,
 		 * If vm_fault_disable_pagefaults() was called,
 		 * i.e., TDP_NOFAULTING is set, we must not sleep nor
 		 * acquire MD VM locks, which means we must not call
-		 * vm_fault_hold().  Some (out of tree) callers mark
+		 * vm_fault().  Some (out of tree) callers mark
 		 * too wide a code area with vm_fault_disable_pagefaults()
 		 * already, use the VM_PROT_QUICK_NOFAULT flag to request
 		 * the proper behaviour explicitly.
@@ -1593,7 +1659,7 @@ vm_fault_quick_hold_pages(vm_map_t map, vm_offset_t addr, vm_size_t len,
 		    (curthread->td_pflags & TDP_NOFAULTING) != 0)
 			goto error;
 		for (mp = ma, va = addr; va < end; mp++, va += PAGE_SIZE)
-			if (*mp == NULL && vm_fault_hold(map, va, prot,
+			if (*mp == NULL && vm_fault(map, va, prot,
 			    VM_FAULT_NORMAL, mp) != KERN_SUCCESS)
 				goto error;
 	}
