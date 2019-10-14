@@ -3832,6 +3832,7 @@ kern/subr_sglist.c		standard
 kern/subr_sleepqueue.c		standard
 kern/subr_smp.c			standard
 kern/subr_stack.c		optional ddb | stack | ktr
+kern/subr_stats.c		optional stats
 kern/subr_taskqueue.c		standard
 kern/subr_terminal.c		optional vt
 kern/subr_trap.c		standard
@@ -4257,6 +4258,7 @@ netinet/sctp_cc_functions.c	optional inet sctp | inet6 sctp
 netinet/sctp_crc32.c		optional inet | inet6
 netinet/sctp_indata.c		optional inet sctp | inet6 sctp
 netinet/sctp_input.c		optional inet sctp | inet6 sctp
+netinet/sctp_kdtrace.c		optional inet sctp | inet6 sctp
 netinet/sctp_output.c		optional inet sctp | inet6 sctp
 netinet/sctp_pcb.c		optional inet sctp | inet6 sctp
 netinet/sctp_peeloff.c		optional inet sctp | inet6 sctp

@@ -658,7 +658,8 @@ vm_page_startup(vm_offset_t vaddr)
 #endif
 
 #if defined(__aarch64__) || defined(__amd64__) || defined(__arm__) || \
-    defined(__i386__) || defined(__mips__) || defined(__riscv)
+    defined(__i386__) || defined(__mips__) || defined(__riscv) || \
+    defined(__powerpc64__)
 	/*
 	 * Allocate a bitmap to indicate that a random physical page
 	 * needs to be included in a minidump.
@@ -684,7 +685,7 @@ vm_page_startup(vm_offset_t vaddr)
 	(void)last_pa;
 #endif
 #if defined(__aarch64__) || defined(__amd64__) || defined(__mips__) || \
-    defined(__riscv)
+    defined(__riscv) || defined(__powerpc64__)
 	/*
 	 * Include the UMA bootstrap pages, witness pages and vm_page_dump
 	 * in a crash dump.  When pmap_map() uses the direct map, they are
@@ -789,7 +790,7 @@ vm_page_startup(vm_offset_t vaddr)
 	new_end = vm_reserv_startup(&vaddr, new_end);
 #endif
 #if defined(__aarch64__) || defined(__amd64__) || defined(__mips__) || \
-    defined(__riscv)
+    defined(__riscv) || defined(__powerpc64__)
 	/*
 	 * Include vm_page_array and vm_reserv_array in a crash dump.
 	 */
@@ -3216,12 +3217,10 @@ vm_page_pqbatch_submit(vm_page_t m, uint8_t queue)
 		critical_exit();
 		return;
 	}
-	if (!vm_pagequeue_trylock(pq)) {
-		critical_exit();
-		vm_pagequeue_lock(pq);
-		critical_enter();
-		bq = DPCPU_PTR(pqbatch[domain][queue]);
-	}
+	critical_exit();
+	vm_pagequeue_lock(pq);
+	critical_enter();
+	bq = DPCPU_PTR(pqbatch[domain][queue]);
 	vm_pqbatch_process(pq, bq, queue);
 
 	/*
@@ -3548,12 +3547,15 @@ vm_page_free_prep(vm_page_t m)
 			    m, i, (uintmax_t)*p));
 	}
 #endif
-	if ((m->oflags & VPO_UNMANAGED) == 0)
+	if ((m->oflags & VPO_UNMANAGED) == 0) {
 		KASSERT(!pmap_page_is_mapped(m),
 		    ("vm_page_free_prep: freeing mapped page %p", m));
-	else
+		KASSERT((m->aflags & (PGA_EXECUTABLE | PGA_WRITEABLE)) == 0,
+		    ("vm_page_free_prep: mapping flags set in page %p", m));
+	} else {
 		KASSERT(m->queue == PQ_NONE,
 		    ("vm_page_free_prep: unmanaged page %p is queued", m));
+	}
 	VM_CNT_INC(v_tfree);
 
 	if (vm_page_sbusied(m))
