@@ -25,6 +25,7 @@ makeoptions	DEBUG=-g		# Build kernel with gdb(1) debug symbols
 makeoptions	WITH_CTF=1		# Run ctfconvert(1) for DTrace support
 
 options 	SCHED_ULE		# ULE scheduler
+options 	NUMA			# Non-Uniform Memory Architecture support
 options 	PREEMPTION		# Enable kernel thread preemption
 options 	VIMAGE			# Subsystem virtualization, e.g. VNET
 options 	INET			# InterNETworking
@@ -207,6 +208,7 @@ device		pl011
 # USB support
 device		aw_usbphy		# Allwinner USB PHY
 device		rk_usb2phy		# Rockchip USB2PHY
+device		rk_typec_phy		# Rockchip TypeC PHY
 device		dwcotg			# DWC OTG controller
 device		ohci			# OHCI USB interface
 device		ehci			# EHCI USB interface (USB 2.0)
@@ -214,6 +216,7 @@ device		ehci_mv			# Marvell EHCI USB interface
 device		xhci			# XHCI USB interface (USB 3.0)
 device		dwc3			# Synopsys DWC controller
 device		aw_dwc3			# Allwinner DWC3 controller
+device		rk_dwc3			# Rockchip DWC3 controller
 device		usb			# USB Bus (required)
 device		ukbd			# Keyboard
 device		umass			# Disks/Mass storage - Requires scbus and da
@@ -260,6 +263,7 @@ device		aw_ccu		# Allwinner clock controller
 device		aw_nmi		# Allwinner NMI support
 device		mv_cp110_icu	# Marvell CP110 ICU
 device		mv_ap806_gicp	# Marvell AP806 GICP
+device		mv_ap806_sei	# Marvell AP806 SEI
 
 # Real-time clock support
 device		aw_rtc		# Allwinner Real-time Clock
@@ -282,6 +286,7 @@ device		mv_thermal	# Marvell Thermal Sensor Controller
 # SPI
 device		spibus
 device		bcm2835_spi	# Broadcom BCM283x SPI bus
+device		rk_spi		# RockChip SPI controller
 
 # PWM
 device		pwm
