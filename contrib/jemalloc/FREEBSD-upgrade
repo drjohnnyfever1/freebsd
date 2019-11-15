@@ -22,19 +22,19 @@
 #
 # Extract latest jemalloc release.
 #
-#   ./FREEBSD-upgrade extract <rev>
+#   ./FREEBSD-upgrade extract
 #
 # Fix patch conflicts as necessary, then regenerate diffs to update line
 # offsets:
 #
 #   ./FREEBSD-upgrade rediff
-#   ./FREEBSD-upgrade extract <rev>
+#   ./FREEBSD-upgrade extract
 #
 # Do multiple buildworld/installworld rounds.  If problems arise and patches
 # are needed, edit the code in ${work} as necessary, then:
 #
 #   ./FREEBSD-upgrade rediff
-#   ./FREEBSD-upgrade extract <rev>
+#   ./FREEBSD-upgrade extract
 #
 # The rediff/extract order is important because rediff saves the local
 # changes, then extract blows away the work tree and re-creates it with the
@@ -45,98 +45,43 @@
 #  ./FREEBSD-upgrade clean
 
 set -e
-set -x
 
 if [ ! -x "FREEBSD-upgrade" ] ; then
   echo "Run from within src/contrib/jemalloc/" >&2
   exit 1
 fi
 
-if [ "x${JEMALLOC_REPO}" = "x" ] ; then
-  JEMALLOC_REPO=https://github.com/jemalloc/jemalloc.git
-fi
-
 src=`pwd`
-
-jemalloc_tmp="jemalloc.tmp"
-tmpdir="${src}/../${jemalloc_tmp}"
-bare_repo="${tmpdir}/jemalloc_bare.git"
-work="jemalloc_work.git"
-work_repo="${tmpdir}/${work}"
-namespace_repo="${tmpdir}/jemalloc_namespace.git"
+workname="jemalloc.git"
+work="${src}/../${workname}" # merge-changes expects ${workname} in "..".
 changes="${src}/FREEBSD-changes"
 
-do_fetch() {
+do_extract() {
   local rev=$1
-  if [ ! -d "${bare_repo}" ] ; then
-    mkdir -p "${bare_repo}"
-    git clone --bare ${JEMALLOC_REPO} ${bare_repo}
-  fi
+  # Clone.
+  rm -rf ${work}
+  git clone https://github.com/jemalloc/jemalloc.git ${work}
   (
-    cd ${bare_repo}
-    git fetch origin ${rev}
-  )
-}
-
-do_extract_helper() {
-  local rev=$1
-  local repo=$2
-  do_fetch ${rev}
-  rm -rf ${repo}
-  git clone ${bare_repo} ${repo}
-  (
-    cd ${repo}
+    cd ${work}
     if [ "x${rev}" != "x" ] ; then
       # Use optional rev argument to check out a revision other than HEAD on
       # master.
       git checkout ${rev}
     fi
-  )
-}
-
-do_autogen() {
-  ./autogen.sh --enable-xmalloc --enable-utrace \
-    --with-xslroot=/usr/local/share/xsl/docbook --with-private-namespace=__ \
-    --with-lg-page-sizes=12,13,14,16
-}
-
-do_extract_diff() {
-  local rev=$1
-  local repo=$2
-  do_extract_helper ${rev} ${repo}
-  (
-    cd ${repo}
     # Apply diffs before generating files.
     patch -p1 < "${src}/FREEBSD-diffs"
     find . -name '*.orig' -delete
-    # Generate files.
-    do_autogen
+    # Generate various files.
+    ./autogen.sh --enable-cc-silence --enable-xmalloc --enable-utrace \
+      --with-xslroot=/usr/local/share/xsl/docbook --with-private-namespace=__ \
+      --with-lg-page-sizes=12,13,14,16
     gmake dist
   )
 }
 
-do_extract_namespace() {
-  local rev=$1
-  local repo=$2
-  do_extract_helper ${rev} ${repo}
-  (
-    cd ${repo}
-    # Generate files.
-    do_autogen
-    gmake include/jemalloc/internal/private_namespace.h
-  )
-}
-
-do_extract() {
-  local rev=$1
-  do_fetch ${rev}
-  do_extract_diff ${rev} ${work_repo}
-  do_extract_namespace ${rev} ${namespace_repo}
-}
-
 do_diff() {
   (
-    cd ${work_repo}
+    cd ${work}
     find . -name '*.orig' -delete
     find . -name '*.rej' -delete
     git add -A
@@ -153,12 +98,12 @@ case "${command}" in
     do_extract ${rev}
     # Compute local differences to the upstream+patches and apply them.
     (
-      cd ${tmpdir}
-      diff -ru -X ${src}/FREEBSD-Xlist ${work} ../jemalloc > ${changes} || true
+      cd ..
+      diff -ru -X ${src}/FREEBSD-Xlist ${workname} jemalloc > ${changes} || true
     )
     (
-      cd ${work_repo}
-      patch -p1 < ${changes} || true
+      cd ${work}
+      patch -p1 < ${changes}
       find . -name '*.orig' -delete
     )
     # Update diff.
@@ -170,17 +115,13 @@ case "${command}" in
     # Delete existing files so that cruft doesn't silently remain.
     rm -rf ChangeLog COPYING VERSION doc include src
     # Copy files over.
-    tar cf - -C ${work_repo} -X FREEBSD-Xlist . |tar xvf -
-    internal_dir="include/jemalloc/internal"
-    grep -v ' isthreaded ' \
-      "${namespace_repo}/${internal_dir}/private_namespace.h" \
-      > "${internal_dir}/private_namespace.h"
+    tar cf - -C ${work} -X FREEBSD-Xlist . |tar xvf -
     ;;
   rediff) # Regenerate diffs based on working tree.
     do_diff
     ;;
   clean) # Remove working tree and temporary files.
-    rm -rf ${tmpdir} ${changes}
+    rm -rf ${work} ${changes}
     ;;
   *)
     echo "Unsupported command: \"${command}\"" >&2
