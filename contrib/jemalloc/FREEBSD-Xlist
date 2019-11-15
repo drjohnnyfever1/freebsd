@@ -7,7 +7,6 @@ FREEBSD-*
 INSTALL.md
 Makefile*
 README
-TUNING.md
 autogen.sh
 autom4te.cache/
 bin/

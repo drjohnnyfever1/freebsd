@@ -37,7 +37,4 @@
 #  define JET_MUTABLE const
 #endif
 
-#define JEMALLOC_VA_ARGS_HEAD(head, ...) head
-#define JEMALLOC_VA_ARGS_TAIL(head, ...) __VA_ARGS__
-
 #endif /* JEMALLOC_INTERNAL_MACROS_H */

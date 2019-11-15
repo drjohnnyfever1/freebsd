@@ -11,14 +11,12 @@
 #define BACKGROUND_THREAD_DEFAULT false
 /* Read-only after initialization. */
 bool opt_background_thread = BACKGROUND_THREAD_DEFAULT;
-size_t opt_max_background_threads = MAX_BACKGROUND_THREAD_LIMIT;
 
 /* Used for thread creation, termination and stats. */
 malloc_mutex_t background_thread_lock;
 /* Indicates global state.  Atomic because decay reads this w/o locking. */
 atomic_b_t background_thread_enabled_state;
 size_t n_background_threads;
-size_t max_background_threads;
 /* Thread info per-index. */
 background_thread_info_t *background_thread_info;
 
@@ -32,20 +30,19 @@ bool can_enable_background_thread;
 
 static int (*pthread_create_fptr)(pthread_t *__restrict, const pthread_attr_t *,
     void *(*)(void *), void *__restrict);
+static pthread_once_t once_control = PTHREAD_ONCE_INIT;
 
 static void
-pthread_create_wrapper_init(void) {
+pthread_create_wrapper_once(void) {
 #ifdef JEMALLOC_LAZY_LOCK
-	if (!isthreaded) {
-		isthreaded = true;
-	}
+	isthreaded = true;
 #endif
 }
 
 int
 pthread_create_wrapper(pthread_t *__restrict thread, const pthread_attr_t *attr,
     void *(*start_routine)(void *), void *__restrict arg) {
-	pthread_create_wrapper_init();
+	pthread_once(&once_control, pthread_create_wrapper_once);
 
 	return pthread_create_fptr(thread, attr, start_routine, arg);
 }
@@ -289,7 +286,7 @@ background_work_sleep_once(tsdn_t *tsdn, background_thread_info_t *info, unsigne
 	uint64_t min_interval = BACKGROUND_THREAD_INDEFINITE_SLEEP;
 	unsigned narenas = narenas_total_get();
 
-	for (unsigned i = ind; i < narenas; i += max_background_threads) {
+	for (unsigned i = ind; i < narenas; i += ncpus) {
 		arena_t *arena = arena_get(tsdn, i, false);
 		if (!arena) {
 			continue;
@@ -382,31 +379,34 @@ background_thread_create_signals_masked(pthread_t *thread,
 	return create_err;
 }
 
-static bool
+static void
 check_background_thread_creation(tsd_t *tsd, unsigned *n_created,
     bool *created_threads) {
-	bool ret = false;
 	if (likely(*n_created == n_background_threads)) {
-		return ret;
+		return;
 	}
 
-	tsdn_t *tsdn = tsd_tsdn(tsd);
-	malloc_mutex_unlock(tsdn, &background_thread_info[0].mtx);
-	for (unsigned i = 1; i < max_background_threads; i++) {
+	malloc_mutex_unlock(tsd_tsdn(tsd), &background_thread_info[0].mtx);
+label_restart:
+	malloc_mutex_lock(tsd_tsdn(tsd), &background_thread_lock);
+	for (unsigned i = 1; i < ncpus; i++) {
 		if (created_threads[i]) {
 			continue;
 		}
 		background_thread_info_t *info = &background_thread_info[i];
-		malloc_mutex_lock(tsdn, &info->mtx);
-		/*
-		 * In case of the background_thread_paused state because of
-		 * arena reset, delay the creation.
-		 */
+		malloc_mutex_lock(tsd_tsdn(tsd), &info->mtx);
+		assert(info->state != background_thread_paused);
 		bool create = (info->state == background_thread_started);
-		malloc_mutex_unlock(tsdn, &info->mtx);
+		malloc_mutex_unlock(tsd_tsdn(tsd), &info->mtx);
 		if (!create) {
 			continue;
 		}
+
+		/*
+		 * To avoid deadlock with prefork handlers (which waits for the
+		 * mutex held here), unlock before calling pthread_create().
+		 */
+		malloc_mutex_unlock(tsd_tsdn(tsd), &background_thread_lock);
 
 		pre_reentrancy(tsd, NULL);
 		int err = background_thread_create_signals_masked(&info->thread,
@@ -423,21 +423,19 @@ check_background_thread_creation(tsd_t *tsd, unsigned *n_created,
 				abort();
 			}
 		}
-		/* Return to restart the loop since we unlocked. */
-		ret = true;
-		break;
+		/* Restart since we unlocked. */
+		goto label_restart;
 	}
-	malloc_mutex_lock(tsdn, &background_thread_info[0].mtx);
-
-	return ret;
+	malloc_mutex_lock(tsd_tsdn(tsd), &background_thread_info[0].mtx);
+	malloc_mutex_unlock(tsd_tsdn(tsd), &background_thread_lock);
 }
 
 static void
 background_thread0_work(tsd_t *tsd) {
 	/* Thread0 is also responsible for launching / terminating threads. */
-	VARIABLE_ARRAY(bool, created_threads, max_background_threads);
+	VARIABLE_ARRAY(bool, created_threads, ncpus);
 	unsigned i;
-	for (i = 1; i < max_background_threads; i++) {
+	for (i = 1; i < ncpus; i++) {
 		created_threads[i] = false;
 	}
 	/* Start working, and create more threads when asked. */
@@ -447,10 +445,8 @@ background_thread0_work(tsd_t *tsd) {
 		    &background_thread_info[0])) {
 			continue;
 		}
-		if (check_background_thread_creation(tsd, &n_created,
-		    (bool *)&created_threads)) {
-			continue;
-		}
+		check_background_thread_creation(tsd, &n_created,
+		    (bool *)&created_threads);
 		background_work_sleep_once(tsd_tsdn(tsd),
 		    &background_thread_info[0], 0);
 	}
@@ -460,20 +456,15 @@ background_thread0_work(tsd_t *tsd) {
 	 * the global background_thread mutex (and is waiting) for us.
 	 */
 	assert(!background_thread_enabled());
-	for (i = 1; i < max_background_threads; i++) {
+	for (i = 1; i < ncpus; i++) {
 		background_thread_info_t *info = &background_thread_info[i];
 		assert(info->state != background_thread_paused);
 		if (created_threads[i]) {
 			background_threads_disable_single(tsd, info);
 		} else {
 			malloc_mutex_lock(tsd_tsdn(tsd), &info->mtx);
-			if (info->state != background_thread_stopped) {
-				/* The thread was not created. */
-				assert(info->state ==
-				    background_thread_started);
-				n_background_threads--;
-				info->state = background_thread_stopped;
-			}
+			/* Clear in case the thread wasn't created. */
+			info->state = background_thread_stopped;
 			malloc_mutex_unlock(tsd_tsdn(tsd), &info->mtx);
 		}
 	}
@@ -507,7 +498,7 @@ background_work(tsd_t *tsd, unsigned ind) {
 static void *
 background_thread_entry(void *ind_arg) {
 	unsigned thread_ind = (unsigned)(uintptr_t)ind_arg;
-	assert(thread_ind < max_background_threads);
+	assert(thread_ind < ncpus);
 #ifdef JEMALLOC_HAVE_PTHREAD_SETNAME_NP
 	pthread_setname_np(pthread_self(), "jemalloc_bg_thd");
 #endif
@@ -541,7 +532,7 @@ background_thread_create(tsd_t *tsd, unsigned arena_ind) {
 	malloc_mutex_assert_owner(tsd_tsdn(tsd), &background_thread_lock);
 
 	/* We create at most NCPUs threads. */
-	size_t thread_ind = arena_ind % max_background_threads;
+	size_t thread_ind = arena_ind % ncpus;
 	background_thread_info_t *info = &background_thread_info[thread_ind];
 
 	bool need_new_thread;
@@ -595,29 +586,26 @@ background_threads_enable(tsd_t *tsd) {
 	assert(background_thread_enabled());
 	malloc_mutex_assert_owner(tsd_tsdn(tsd), &background_thread_lock);
 
-	VARIABLE_ARRAY(bool, marked, max_background_threads);
+	VARIABLE_ARRAY(bool, marked, ncpus);
 	unsigned i, nmarked;
-	for (i = 0; i < max_background_threads; i++) {
+	for (i = 0; i < ncpus; i++) {
 		marked[i] = false;
 	}
 	nmarked = 0;
-	/* Thread 0 is required and created at the end. */
-	marked[0] = true;
 	/* Mark the threads we need to create for thread 0. */
 	unsigned n = narenas_total_get();
 	for (i = 1; i < n; i++) {
-		if (marked[i % max_background_threads] ||
+		if (marked[i % ncpus] ||
 		    arena_get(tsd_tsdn(tsd), i, false) == NULL) {
 			continue;
 		}
-		background_thread_info_t *info = &background_thread_info[
-		    i % max_background_threads];
+		background_thread_info_t *info = &background_thread_info[i];
 		malloc_mutex_lock(tsd_tsdn(tsd), &info->mtx);
 		assert(info->state == background_thread_stopped);
 		background_thread_init(tsd, info);
 		malloc_mutex_unlock(tsd_tsdn(tsd), &info->mtx);
-		marked[i % max_background_threads] = true;
-		if (++nmarked == max_background_threads) {
+		marked[i % ncpus] = true;
+		if (++nmarked == ncpus) {
 			break;
 		}
 	}
@@ -732,14 +720,14 @@ background_thread_prefork0(tsdn_t *tsdn) {
 
 void
 background_thread_prefork1(tsdn_t *tsdn) {
-	for (unsigned i = 0; i < max_background_threads; i++) {
+	for (unsigned i = 0; i < ncpus; i++) {
 		malloc_mutex_prefork(tsdn, &background_thread_info[i].mtx);
 	}
 }
 
 void
 background_thread_postfork_parent(tsdn_t *tsdn) {
-	for (unsigned i = 0; i < max_background_threads; i++) {
+	for (unsigned i = 0; i < ncpus; i++) {
 		malloc_mutex_postfork_parent(tsdn,
 		    &background_thread_info[i].mtx);
 	}
@@ -748,7 +736,7 @@ background_thread_postfork_parent(tsdn_t *tsdn) {
 
 void
 background_thread_postfork_child(tsdn_t *tsdn) {
-	for (unsigned i = 0; i < max_background_threads; i++) {
+	for (unsigned i = 0; i < ncpus; i++) {
 		malloc_mutex_postfork_child(tsdn,
 		    &background_thread_info[i].mtx);
 	}
@@ -761,7 +749,7 @@ background_thread_postfork_child(tsdn_t *tsdn) {
 	malloc_mutex_lock(tsdn, &background_thread_lock);
 	n_background_threads = 0;
 	background_thread_enabled_set(tsdn, false);
-	for (unsigned i = 0; i < max_background_threads; i++) {
+	for (unsigned i = 0; i < ncpus; i++) {
 		background_thread_info_t *info = &background_thread_info[i];
 		malloc_mutex_lock(tsdn, &info->mtx);
 		info->state = background_thread_stopped;
@@ -785,7 +773,7 @@ background_thread_stats_read(tsdn_t *tsdn, background_thread_stats_t *stats) {
 	stats->num_threads = n_background_threads;
 	uint64_t num_runs = 0;
 	nstime_init(&stats->run_interval, 0);
-	for (unsigned i = 0; i < max_background_threads; i++) {
+	for (unsigned i = 0; i < ncpus; i++) {
 		background_thread_info_t *info = &background_thread_info[i];
 		malloc_mutex_lock(tsdn, &info->mtx);
 		if (info->state != background_thread_stopped) {
@@ -807,26 +795,6 @@ background_thread_stats_read(tsdn_t *tsdn, background_thread_stats_t *stats) {
 #undef BILLION
 #undef BACKGROUND_THREAD_MIN_INTERVAL_NS
 
-static bool
-pthread_create_fptr_init(void) {
-	if (pthread_create_fptr != NULL) {
-		return false;
-	}
-	pthread_create_fptr = dlsym(RTLD_NEXT, "pthread_create");
-	if (pthread_create_fptr == NULL) {
-		can_enable_background_thread = false;
-		if (config_lazy_lock || opt_background_thread) {
-			malloc_write("<jemalloc>: Error in dlsym(RTLD_NEXT, "
-			    "\"pthread_create\")\n");
-			abort();
-		}
-	} else {
-		can_enable_background_thread = true;
-	}
-
-	return false;
-}
-
 /*
  * When lazy lock is enabled, we need to make sure setting isthreaded before
  * taking any background_thread locks.  This is called early in ctl (instead of
@@ -837,8 +805,7 @@ void
 background_thread_ctl_init(tsdn_t *tsdn) {
 	malloc_mutex_assert_not_owner(tsdn, &background_thread_lock);
 #ifdef JEMALLOC_PTHREAD_CREATE_WRAPPER
-	pthread_create_fptr_init();
-	pthread_create_wrapper_init();
+	pthread_once(&once_control, pthread_create_wrapper_once);
 #endif
 }
 
@@ -851,10 +818,18 @@ background_thread_boot0(void) {
 		    "supports pthread only\n");
 		return true;
 	}
+
 #ifdef JEMALLOC_PTHREAD_CREATE_WRAPPER
-	if ((config_lazy_lock || opt_background_thread) &&
-	    pthread_create_fptr_init()) {
-		return true;
+	pthread_create_fptr = dlsym(RTLD_NEXT, "pthread_create");
+	if (pthread_create_fptr == NULL) {
+		can_enable_background_thread = false;
+		if (config_lazy_lock || opt_background_thread) {
+			malloc_write("<jemalloc>: Error in dlsym(RTLD_NEXT, "
+			    "\"pthread_create\")\n");
+			abort();
+		}
+	} else {
+		can_enable_background_thread = true;
 	}
 #endif
 	return false;
@@ -866,12 +841,6 @@ background_thread_boot1(tsdn_t *tsdn) {
 	assert(have_background_thread);
 	assert(narenas_total_get() > 0);
 
-	if (opt_max_background_threads == MAX_BACKGROUND_THREAD_LIMIT &&
-	    ncpus < MAX_BACKGROUND_THREAD_LIMIT) {
-		opt_max_background_threads = ncpus;
-	}
-	max_background_threads = opt_max_background_threads;
-
 	background_thread_enabled_set(tsdn, opt_background_thread);
 	if (malloc_mutex_init(&background_thread_lock,
 	    "background_thread_global",
@@ -879,15 +848,17 @@ background_thread_boot1(tsdn_t *tsdn) {
 	    malloc_mutex_rank_exclusive)) {
 		return true;
 	}
+	if (opt_background_thread) {
+		background_thread_ctl_init(tsdn);
+	}
 
 	background_thread_info = (background_thread_info_t *)base_alloc(tsdn,
-	    b0get(), opt_max_background_threads *
-	    sizeof(background_thread_info_t), CACHELINE);
+	    b0get(), ncpus * sizeof(background_thread_info_t), CACHELINE);
 	if (background_thread_info == NULL) {
 		return true;
 	}
 
-	for (unsigned i = 0; i < max_background_threads; i++) {
+	for (unsigned i = 0; i < ncpus; i++) {
 		background_thread_info_t *info = &background_thread_info[i];
 		/* Thread mutex is rank_inclusive because of thread0. */
 		if (malloc_mutex_init(&info->mtx, "background_thread",
