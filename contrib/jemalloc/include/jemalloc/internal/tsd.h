@@ -99,10 +99,9 @@ enum {
 	tsd_state_nominal_slow = 1, /* Initialized but on slow path. */
 	/* the above 2 nominal states should be lower values. */
 	tsd_state_nominal_max = 1, /* used for comparison only. */
-	tsd_state_minimal_initialized = 2,
-	tsd_state_purgatory = 3,
-	tsd_state_reincarnated = 4,
-	tsd_state_uninitialized = 5
+	tsd_state_purgatory = 2,
+	tsd_state_reincarnated = 3,
+	tsd_state_uninitialized = 4
 };
 
 /* Manually limit tsd_state_t to a single byte. */
@@ -191,8 +190,7 @@ JEMALLOC_ALWAYS_INLINE t *						\
 tsd_##n##p_get(tsd_t *tsd) {						\
 	assert(tsd->state == tsd_state_nominal ||			\
 	    tsd->state == tsd_state_nominal_slow ||			\
-	    tsd->state == tsd_state_reincarnated ||			\
-	    tsd->state == tsd_state_minimal_initialized);		\
+	    tsd->state == tsd_state_reincarnated);			\
 	return tsd_##n##p_get_unsafe(tsd);				\
 }
 MALLOC_TSD
@@ -227,8 +225,7 @@ MALLOC_TSD
 #define O(n, t, nt)							\
 JEMALLOC_ALWAYS_INLINE void						\
 tsd_##n##_set(tsd_t *tsd, t val) {					\
-	assert(tsd->state != tsd_state_reincarnated &&			\
-	    tsd->state != tsd_state_minimal_initialized);		\
+	assert(tsd->state != tsd_state_reincarnated);			\
 	*tsd_##n##p_get(tsd) = val;					\
 }
 MALLOC_TSD
@@ -251,7 +248,7 @@ tsd_fast(tsd_t *tsd) {
 }
 
 JEMALLOC_ALWAYS_INLINE tsd_t *
-tsd_fetch_impl(bool init, bool minimal) {
+tsd_fetch_impl(bool init, bool internal) {
 	tsd_t *tsd = tsd_get(init);
 
 	if (!init && tsd_get_allocates() && tsd == NULL) {
@@ -260,7 +257,7 @@ tsd_fetch_impl(bool init, bool minimal) {
 	assert(tsd != NULL);
 
 	if (unlikely(tsd->state != tsd_state_nominal)) {
-		return tsd_fetch_slow(tsd, minimal);
+		return tsd_fetch_slow(tsd, internal);
 	}
 	assert(tsd_fast(tsd));
 	tsd_assert_fast(tsd);
@@ -268,20 +265,9 @@ tsd_fetch_impl(bool init, bool minimal) {
 	return tsd;
 }
 
-/* Get a minimal TSD that requires no cleanup.  See comments in free(). */
-JEMALLOC_ALWAYS_INLINE tsd_t *
-tsd_fetch_min(void) {
-	return tsd_fetch_impl(true, true);
-}
-
-/* For internal background threads use only. */
 JEMALLOC_ALWAYS_INLINE tsd_t *
 tsd_internal_fetch(void) {
-	tsd_t *tsd = tsd_fetch_min();
-	/* Use reincarnated state to prevent full initialization. */
-	tsd->state = tsd_state_reincarnated;
-
-	return tsd;
+	return tsd_fetch_impl(true, true);
 }
 
 JEMALLOC_ALWAYS_INLINE tsd_t *

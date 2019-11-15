@@ -41,9 +41,8 @@ background_thread_indefinite_sleep(background_thread_info_t *info) {
 }
 
 JEMALLOC_ALWAYS_INLINE void
-arena_background_thread_inactivity_check(tsdn_t *tsdn, arena_t *arena,
-    bool is_background_thread) {
-	if (!background_thread_enabled() || is_background_thread) {
+arena_background_thread_inactivity_check(tsdn_t *tsdn, arena_t *arena) {
+	if (!background_thread_enabled()) {
 		return;
 	}
 	background_thread_info_t *info =
