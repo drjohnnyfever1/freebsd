@@ -1761,12 +1761,10 @@ dmu_read_pages(objset_t *os, uint64_t object, vm_page_t *ma, int count,
 		bcopy((char *)db->db_data + bufoff, va, PAGESIZE);
 		zfs_unmap_page(sf);
 		vm_page_valid(m);
-		vm_page_lock(m);
 		if ((m->busy_lock & VPB_BIT_WAITERS) != 0)
 			vm_page_activate(m);
 		else
 			vm_page_deactivate(m);
-		vm_page_unlock(m);
 		vm_page_sunbusy(m);
 	}
 	*rbehind = i;
@@ -1884,12 +1882,10 @@ dmu_read_pages(objset_t *os, uint64_t object, vm_page_t *ma, int count,
 		}
 		zfs_unmap_page(sf);
 		vm_page_valid(m);
-		vm_page_lock(m);
 		if ((m->busy_lock & VPB_BIT_WAITERS) != 0)
 			vm_page_activate(m);
 		else
 			vm_page_deactivate(m);
-		vm_page_unlock(m);
 		vm_page_sunbusy(m);
 	}
 	*rahead = i;
@@ -2514,6 +2510,8 @@ dmu_write_policy(objset_t *os, dnode_t *dn, int level, int wp, zio_prop_t *zp)
 	zp->zp_dedup = dedup;
 	zp->zp_dedup_verify = dedup && dedup_verify;
 	zp->zp_nopwrite = nopwrite;
+	zp->zp_zpl_smallblk = DMU_OT_IS_FILE(zp->zp_type) ?
+	    os->os_zpl_special_smallblock : 0;
 }
 
 int

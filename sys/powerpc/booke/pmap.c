@@ -393,6 +393,7 @@ static int		mmu_booke_map_user_ptr(mmu_t mmu, pmap_t pm,
     volatile const void *uaddr, void **kaddr, size_t ulen, size_t *klen);
 static int		mmu_booke_decode_kernel_ptr(mmu_t mmu, vm_offset_t addr,
     int *is_user, vm_offset_t *decoded_addr);
+static void		mmu_booke_page_array_startup(mmu_t , long);
 
 
 static mmu_method_t mmu_booke_methods[] = {
@@ -434,6 +435,7 @@ static mmu_method_t mmu_booke_methods[] = {
 	MMUMETHOD(mmu_deactivate,	mmu_booke_deactivate),
 	MMUMETHOD(mmu_quick_enter_page, mmu_booke_quick_enter_page),
 	MMUMETHOD(mmu_quick_remove_page, mmu_booke_quick_remove_page),
+	MMUMETHOD(mmu_page_array_startup,	mmu_booke_page_array_startup),
 
 	/* Internal interfaces */
 	MMUMETHOD(mmu_bootstrap,	mmu_booke_bootstrap),
@@ -1619,11 +1621,33 @@ mmu_booke_bootstrap(mmu_t mmu, vm_offset_t start, vm_offset_t kernelend)
 	debugf(" kernel pdir at 0x%"PRI0ptrX" end = 0x%"PRI0ptrX"\n",
 	    kernel_pdir, data_end);
 
+	/* Retrieve phys/avail mem regions */
+	mem_regions(&physmem_regions, &physmem_regions_sz,
+	    &availmem_regions, &availmem_regions_sz);
+
+	if (PHYS_AVAIL_ENTRIES < availmem_regions_sz)
+		panic("mmu_booke_bootstrap: phys_avail too small");
+
+	data_end = round_page(data_end);
+	vm_page_array = (vm_page_t)data_end;
+	/*
+	 * Get a rough idea (upper bound) on the size of the page array.  The
+	 * vm_page_array will not handle any more pages than we have in the
+	 * avail_regions array, and most likely much less.
+	 */
+	sz = 0;
+	for (mp = availmem_regions; mp->mr_size; mp++) {
+		sz += mp->mr_size;
+	}
+	sz = (round_page(sz) / (PAGE_SIZE + sizeof(struct vm_page)));
+	data_end += round_page(sz * sizeof(struct vm_page));
+
 	/* Pre-round up to 1MB.  This wastes some space, but saves TLB entries */
 	data_end = roundup2(data_end, 1 << 20);
+
 	debugf(" data_end: 0x%"PRI0ptrX"\n", data_end);
-	debugf(" kernstart: %p\n", kernstart);
-	debugf(" kernsize: %lx\n", kernsize);
+	debugf(" kernstart: %#zx\n", kernstart);
+	debugf(" kernsize: %#zx\n", kernsize);
 
 	if (data_end - kernstart > kernsize) {
 		kernsize += tlb1_mapin_region(kernstart + kernsize,
@@ -1689,13 +1713,6 @@ mmu_booke_bootstrap(mmu_t mmu, vm_offset_t start, vm_offset_t kernelend)
 	 * align all regions.  Non-page aligned memory isn't very interesting
 	 * to us.  Also, sort the entries for ascending addresses.
 	 */
-
-	/* Retrieve phys/avail mem regions */
-	mem_regions(&physmem_regions, &physmem_regions_sz,
-	    &availmem_regions, &availmem_regions_sz);
-
-	if (PHYS_AVAIL_ENTRIES < availmem_regions_sz)
-		panic("mmu_booke_bootstrap: phys_avail too small");
 
 	sz = 0;
 	cnt = availmem_regions_sz;
@@ -3664,6 +3681,12 @@ mmu_booke_change_attr(mmu_t mmu, vm_offset_t addr, vm_size_t sz,
 	return (0);
 }
 
+static void
+mmu_booke_page_array_startup(mmu_t mmu, long pages)
+{
+	vm_page_array_size = pages;
+}
+
 /**************************************************************************/
 /* TID handling */
 /**************************************************************************/
@@ -4005,7 +4028,22 @@ tlb1_mapin_region(vm_offset_t va, vm_paddr_t pa, vm_size_t size, int wimge)
 				sz >>= 2;
 			} while (va % sz != 0);
 		}
-		/* Now align from there to VA */
+#ifdef __powerpc64__
+		/*
+		 * Clamp TLB1 entries to 4G.
+		 *
+		 * While the e6500 supports up to 1TB mappings, the e5500
+		 * only supports up to 4G mappings. (0b1011)
+		 *
+		 * If any e6500 machines capable of supporting a very
+		 * large amount of memory appear in the future, we can
+		 * revisit this.
+		 *
+		 * For now, though, since we have plenty of space in TLB1,
+		 * always avoid creating entries larger than 4GB.
+		 */
+		sz = MIN(sz, 1UL << 32);
+#endif
 		if (bootverbose)
 			printf("Wiring VA=%p to PA=%jx (size=%lx)\n",
 			    (void *)va, (uintmax_t)pa, (long)sz);

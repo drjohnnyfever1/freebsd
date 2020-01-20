@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD$");
 #include <pthread_np.h>
 
 #include "bhyverun.h"
+#include "debug.h"
 #include "pci_emul.h"
 #include "mevent.h"
 #include "virtio.h"
@@ -91,8 +92,8 @@ struct virtio_net_config {
  * Debug printf
  */
 static int pci_vtnet_debug;
-#define DPRINTF(params) if (pci_vtnet_debug) printf params
-#define WPRINTF(params) printf params
+#define DPRINTF(params) if (pci_vtnet_debug) PRINTLN params
+#define WPRINTF(params) PRINTLN params
 
 /*
  * Per-device softc
@@ -109,7 +110,6 @@ struct pci_vtnet_softc {
 	uint64_t	vsc_features;	/* negotiated features */
 	
 	pthread_mutex_t	rx_mtx;
-	unsigned int	rx_vhdrlen;
 	int		rx_merge;	/* merged rx bufs in use */
 
 	pthread_t 	tx_tid;
@@ -144,10 +144,20 @@ pci_vtnet_reset(void *vsc)
 {
 	struct pci_vtnet_softc *sc = vsc;
 
-	DPRINTF(("vtnet: device reset requested !\n"));
+	DPRINTF(("vtnet: device reset requested !"));
 
 	/* Acquire the RX lock to block RX processing. */
 	pthread_mutex_lock(&sc->rx_mtx);
+
+	/*
+	 * Make sure receive operation is disabled at least until we
+	 * re-negotiate the features, since receive operation depends
+	 * on the value of sc->rx_merge and the header length, which
+	 * are both set in pci_vtnet_neg_features().
+	 * Receive operation will be enabled again once the guest adds
+	 * the first receive buffers and kicks us.
+	 */
+	netbe_rx_disable(sc->vsc_be);
 
 	/* Set sc->resetting and give a chance to the TX thread to stop. */
 	pthread_mutex_lock(&sc->tx_mtx);
@@ -157,9 +167,6 @@ pci_vtnet_reset(void *vsc)
 		usleep(10000);
 		pthread_mutex_lock(&sc->tx_mtx);
 	}
-
-	sc->rx_merge = 1;
-	sc->rx_vhdrlen = sizeof(struct virtio_net_rxhdr);
 
 	/*
 	 * Now reset rings, MSI-X vectors, and negotiated capabilities.
@@ -421,7 +428,7 @@ static void
 pci_vtnet_ping_ctlq(void *vsc, struct vqueue_info *vq)
 {
 
-	DPRINTF(("vtnet: control qnotify!\n\r"));
+	DPRINTF(("vtnet: control qnotify!"));
 }
 #endif
 
@@ -512,8 +519,7 @@ pci_vtnet_init(struct vmctx *ctx, struct pci_devinst *pi, char *opts)
 
 	sc->resetting = 0;
 
-	sc->rx_merge = 1;
-	sc->rx_vhdrlen = sizeof(struct virtio_net_rxhdr);
+	sc->rx_merge = 0;
 	pthread_mutex_init(&sc->rx_mtx, NULL); 
 
 	/* 
@@ -547,7 +553,7 @@ pci_vtnet_cfgwrite(void *vsc, int offset, int size, uint32_t value)
 		memcpy(ptr, &value, size);
 	} else {
 		/* silently ignore other writes */
-		DPRINTF(("vtnet: write to readonly reg %d\n\r", offset));
+		DPRINTF(("vtnet: write to readonly reg %d", offset));
 	}
 
 	return (0);
@@ -568,18 +574,24 @@ static void
 pci_vtnet_neg_features(void *vsc, uint64_t negotiated_features)
 {
 	struct pci_vtnet_softc *sc = vsc;
+	unsigned int rx_vhdrlen;
 
 	sc->vsc_features = negotiated_features;
 
-	if (!(negotiated_features & VIRTIO_NET_F_MRG_RXBUF)) {
+	if (negotiated_features & VIRTIO_NET_F_MRG_RXBUF) {
+		rx_vhdrlen = sizeof(struct virtio_net_rxhdr);
+		sc->rx_merge = 1;
+	} else {
+		/*
+		 * Without mergeable rx buffers, virtio-net header is 2
+		 * bytes shorter than sizeof(struct virtio_net_rxhdr).
+		 */
+		rx_vhdrlen = sizeof(struct virtio_net_rxhdr) - 2;
 		sc->rx_merge = 0;
-		/* Without mergeable rx buffers, virtio-net header is 2
-		 * bytes shorter than sizeof(struct virtio_net_rxhdr). */
-		sc->rx_vhdrlen = sizeof(struct virtio_net_rxhdr) - 2;
 	}
 
 	/* Tell the backend to enable some capabilities it has advertised. */
-	netbe_set_cap(sc->vsc_be, negotiated_features, sc->rx_vhdrlen);
+	netbe_set_cap(sc->vsc_be, negotiated_features, rx_vhdrlen);
 }
 
 static struct pci_devemu pci_de_vnet = {

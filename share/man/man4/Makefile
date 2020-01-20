@@ -16,6 +16,7 @@ MAN=	aac.4 \
 	${_acpi_rapidstart.4} \
 	${_acpi_sony.4} \
 	acpi_thermal.4 \
+	acpi_battery.4 \
 	${_acpi_toshiba.4} \
 	acpi_video.4 \
 	${_acpi_wmi.4} \
@@ -173,6 +174,7 @@ MAN=	aac.4 \
 	gpio.4 \
 	gpioiic.4 \
 	gpioled.4 \
+	gpioths.4 \
 	gre.4 \
 	h_ertt.4 \
 	hifn.4 \
@@ -202,8 +204,10 @@ MAN=	aac.4 \
 	ig4.4 \
 	igmp.4 \
 	iic.4 \
+	iic_gpiomux.4 \
 	iicbb.4 \
 	iicbus.4 \
+	iicmux.4 \
 	iicsmb.4 \
 	iir.4 \
 	${_imcsmb.4} \
@@ -256,6 +260,7 @@ MAN=	aac.4 \
 	lp.4 \
 	lpbb.4 \
 	lpt.4 \
+	ltc430x.4 \
 	mac.4 \
 	mac_biba.4 \
 	mac_bsdextended.4 \
@@ -461,7 +466,6 @@ MAN=	aac.4 \
 	siftr.4 \
 	siis.4 \
 	simplebus.4 \
-	sio.4 \
 	sis.4 \
 	sk.4 \
 	${_smartpqi.4} \
@@ -523,7 +527,6 @@ MAN=	aac.4 \
 	ti.4 \
 	timecounters.4 \
 	${_tpm.4} \
-	trm.4 \
 	tty.4 \
 	tun.4 \
 	twa.4 \
@@ -649,6 +652,8 @@ MLINKS+=gem.4 if_gem.4
 MLINKS+=geom.4 GEOM.4
 MLINKS+=gif.4 if_gif.4
 MLINKS+=gpio.4 gpiobus.4
+MLINKS+=gpioths.4 dht11.4
+MLINKS+=gpioths.4 dht22.4
 MLINKS+=gre.4 if_gre.4
 MLINKS+=hme.4 if_hme.4
 MLINKS+=hpet.4 acpi_hpet.4
@@ -724,7 +729,9 @@ MLINKS+=stf.4 if_stf.4
 MLINKS+=stge.4 if_stge.4
 MLINKS+=syncache.4 syncookies.4
 MLINKS+=syscons.4 sc.4
-MLINKS+=tap.4 if_tap.4
+MLINKS+=tap.4 if_tap.4 \
+	tap.4 vmnet.4 \
+	tap.4 if_vmnet.4
 MLINKS+=tdfx.4 tdfx_linux.4
 MLINKS+=ti.4 if_ti.4
 MLINKS+=tun.4 if_tun.4
@@ -861,8 +868,16 @@ _nvram2env.4=	nvram2env.4
 .endif
 
 .if ${MACHINE_CPUARCH} == "powerpc"
+_if_vtnet.4=    if_vtnet.4
 _nvd.4= 	nvd.4
 _nvme.4=	nvme.4
+_virtio.4=	virtio.4
+_virtio_balloon.4=virtio_balloon.4
+_virtio_blk.4=	virtio_blk.4
+_virtio_console.4=virtio_console.4
+_virtio_random.4= virtio_random.4
+_virtio_scsi.4=	virtio_scsi.4
+_vtnet.4=	vtnet.4
 .endif
 
 .if empty(MAN_ARCH)

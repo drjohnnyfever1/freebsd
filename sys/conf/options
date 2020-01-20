@@ -230,6 +230,7 @@ ZSTDIO		opt_zstdio.h
 # Sanitizers
 COVERAGE	opt_global.h
 KCOV
+KCSAN		opt_global.h
 KUBSAN		opt_global.h
 
 # POSIX kernel options
@@ -620,8 +621,6 @@ NO_SWAPPING		opt_vm.h
 MALLOC_MAKE_FAILURES	opt_vm.h
 MALLOC_PROFILE		opt_vm.h
 MALLOC_DEBUG_MAXZONES	opt_vm.h
-UMA_XDOMAIN		opt_vm.h
-UMA_FIRSTTOUCH		opt_vm.h
 
 # The MemGuard replacement allocator used for tamper-after-free detection
 DEBUG_MEMGUARD		opt_vm.h

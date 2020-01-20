@@ -54,6 +54,8 @@ __FBSDID("$FreeBSD$");
 #include <machine/pcb.h>
 #endif
 #include <machine/vmparam.h>
+#include <net/if.h>
+#include <net/if_var.h>
 #ifdef RSS
 #include <net/netisr.h>
 #include <net/rss_config.h>
@@ -357,11 +359,7 @@ ktls_init(void *dummy __unused)
 
 	ktls_session_zone = uma_zcreate("ktls_session",
 	    sizeof(struct ktls_session),
-#ifdef INVARIANTS
-	    trash_ctor, trash_dtor, trash_init, trash_fini,
-#else
 	    NULL, NULL, NULL, NULL,
-#endif
 	    UMA_ALIGN_CACHE, 0);
 
 	/*

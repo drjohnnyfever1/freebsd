@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/bus.h>
 #include <sys/cons.h>	/* cngetc() */
 #include <sys/cpuset.h>
+#include <sys/csan.h>
 #ifdef GPROF 
 #include <sys/gmon.h>
 #endif
@@ -1080,6 +1081,8 @@ init_secondary_tail(void)
 	cpu_initclocks_ap();
 #endif
 
+	kcsan_cpu_init(cpuid);
+
 	sched_throw(NULL);
 
 	panic("scheduler returned us to %s", __func__);
@@ -1089,13 +1092,12 @@ init_secondary_tail(void)
 static void
 smp_after_idle_runnable(void *arg __unused)
 {
-	struct thread *idle_td;
+	struct pcpu *pc;
 	int cpu;
 
 	for (cpu = 1; cpu < mp_ncpus; cpu++) {
-		idle_td = pcpu_find(cpu)->pc_idlethread;
-		while (atomic_load_int(&idle_td->td_lastcpu) == NOCPU &&
-		    atomic_load_int(&idle_td->td_oncpu) == NOCPU)
+		pc = pcpu_find(cpu);
+		while (atomic_load_ptr(&pc->pc_curthread) == (uintptr_t)NULL)
 			cpu_spinwait();
 		kmem_free((vm_offset_t)bootstacks[cpu], kstack_pages *
 		    PAGE_SIZE);
@@ -1230,7 +1232,8 @@ ipi_send_cpu(int cpu, u_int ipi)
 	u_int bitmap, old, new;
 	u_int *cpu_bitmap;
 
-	KASSERT(cpu_apic_ids[cpu] != -1, ("IPI to non-existent CPU %d", cpu));
+	KASSERT((u_int)cpu < MAXCPU && cpu_apic_ids[cpu] != -1,
+	    ("IPI to non-existent CPU %d", cpu));
 
 	if (IPI_IS_BITMAPED(ipi)) {
 		bitmap = 1 << ipi;
@@ -1258,12 +1261,23 @@ ipi_bitmap_handler(struct trapframe frame)
 	int cpu = PCPU_GET(cpuid);
 	u_int ipi_bitmap;
 
-	critical_enter();
 	td = curthread;
+	ipi_bitmap = atomic_readandclear_int(&cpuid_to_pcpu[cpu]->
+	    pc_ipi_bitmap);
+
+	/*
+	 * sched_preempt() must be called to clear the pending preempt
+	 * IPI to enable delivery of further preempts.  However, the
+	 * critical section will cause extra scheduler lock thrashing
+	 * when used unconditionally.  Only critical_enter() if
+	 * hardclock must also run, which requires the section entry.
+	 */
+	if (ipi_bitmap & (1 << IPI_HARDCLOCK))
+		critical_enter();
+
 	td->td_intr_nesting_level++;
 	oldframe = td->td_intr_frame;
 	td->td_intr_frame = &frame;
-	ipi_bitmap = atomic_readandclear_int(&cpuid_to_pcpu[cpu]->pc_ipi_bitmap);
 	if (ipi_bitmap & (1 << IPI_PREEMPT)) {
 #ifdef COUNT_IPIS
 		(*ipi_preempt_counts[cpu])++;
@@ -1284,7 +1298,8 @@ ipi_bitmap_handler(struct trapframe frame)
 	}
 	td->td_intr_frame = oldframe;
 	td->td_intr_nesting_level--;
-	critical_exit();
+	if (ipi_bitmap & (1 << IPI_HARDCLOCK))
+		critical_exit();
 }
 
 /*
@@ -1444,7 +1459,7 @@ cpustop_handler(void)
 		 * again, and might as well save power / release resources
 		 * (e.g., overprovisioned VM infrastructure).
 		 */
-		while (__predict_false(!IS_BSP() && panicstr != NULL))
+		while (__predict_false(!IS_BSP() && KERNEL_PANICKED()))
 			halt();
 	}
 
@@ -1657,7 +1672,7 @@ smp_targeted_tlb_shootdown(cpuset_t mask, u_int vector, pmap_t pmap,
 	int cpu;
 
 	/* It is not necessary to signal other CPUs while in the debugger. */
-	if (kdb_active || panicstr != NULL)
+	if (kdb_active || KERNEL_PANICKED())
 		return;
 
 	/*

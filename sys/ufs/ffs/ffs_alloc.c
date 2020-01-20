@@ -202,9 +202,9 @@ retry:
 		delta = btodb(size);
 		DIP_SET(ip, i_blocks, DIP(ip, i_blocks) + delta);
 		if (flags & IO_EXT)
-			ip->i_flag |= IN_CHANGE;
+			UFS_INODE_SET_FLAG(ip, IN_CHANGE);
 		else
-			ip->i_flag |= IN_CHANGE | IN_UPDATE;
+			UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_UPDATE);
 		*bnp = bno;
 		return (0);
 	}
@@ -329,9 +329,9 @@ retry:
 		delta = btodb(nsize - osize);
 		DIP_SET(ip, i_blocks, DIP(ip, i_blocks) + delta);
 		if (flags & IO_EXT)
-			ip->i_flag |= IN_CHANGE;
+			UFS_INODE_SET_FLAG(ip, IN_CHANGE);
 		else
-			ip->i_flag |= IN_CHANGE | IN_UPDATE;
+			UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_UPDATE);
 		allocbuf(bp, nsize);
 		bp->b_flags |= B_DONE;
 		vfs_bio_bzero_buf(bp, osize, nsize - osize);
@@ -413,9 +413,9 @@ retry:
 		delta = btodb(nsize - osize);
 		DIP_SET(ip, i_blocks, DIP(ip, i_blocks) + delta);
 		if (flags & IO_EXT)
-			ip->i_flag |= IN_CHANGE;
+			UFS_INODE_SET_FLAG(ip, IN_CHANGE);
 		else
-			ip->i_flag |= IN_CHANGE | IN_UPDATE;
+			UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_UPDATE);
 		allocbuf(bp, nsize);
 		bp->b_flags |= B_DONE;
 		vfs_bio_bzero_buf(bp, osize, nsize - osize);
@@ -743,7 +743,7 @@ ffs_reallocblks_ufs1(ap)
 		else
 			bwrite(sbp);
 	} else {
-		ip->i_flag |= IN_CHANGE | IN_UPDATE;
+		UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_UPDATE);
 		if (!doasyncfree)
 			ffs_update(vp, 1);
 	}
@@ -1007,7 +1007,7 @@ ffs_reallocblks_ufs2(ap)
 		else
 			bwrite(sbp);
 	} else {
-		ip->i_flag |= IN_CHANGE | IN_UPDATE;
+		UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_UPDATE);
 		if (!doasyncfree)
 			ffs_update(vp, 1);
 	}
@@ -1150,7 +1150,7 @@ retry:
 			ip = VTOI(*vpp);
 			if (ip->i_mode)
 				goto dup_alloc;
-			ip->i_flag |= IN_MODIFIED;
+			UFS_INODE_SET_FLAG(ip, IN_MODIFIED);
 			vput(*vpp);
 		}
 		return (error);
@@ -1185,7 +1185,7 @@ dup_alloc:
 	(*vpp)->v_type = VNON;
 	if (fs->fs_magic == FS_UFS2_MAGIC) {
 		(*vpp)->v_op = &ffs_vnodeops2;
-		ip->i_flag |= IN_UFS2;
+		UFS_INODE_SET_FLAG(ip, IN_UFS2);
 	} else {
 		(*vpp)->v_op = &ffs_vnodeops1;
 	}
@@ -2786,6 +2786,7 @@ ffs_freefile(ump, fs, devvp, ino, mode, wkhd)
 	u_int cg;
 	u_int8_t *inosused;
 	struct cdev *dev;
+	ino_t cgino;
 
 	cg = ino_to_cg(fs, ino);
 	if (devvp->v_type == VREG) {
@@ -2805,16 +2806,16 @@ ffs_freefile(ump, fs, devvp, ino, mode, wkhd)
 	if ((error = ffs_getcg(fs, devvp, cg, 0, &bp, &cgp)) != 0)
 		return (error);
 	inosused = cg_inosused(cgp);
-	ino %= fs->fs_ipg;
-	if (isclr(inosused, ino)) {
+	cgino = ino % fs->fs_ipg;
+	if (isclr(inosused, cgino)) {
 		printf("dev = %s, ino = %ju, fs = %s\n", devtoname(dev),
-		    (uintmax_t)(ino + cg * fs->fs_ipg), fs->fs_fsmnt);
+		    (uintmax_t)ino, fs->fs_fsmnt);
 		if (fs->fs_ronly == 0)
 			panic("ffs_freefile: freeing free inode");
 	}
-	clrbit(inosused, ino);
-	if (ino < cgp->cg_irotor)
-		cgp->cg_irotor = ino;
+	clrbit(inosused, cgino);
+	if (cgino < cgp->cg_irotor)
+		cgp->cg_irotor = cgino;
 	cgp->cg_cs.cs_nifree++;
 	UFS_LOCK(ump);
 	fs->fs_cstotal.cs_nifree++;
@@ -2828,8 +2829,7 @@ ffs_freefile(ump, fs, devvp, ino, mode, wkhd)
 	ACTIVECLEAR(fs, cg);
 	UFS_UNLOCK(ump);
 	if (MOUNTEDSOFTDEP(UFSTOVFS(ump)) && devvp->v_type == VCHR)
-		softdep_setup_inofree(UFSTOVFS(ump), bp,
-		    ino + cg * fs->fs_ipg, wkhd);
+		softdep_setup_inofree(UFSTOVFS(ump), bp, ino, wkhd);
 	bdwrite(bp);
 	return (0);
 }
@@ -2955,16 +2955,19 @@ ffs_getcg(fs, devvp, cg, flags, bpp, cgpp)
 	struct buf *bp;
 	struct cg *cgp;
 	const struct statfs *sfs;
+	daddr_t blkno;
 	int error;
 
 	*bpp = NULL;
 	*cgpp = NULL;
 	if ((fs->fs_metackhash & CK_CYLGRP) != 0)
 		flags |= GB_CKHASH;
-	error = breadn_flags(devvp, devvp->v_type == VREG ?
-	    fragstoblks(fs, cgtod(fs, cg)) : fsbtodb(fs, cgtod(fs, cg)),
-	    (int)fs->fs_cgsize, NULL, NULL, 0, NOCRED, flags,
-	    ffs_ckhash_cg, &bp);
+	if (devvp->v_type == VREG)
+		blkno = fragstoblks(fs, cgtod(fs, cg));
+	else
+		blkno = fsbtodb(fs, cgtod(fs, cg));
+	error = breadn_flags(devvp, blkno, blkno, (int)fs->fs_cgsize, NULL,
+	    NULL, 0, NOCRED, flags, ffs_ckhash_cg, &bp);
 	if (error != 0)
 		return (error);
 	cgp = (struct cg *)bp->b_data;
@@ -3235,7 +3238,7 @@ sysctl_ffs_fsck(SYSCTL_HANDLER_ARGS)
 		ip->i_nlink += cmd.size;
 		DIP_SET(ip, i_nlink, ip->i_nlink);
 		ip->i_effnlink += cmd.size;
-		ip->i_flag |= IN_CHANGE | IN_MODIFIED;
+		UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_MODIFIED);
 		error = ffs_update(vp, 1);
 		if (DOINGSOFTDEP(vp))
 			softdep_change_linkcnt(ip);
@@ -3254,7 +3257,7 @@ sysctl_ffs_fsck(SYSCTL_HANDLER_ARGS)
 			break;
 		ip = VTOI(vp);
 		DIP_SET(ip, i_blocks, DIP(ip, i_blocks) + cmd.size);
-		ip->i_flag |= IN_CHANGE | IN_MODIFIED;
+		UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_MODIFIED);
 		error = ffs_update(vp, 1);
 		vput(vp);
 		break;
@@ -3271,7 +3274,7 @@ sysctl_ffs_fsck(SYSCTL_HANDLER_ARGS)
 			break;
 		ip = VTOI(vp);
 		DIP_SET(ip, i_size, cmd.size);
-		ip->i_flag |= IN_CHANGE | IN_MODIFIED;
+		UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_MODIFIED);
 		error = ffs_update(vp, 1);
 		vput(vp);
 		break;
@@ -3404,7 +3407,7 @@ sysctl_ffs_fsck(SYSCTL_HANDLER_ARGS)
 			vput(vp);
 			break;
 		}
-		VOP_UNLOCK(vp, 0);
+		VOP_UNLOCK(vp);
 		pwd_chdir(td, vp);
 		break;
 
@@ -3491,7 +3494,7 @@ sysctl_ffs_fsck(SYSCTL_HANDLER_ARGS)
 			vput(vp);
 			break;
 		}
-		ip->i_flag |= IN_CHANGE | IN_MODIFIED;
+		UFS_INODE_SET_FLAG(ip, IN_CHANGE | IN_MODIFIED);
 		error = ffs_update(vp, 1);
 		vput(vp);
 		break;
@@ -3631,7 +3634,7 @@ buffered_write(fp, uio, active_cred, flags, td)
 	}
 	error = bwrite(bp);
 out:
-	VOP_UNLOCK(devvp, 0);
+	VOP_UNLOCK(devvp);
 	foffset_unlock_uio(fp, uio, flags | FOF_NEXTOFF);
 	return (error);
 }

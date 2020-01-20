@@ -89,6 +89,7 @@ struct sf_io {
 	int		npages;
 	struct socket	*so;
 	struct mbuf	*m;
+	vm_object_t	obj;
 #ifdef KERN_TLS
 	struct ktls_session *tls;
 #endif
@@ -261,13 +262,15 @@ sendfile_iodone(void *arg, vm_page_t *pg, int count, int error)
 
 	for (int i = 0; i < count; i++)
 		if (pg[i] != bogus_page)
-			vm_page_xunbusy(pg[i]);
+			vm_page_xunbusy_unchecked(pg[i]);
 
 	if (error)
 		sfio->error = error;
 
 	if (!refcount_release(&sfio->nios))
 		return;
+
+	vm_object_pip_wakeup(sfio->obj);
 
 	if (__predict_false(sfio->error && sfio->m == NULL)) {
 		/*
@@ -421,9 +424,11 @@ sendfile_swapin(vm_object_t obj, struct sf_io *sfio, int *nios, off_t off,
 			}
 
 		refcount_acquire(&sfio->nios);
+		VM_OBJECT_WUNLOCK(obj);
 		rv = vm_pager_get_pages_async(obj, pa + i, count, NULL,
 		    i + count == npages ? &rhpages : NULL,
 		    &sendfile_iodone, sfio);
+		VM_OBJECT_WLOCK(obj);
 		if (__predict_false(rv != VM_PAGER_OK)) {
 			/*
 			 * Perform full pages recovery before returning EIO.
@@ -544,7 +549,7 @@ sendfile_getobj(struct thread *td, struct file *fp, vm_object_t *obj_res,
 
 out:
 	if (vp != NULL)
-		VOP_UNLOCK(vp, 0);
+		VOP_UNLOCK(vp);
 	return (error);
 }
 
@@ -764,7 +769,7 @@ retry_space:
 				goto done;
 			error = VOP_GETATTR(vp, &va, td->td_ucred);
 			if (error != 0 || off >= va.va_size) {
-				VOP_UNLOCK(vp, 0);
+				VOP_UNLOCK(vp);
 				goto done;
 			}
 			if (va.va_size != obj_size) {
@@ -815,7 +820,9 @@ retry_space:
 		    npages * sizeof(vm_page_t), M_TEMP, M_WAITOK);
 		refcount_init(&sfio->nios, 1);
 		sfio->so = so;
+		sfio->obj = obj;
 		sfio->error = 0;
+		vm_object_pip_add(obj, 1);
 
 #ifdef KERN_TLS
 		/*
@@ -830,7 +837,7 @@ retry_space:
 		    rhpages, flags);
 		if (error != 0) {
 			if (vp != NULL)
-				VOP_UNLOCK(vp, 0);
+				VOP_UNLOCK(vp);
 			sfio->m = NULL;
 			sendfile_iodone(sfio, NULL, 0, error);
 			goto done;
@@ -1011,7 +1018,7 @@ retry_space:
 		}
 
 		if (vp != NULL)
-			VOP_UNLOCK(vp, 0);
+			VOP_UNLOCK(vp);
 
 		/* Keep track of bytes processed. */
 		off += space;
@@ -1053,6 +1060,7 @@ prepend_header:
 			 * we can send data right now without the
 			 * PRUS_NOTREADY flag.
 			 */
+			vm_object_pip_wakeup(sfio->obj);
 			free(sfio, M_TEMP);
 #ifdef KERN_TLS
 			if (tls != NULL && tls->mode == TCP_TLS_MODE_SW) {

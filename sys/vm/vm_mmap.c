@@ -199,6 +199,18 @@ int
 kern_mmap(struct thread *td, uintptr_t addr0, size_t len, int prot, int flags,
     int fd, off_t pos)
 {
+
+	return (kern_mmap_fpcheck(td, addr0, len, prot, flags, fd, pos, NULL));
+}
+
+/*
+ * When mmap'ing a file, check_fp_fn may be used for the caller to do any
+ * last-minute validation based on the referenced file in a non-racy way.
+ */
+int
+kern_mmap_fpcheck(struct thread *td, uintptr_t addr0, size_t len, int prot,
+    int flags, int fd, off_t pos, mmap_check_fp_fn check_fp_fn)
+{
 	struct vmspace *vms;
 	struct file *fp;
 	struct proc *p;
@@ -394,7 +406,12 @@ kern_mmap(struct thread *td, uintptr_t addr0, size_t len, int prot, int flags,
 			error = EINVAL;
 			goto done;
 		}
-
+		if (check_fp_fn != NULL) {
+			error = check_fp_fn(fp, prot, max_prot & cap_maxprot,
+			    flags);
+			if (error != 0)
+				goto done;
+		}
 		/* This relies on VM_PROT_* matching PROT_*. */
 		error = fo_mmap(fp, &vms->vm_map, &addr, size, prot,
 		    max_prot & cap_maxprot, flags, pos, td);
@@ -931,9 +948,9 @@ retry:
 				 * and set PGA_REFERENCED before the call to
 				 * pmap_is_referenced(). 
 				 */
-				if ((m->aflags & PGA_REFERENCED) != 0 ||
+				if ((m->a.flags & PGA_REFERENCED) != 0 ||
 				    pmap_is_referenced(m) ||
-				    (m->aflags & PGA_REFERENCED) != 0)
+				    (m->a.flags & PGA_REFERENCED) != 0)
 					mincoreinfo |= MINCORE_REFERENCED_OTHER;
 			}
 			if (object != NULL)
@@ -1325,12 +1342,14 @@ vm_mmap_vnode(struct thread *td, vm_size_t objsize,
 	} else {
 		KASSERT(obj->type == OBJT_DEFAULT || obj->type == OBJT_SWAP,
 		    ("wrong object type"));
-		VM_OBJECT_WLOCK(obj);
-		vm_object_reference_locked(obj);
+		vm_object_reference(obj);
 #if VM_NRESERVLEVEL > 0
-		vm_object_color(obj, 0);
+		if ((obj->flags & OBJ_COLORED) == 0) {
+			VM_OBJECT_WLOCK(obj);
+			vm_object_color(obj, 0);
+			VM_OBJECT_WUNLOCK(obj);
+		}
 #endif
-		VM_OBJECT_WUNLOCK(obj);
 	}
 	*objp = obj;
 	*flagsp = flags;
