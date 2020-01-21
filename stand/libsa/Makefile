@@ -53,7 +53,7 @@ CFLAGS.clang+=	-mno-movt
 .endif
 CFLAGS.clang+=	-mfpu=none
 
-.PATH: ${SRCTOP}/contrib/compiler-rt/lib/builtins/arm/
+.PATH: ${SRCTOP}/contrib/llvm-project/compiler-rt/lib/builtins/arm/
 SRCS+=	aeabi_idivmod.S aeabi_ldivmod.S aeabi_uidivmod.S aeabi_uldivmod.S
 SRCS+=	aeabi_memcmp.S aeabi_memcpy.S aeabi_memmove.S aeabi_memset.S
 .endif
@@ -63,7 +63,7 @@ SRCS+=	aeabi_memcmp.S aeabi_memcpy.S aeabi_memmove.S aeabi_memset.S
 .endif
 
 # Compiler support functions
-.PATH: ${SRCTOP}/contrib/compiler-rt/lib/builtins/
+.PATH: ${SRCTOP}/contrib/llvm-project/compiler-rt/lib/builtins/
 # __clzsi2 and ctzsi2 for various builtin functions
 SRCS+=	clzsi2.c ctzsi2.c
 # Divide and modulus functions called by the compiler
@@ -101,6 +101,11 @@ SRCS+=bzlib.c crctable.c decompress.c huffman.c randtable.c
 CFLAGS+=-DHAVE_MEMCPY -I${SRCTOP}/sys/contrib/zlib
 SRCS+=	adler32.c crc32.c
 SRCS+=	infback.c inffast.c inflate.c inftrees.c zutil.c
+
+# lz4 decompression functionality
+.PATH: ${SRCTOP}/sys/cddl/contrib/opensolaris/common/lz4
+SRCS+=	lz4.c
+CFLAGS.lz4.c+= -I${SRCTOP}/sys/cddl/contrib/opensolaris/common/lz4
 
 # Create a subset of includes that are safe, as well as adjusting those that aren't
 # The lists may drive people nuts, but they are explicitly opt-in
